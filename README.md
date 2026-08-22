@@ -18,10 +18,10 @@ store data, match tenants, reconcile rent, or implement accounting logic.
 1. Open the [Google Cloud Console](https://console.cloud.google.com/) and create or select a
    project.
 2. In **APIs & Services > Library**, enable **Gmail API**.
-3. In **Google Auth platform**, configure the OAuth consent screen. For a personal/testing app,
-   choose **External**, keep the app in testing, and add your Gmail address as a test user.
-4. In **APIs & Services > Credentials**, select **Create credentials > OAuth client ID** and
-   choose **Desktop app**.
+3. In **Google Auth platform**, configure **Branding**, **Audience**, and **Data Access**. For a
+   personal/testing app, choose **External**, keep the app in testing, and add your Gmail address
+   as a test user.
+4. In **Google Auth platform > Clients**, select **Create Client** and choose **Desktop app**.
 5. Download the client JSON, place it in the project root, and rename it `credentials.json`.
 
 Both `credentials.json` and the generated `token.json` are ignored by Git. Never commit either
