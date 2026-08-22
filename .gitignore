@@ -1,0 +1,28 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+dist/
+build/
+
+# Local configuration and secrets
+.env
+.env.*
+credentials*.json
+client_secret*.json
+token*.json
+
+# Local Gmail exports/downloads
+gmail-data/
+downloads/
+*.mbox
+*.eml
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
