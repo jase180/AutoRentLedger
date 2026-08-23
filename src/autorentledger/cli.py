@@ -10,7 +10,11 @@ from autorentledger.email.gmail import GmailSource
 from autorentledger.email.source import EmailSource
 from autorentledger.ingestion import ingest_raw_emails
 from autorentledger.parsing import NotificationParseError, parse_payment_notification
-from autorentledger.storage.sqlite import SQLiteRawEmailRepository
+from autorentledger.processing import process_raw_emails
+from autorentledger.storage.sqlite import (
+    SQLitePaymentEventRepository,
+    SQLiteRawEmailRepository,
+)
 
 DEFAULT_QUERY = "subject:zelle"
 DEFAULT_DATABASE = Path("data/autorentledger.db")
@@ -35,6 +39,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     parse = subparsers.add_parser("parse", help="parse locally stored raw emails")
     parse.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+    process = subparsers.add_parser("process", help="persist parsed payment events")
+    process.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+    payments = subparsers.add_parser("payments", help="list persisted payment events")
+    payments.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
     return parser
 
 
@@ -106,6 +116,33 @@ def _format_currency(amount_cents: int) -> str:
     return f"${dollars:,}.{cents:02d}"
 
 
+def run_processing(database_path: Path) -> int:
+    raw_repository = SQLiteRawEmailRepository(database_path)
+    payment_repository = SQLitePaymentEventRepository(database_path)
+    result = process_raw_emails(raw_repository, payment_repository)
+    print(f"Raw emails: {result.raw_emails}")
+    print(f"Created: {result.created}")
+    print(f"Already processed: {result.already_processed}")
+    print(f"Parse failures: {result.parse_failures}")
+    for reason, count in result.failure_reasons:
+        print(f"Failure reason: {reason} ({count})")
+    return 0
+
+
+def run_payment_listing(database_path: Path) -> int:
+    repository = SQLitePaymentEventRepository(database_path)
+    events = repository.list_all()
+    print(f"{'ID':<4} {'DATE':<10} {'SENDER':<24} {'AMOUNT':>12}  PROVIDER")
+    for event in events:
+        occurred_on = event.occurred_on or "-"
+        amount = _format_currency(event.amount_cents)
+        print(
+            f"{event.id:<4} {occurred_on:<10} {event.sender_name:<24} "
+            f"{amount:>12}  {event.provider}"
+        )
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "search":
@@ -116,6 +153,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_ingestion(source, args.database, args.query, args.max_results)
     if args.command == "parse":
         return run_parsing(args.database)
+    if args.command == "process":
+        return run_processing(args.database)
+    if args.command == "payments":
+        return run_payment_listing(args.database)
     raise AssertionError(f"Unhandled command: {args.command}")
 
 

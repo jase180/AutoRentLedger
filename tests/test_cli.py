@@ -9,9 +9,12 @@ from autorentledger.cli import (
     print_search_results,
     run_ingestion,
     run_parsing,
+    run_payment_listing,
+    run_processing,
 )
 from autorentledger.email import EmailMessageSummary
-from autorentledger.storage import SQLiteRawEmailRepository
+from autorentledger.parsing import PaymentNotification
+from autorentledger.storage import SQLitePaymentEventRepository, SQLiteRawEmailRepository
 
 
 class StubEmailSource:
@@ -46,6 +49,14 @@ def test_parse_command_defaults():
     args = build_parser().parse_args(["parse"])
 
     assert args.database == DEFAULT_DATABASE
+
+
+def test_process_and_payments_command_defaults():
+    process_args = build_parser().parse_args(["process"])
+    payment_args = build_parser().parse_args(["payments"])
+
+    assert process_args.database == DEFAULT_DATABASE
+    assert payment_args.database == DEFAULT_DATABASE
 
 
 def test_print_search_results_uses_source_neutral_interface(capsys):
@@ -123,3 +134,64 @@ def test_parse_cli_never_prints_raw_body(tmp_path, capsys):
     assert "Status: failed" in output
     assert "Reason: unsupported_provider" in output
     assert "Stored: 1\nParsed: 0\nFailed: 1\n" in output
+
+
+def test_process_cli_summary_does_not_print_raw_body(tmp_path, capsys):
+    database_path = tmp_path / "process.sqlite3"
+    repository = SQLiteRawEmailRepository(database_path)
+    message = EmailMessage()
+    message["From"] = "unknown@example.test"
+    message["Subject"] = "Unknown synthetic message"
+    message.set_content("PROCESS_PRIVATE_BODY_SENTINEL")
+    summary = EmailMessageSummary(
+        message_id="synthetic-process-1",
+        received_at=datetime(2026, 1, 15, 12, 0, tzinfo=UTC),
+        sender="unknown@example.test",
+        subject="Unknown synthetic message",
+    )
+    repository.insert(summary, message.as_bytes(policy=SMTP))
+
+    assert run_processing(database_path) == 0
+
+    output = capsys.readouterr().out
+    assert "PROCESS_PRIVATE_BODY_SENTINEL" not in output
+    assert output == (
+        "Raw emails: 1\n"
+        "Created: 0\n"
+        "Already processed: 0\n"
+        "Parse failures: 1\n"
+        "Failure reason: unsupported_provider (1)\n"
+    )
+
+
+def test_payments_cli_displays_normalized_event(tmp_path, capsys):
+    database_path = tmp_path / "payments.sqlite3"
+    raw_repository = SQLiteRawEmailRepository(database_path)
+    payment_repository = SQLitePaymentEventRepository(database_path)
+    summary = EmailMessageSummary(
+        message_id="synthetic-payment-1",
+        received_at=datetime(2026, 1, 15, 12, 0, tzinfo=UTC),
+        sender="forwarder@example.test",
+        subject="Synthetic notification",
+    )
+    raw_repository.insert(summary, b"Synthetic raw MIME")
+    raw_email = raw_repository.get("synthetic-payment-1")
+    payment_repository.insert(
+        raw_email.id,
+        PaymentNotification(
+            provider="synthetic_provider",
+            sender_name="Alex Example",
+            amount_cents=123456,
+            occurred_on=None,
+            memo=None,
+        ),
+    )
+
+    assert run_payment_listing(database_path) == 0
+
+    output = capsys.readouterr().out
+    assert "ID" in output
+    assert "DATE" in output
+    assert "Alex Example" in output
+    assert "$1,234.56" in output
+    assert "synthetic_provider" in output

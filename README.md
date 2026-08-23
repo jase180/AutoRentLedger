@@ -1,11 +1,12 @@
 # AutoRentLedger
 
-AutoRentLedger Milestone 3 is a small, read-only Gmail ingestion and deterministic parsing tool.
-It stores complete original raw MIME bytes in local SQLite, then converts supported Zelle
-notifications into source-neutral payment notifications without persisting parsed payments.
+AutoRentLedger Milestone 4 is a small, read-only Gmail ingestion and deterministic payment-event
+pipeline. It stores complete original raw MIME bytes in local SQLite, converts supported Zelle
+notifications into source-neutral payment notifications, and persists successful results as
+derived payment events.
 
-It does not modify messages or labels, print message bodies, match tenants, persist payment
-records, reconcile rent, or implement accounting logic.
+It does not modify messages or labels, print message bodies, match tenants, assign units or rent
+periods, reconcile rent, or implement accounting logic.
 
 ## Requirements
 
@@ -46,6 +47,8 @@ python -m pip install -e ".[dev]"
 autorentledger search
 autorentledger ingest
 autorentledger parse
+autorentledger process
+autorentledger payments
 ```
 
 macOS or Linux:
@@ -58,6 +61,8 @@ python -m pip install -e '.[dev]'
 autorentledger search
 autorentledger ingest
 autorentledger parse
+autorentledger process
+autorentledger payments
 ```
 
 The default Gmail query is `subject:zelle`. Override it when your bank uses different wording:
@@ -134,6 +139,43 @@ timezone.
 Current local validation: three stored messages, two parsed successfully, and one rejected for a
 missing required amount. No real values are recorded in this repository.
 
+## Persist and inspect payment events
+
+Create derived payment events from all unprocessed raw emails:
+
+```powershell
+autorentledger process
+```
+
+The command skips raw emails that already have a payment event. Parse failures remain only in
+`raw_emails` and are retried on later runs so improved parsers can process them in the future.
+Output contains counts and safe aggregated failure reasons, never raw message bodies.
+
+List the normalized payment events stored locally:
+
+```powershell
+autorentledger payments
+```
+
+Both commands accept `--database` to select another local SQLite file. The additive
+`payment_events` schema is initialized automatically with `CREATE TABLE IF NOT EXISTS`; existing
+raw email rows are unchanged.
+
+```text
+payment_events
+  id                integer primary key
+  raw_email_id      unique foreign key -> raw_emails.id
+  provider          text
+  sender_name       text
+  amount_cents      integer
+  occurred_on       nullable ISO date
+  memo              nullable text
+  parsed_at         UTC ISO timestamp
+```
+
+The unique foreign key enforces at most one payment event per raw email at the database level.
+Payment events represent only observed notification facts, not tenant identity or rent status.
+
 ## Development checks
 
 ```powershell
@@ -158,19 +200,21 @@ src/autorentledger/
     us_bank.py      # U.S. Bank-specific deterministic parser
     values.py       # shared exact value normalization
   ingestion.py      # source-to-repository idempotent workflow
-  cli.py            # search, ingest, and local parse commands
+  processing.py     # idempotent raw-email to payment-event workflow
+  cli.py            # search, ingest, parse, process, and payments commands
 tests/              # synthetic adapter, storage, service, and CLI tests
 pyproject.toml      # package, command, dependencies, and tool configuration
 ```
 
 The ingestion service depends on the provider-neutral `EmailSource` interface and raw email
-repository. Parsing accepts raw MIME bytes and has no Gmail dependency. Google SDK response
-objects remain inside the Gmail adapter, and SQLite has no provider-specific parsing knowledge.
+repository. Parsing accepts raw MIME bytes and has no Gmail dependency. Processing connects the
+parser to the payment-event repository. Google SDK response objects remain inside the Gmail
+adapter, and SQLite has no provider-specific parsing knowledge.
 
 ## Intentionally out of scope
 
-- Persisting parsed payments or introducing a payment ledger
-- Tenant matching, rent obligations, reconciliation, or accounting
+- Tenant or sender identity mapping, unit assignments, rent obligations, reconciliation, or
+  accounting
 - Gmail writes, label creation, or label changes
 - Web UI, visualization, cloud deployment, or background processing
-- Schema migration tooling; Milestone 2 initializes its single table directly
+- Schema migration tooling; the current schemas use additive `CREATE TABLE IF NOT EXISTS`
