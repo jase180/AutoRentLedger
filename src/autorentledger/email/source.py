@@ -21,3 +21,7 @@ class EmailSource(Protocol):
     def search(self, query: str, max_results: int = 100) -> list[EmailMessageSummary]:
         """Return message summaries matching a provider-specific query."""
         ...
+
+    def get_raw_message(self, message_id: str) -> bytes:
+        """Return the complete original MIME representation for a message."""
+        ...

@@ -1,3 +1,4 @@
+import base64
 from datetime import UTC, datetime
 
 import pytest
@@ -27,6 +28,10 @@ class FakeMessages:
     def get(self, **kwargs):
         self.get_calls.append(kwargs)
         message_id = kwargs["id"]
+        if kwargs["format"] == "raw":
+            raw_mime = b"From: synthetic@example.test\r\nSubject: Synthetic message\r\n\r\nFake body."
+            encoded = base64.urlsafe_b64encode(raw_mime).decode().rstrip("=")
+            return FakeRequest({"id": message_id, "raw": encoded})
         return FakeRequest(
             {
                 "id": message_id,
@@ -82,3 +87,16 @@ def test_search_paginates_and_maps_metadata():
 def test_search_rejects_non_positive_limit():
     with pytest.raises(ValueError, match="at least 1"):
         GmailSource(FakeService()).search("zelle", max_results=0)
+
+
+def test_get_raw_message_decodes_original_bytes():
+    service = FakeService()
+
+    raw_mime = GmailSource(service).get_raw_message("gmail-raw")
+
+    assert raw_mime == (
+        b"From: synthetic@example.test\r\nSubject: Synthetic message\r\n\r\nFake body."
+    )
+    assert service.messages_api.get_calls == [
+        {"userId": "me", "id": "gmail-raw", "format": "raw"}
+    ]

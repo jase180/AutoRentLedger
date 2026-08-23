@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from pathlib import Path
@@ -84,6 +86,26 @@ class GmailSource:
                 break
 
         return messages
+
+    def get_raw_message(self, message_id: str) -> bytes:
+        """Retrieve and decode Gmail's URL-safe base64 raw MIME representation."""
+        response = (
+            self._service.users()
+            .messages()
+            .get(userId="me", id=message_id, format="raw")
+            .execute()
+        )
+        encoded = response.get("raw")
+        if encoded is None:
+            raise ValueError(f"Gmail message {message_id} did not include raw MIME data")
+        if not isinstance(encoded, str):
+            raise TypeError(f"Gmail message {message_id} raw MIME data was not text")
+
+        padding = "=" * (-len(encoded) % 4)
+        try:
+            return base64.b64decode(encoded + padding, altchars=b"-_", validate=True)
+        except (binascii.Error, ValueError) as error:
+            raise ValueError(f"Gmail message {message_id} contained invalid raw MIME data") from error
 
 
 def _to_summary(message: dict[str, Any]) -> EmailMessageSummary:

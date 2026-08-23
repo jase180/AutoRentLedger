@@ -21,6 +21,15 @@ downloads/
 *.mbox
 *.eml
 
+# Local application data (may contain complete private emails)
+data/
+*.db
+*.sqlite
+*.sqlite3
+*.db-wal
+*.db-shm
+*.db-journal
+
 # Editors and operating systems
 .idea/
 .vscode/
