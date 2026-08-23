@@ -26,6 +26,7 @@ from autorentledger.cli import (
     run_rent_account_add_payer,
     run_rent_account_listing,
     run_rent_account_show,
+    run_review,
     run_unit_add,
     run_unit_listing,
     run_unresolved_payers,
@@ -172,6 +173,12 @@ def test_reconcile_command_defaults():
 
     assert args.database == DEFAULT_DATABASE
     assert args.period == "2026-08"
+
+
+def test_review_command_defaults():
+    args = build_parser().parse_args(["review"])
+
+    assert args.database == DEFAULT_DATABASE
 
 
 def test_print_search_results_uses_source_neutral_interface(capsys):
@@ -636,3 +643,60 @@ def test_reconciliation_cli_and_obligation_show_use_derived_state(tmp_path, caps
     assert "Due date: 2026-08-01" in output
     assert "expected canonical YYYY-MM" in output
     assert "RECONCILIATION_CLI_PRIVATE_RAW_SENTINEL" not in output
+
+
+def test_review_cli_shows_all_categories_without_raw_content(tmp_path, capsys):
+    database_path = tmp_path / "review-cli.sqlite3"
+    raws = SQLiteRawEmailRepository(database_path)
+    payments = SQLitePaymentEventRepository(database_path)
+    SQLitePayerRepository(database_path)
+    rentals = SQLiteRentalRepository(database_path)
+    obligations = SQLiteObligationRepository(database_path)
+    allocations = SQLiteAllocationRepository(database_path)
+    unit = rentals.create_unit("Unit A")
+    account = rentals.create_rent_account(unit.id, "Synthetic Household", None, None)
+    unpaid = obligations.create(account.id, "2026-08", 123456, date(2027, 8, 1))
+    partial = obligations.create(account.id, "2026-09", 135000, date(2026, 9, 1))
+    raws.insert(
+        EmailMessageSummary(
+            "synthetic-review-cli-1",
+            datetime(2026, 8, 1, 12, 0, tzinfo=UTC),
+            "forwarder@example.test",
+            "Synthetic parsed notification",
+        ),
+        b"REVIEW_CLI_PRIVATE_RAW_SENTINEL decoded body",
+    )
+    parsed_raw = raws.get("synthetic-review-cli-1")
+    payments.insert(
+        parsed_raw.id,
+        PaymentNotification("synthetic_provider", "ALEX EXAMPLE", 150000, None, None),
+    )
+    payment = payments.get_by_raw_email_id(parsed_raw.id)
+    allocations.create_checked(payment.id, partial.id, 67500)
+    raws.insert(
+        EmailMessageSummary(
+            "synthetic-review-cli-2",
+            datetime(2026, 8, 2, 12, 0, tzinfo=UTC),
+            "forwarder@example.test",
+            "Fwd: Synthetic unparsed notification",
+        ),
+        b"SECOND_REVIEW_PRIVATE_SENTINEL decoded message body",
+    )
+
+    assert run_review(database_path) == 0
+
+    output = capsys.readouterr().out
+    assert "UNRESOLVED_PAYER" in output
+    assert "UNALLOCATED_PAYMENT" in output
+    assert "UNPAID_OBLIGATION" in output
+    assert "PARTIAL_OBLIGATION" in output
+    assert "UNPARSED_EMAIL" in output
+    assert "$825.00 remaining unallocated" in output
+    assert f"oblig. {unpaid.id}" in output
+    assert "$1,234.56 remaining" in output
+    assert "$675.00 remaining" in output
+    assert "Fwd: Synthetic unparsed notification" in output
+    assert "REVIEW_CLI_PRIVATE_RAW_SENTINEL" not in output
+    assert "SECOND_REVIEW_PRIVATE_SENTINEL" not in output
+    assert "decoded body" not in output
+    assert "decoded message body" not in output

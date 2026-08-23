@@ -27,7 +27,10 @@ from autorentledger.storage.sqlite import (
     SQLiteRawEmailRepository,
     SQLiteReconciliationRepository,
     SQLiteRentalRepository,
+    SQLiteReviewRepository,
+    UnallocatedPaymentSourceRecord,
     UnitRecord,
+    UnparsedEmailSourceRecord,
 )
 
 __all__ = [
@@ -57,5 +60,8 @@ __all__ = [
     "SQLiteRawEmailRepository",
     "SQLiteReconciliationRepository",
     "SQLiteRentalRepository",
+    "SQLiteReviewRepository",
+    "UnallocatedPaymentSourceRecord",
     "UnitRecord",
+    "UnparsedEmailSourceRecord",
 ]

@@ -45,6 +45,13 @@ def reconcile_period(
     ]
 
 
+def reconcile_all(
+    repository: SQLiteReconciliationRepository,
+) -> list[ReconciliationRecord]:
+    """Derive reconciliation for every existing obligation."""
+    return [_derive(source) for source in repository.list_sources()]
+
+
 def get_reconciliation(
     repository: SQLiteReconciliationRepository, obligation_id: int
 ) -> ReconciliationRecord | None:

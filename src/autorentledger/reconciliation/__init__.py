@@ -5,6 +5,7 @@ from autorentledger.reconciliation.service import (
     ReconciliationRecord,
     ReconciliationStatus,
     get_reconciliation,
+    reconcile_all,
     reconcile_period,
 )
 
@@ -13,5 +14,6 @@ __all__ = [
     "ReconciliationRecord",
     "ReconciliationStatus",
     "get_reconciliation",
+    "reconcile_all",
     "reconcile_period",
 ]

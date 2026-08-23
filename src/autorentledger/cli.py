@@ -39,6 +39,11 @@ from autorentledger.rental import (
     create_rent_account,
     create_unit,
 )
+from autorentledger.review import (
+    ReviewInvariantError,
+    ReviewKind,
+    collect_review_items,
+)
 from autorentledger.storage.sqlite import (
     SQLiteAllocationRepository,
     SQLiteObligationRepository,
@@ -47,6 +52,7 @@ from autorentledger.storage.sqlite import (
     SQLiteRawEmailRepository,
     SQLiteReconciliationRepository,
     SQLiteRentalRepository,
+    SQLiteReviewRepository,
 )
 
 DEFAULT_QUERY = "subject:zelle"
@@ -176,6 +182,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     reconcile.add_argument("--period", required=True)
     reconcile.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+    review = subparsers.add_parser("review", help="show ledger items needing attention")
+    review.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
     return parser
 
 
@@ -589,6 +598,41 @@ def run_reconciliation(database_path: Path, period: str) -> int:
     return 0
 
 
+def run_review(database_path: Path) -> int:
+    try:
+        items = collect_review_items(
+            SQLiteReconciliationRepository(database_path),
+            SQLiteReviewRepository(database_path),
+        )
+    except (ReconciliationInvariantError, ReviewInvariantError) as error:
+        print(error)
+        return 1
+
+    print(f"{'TYPE':<24} {'REF':<12} DETAILS")
+    for item in items:
+        if item.kind is ReviewKind.UNRESOLVED_PAYER:
+            reference = "-"
+            noun = "payment" if item.count == 1 else "payments"
+            details = f"{item.summary} ({item.count} {noun})"
+        elif item.kind is ReviewKind.UNALLOCATED_PAYMENT:
+            reference = f"payment {item.reference_id}"
+            details = f"{_format_currency(item.amount_cents)} remaining unallocated"
+        elif item.kind in {
+            ReviewKind.UNPAID_OBLIGATION,
+            ReviewKind.PARTIAL_OBLIGATION,
+        }:
+            reference = f"oblig. {item.reference_id}"
+            details = (
+                f"{item.unit_label} / {item.account_display_name} / {item.period} / "
+                f"{_format_currency(item.amount_cents)} remaining"
+            )
+        else:
+            reference = f"raw {item.reference_id}"
+            details = item.summary
+        print(f"{item.kind:<24} {reference:<12} {details}")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "search":
@@ -666,6 +710,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_allocation_listing(args.database, args.payment, args.obligation)
     if args.command == "reconcile":
         return run_reconciliation(args.database, args.period)
+    if args.command == "review":
+        return run_review(args.database)
     raise AssertionError(f"Unhandled command: {args.command}")
 
 

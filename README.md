@@ -1,10 +1,11 @@
 # AutoRentLedger
 
-AutoRentLedger Milestone 9 is a small, read-only Gmail ingestion and deterministic payment-event
+AutoRentLedger Milestone 10 is a small, read-only Gmail ingestion and deterministic payment-event
 pipeline with explicit payer identities, rent accounts, monthly obligations, and manual payment
 allocations. It derives each obligation's current reconciliation state without persisting status.
-It stores complete original raw MIME bytes in local SQLite while keeping observed payments and
-debt records unchanged; allocation rows record deliberate accounting interpretation.
+It also derives one operational review list from unresolved identities, unallocated money,
+incomplete obligations, and unparsed raw emails. It stores complete original raw MIME bytes in
+local SQLite while keeping observed payments and debt records unchanged.
 
 It does not modify messages or labels, print message bodies, match tenants, assign units or rent
 periods automatically, match payments automatically, or calculate late/overdue state.
@@ -68,6 +69,7 @@ autorentledger allocation add --payment 1 --obligation 1 --amount 675.00
 autorentledger allocations
 autorentledger allocation remove 1
 autorentledger reconcile --period 2026-08
+autorentledger review
 ```
 
 macOS or Linux:
@@ -100,6 +102,7 @@ autorentledger allocation add --payment 1 --obligation 1 --amount 675.00
 autorentledger allocations
 autorentledger allocation remove 1
 autorentledger reconcile --period 2026-08
+autorentledger review
 ```
 
 The default Gmail query is `subject:zelle`. Override it when your bank uses different wording:
@@ -422,6 +425,34 @@ missing obligations are not invented, and extra unallocated payment money does n
 overpaid state or credit. An allocated total above the obligation amount raises a clear invariant
 error rather than hiding corrupt data.
 
+## Review items needing attention
+
+Show the current derived review list:
+
+```powershell
+autorentledger review
+```
+
+The command reports five neutral categories:
+
+```text
+UNRESOLVED_PAYER      observed sender has no explicit payer alias
+UNALLOCATED_PAYMENT   payment money remains explicitly unallocated
+UNPAID_OBLIGATION     existing obligation has no allocations
+PARTIAL_OBLIGATION    existing obligation is only partially allocated
+UNPARSED_EMAIL        stored raw email has no payment event
+```
+
+These conditions are independent. For example, one payment may have both an unresolved sender and
+unallocated money. Due dates do not turn obligation review items into late or overdue items, and
+unallocated money is not labeled a credit, overpayment, or error.
+
+Review state is never stored. Adding an alias, allocating remaining money, fully funding an
+obligation, or creating a payment event makes the corresponding item disappear on the next run.
+The review adapters open the existing SQLite database in read-only mode. Output ordering is stable,
+and unparsed-email output is limited to its local raw record ID and subject; raw MIME, decoded body,
+memo text, and parser internals are never displayed.
+
 ## Development checks
 
 ```powershell
@@ -449,6 +480,8 @@ src/autorentledger/
     service.py       # explicit allocation validation and error translation
   reconciliation/
     service.py       # read-only amount and status derivation
+  review/
+    service.py       # derived operational review items
   parsing/
     mime.py         # source-neutral MIME text decoding
     models.py       # normalized result and structured parse failure
@@ -458,7 +491,7 @@ src/autorentledger/
     values.py       # shared exact value normalization
   ingestion.py      # source-to-repository idempotent workflow
   processing.py     # idempotent raw-email to payment-event workflow
-  cli.py            # ingestion, rental, obligation, allocation, and reconciliation commands
+  cli.py            # ingestion, ledger-domain, reconciliation, and review commands
 tests/              # synthetic adapter, storage, service, and CLI tests
 pyproject.toml      # package, command, dependencies, and tool configuration
 ```
@@ -474,13 +507,16 @@ or mutates payment events. Allocation creation is explicit and transactional; it
 target from payer identity, dates, amounts, memos, or rent-account membership.
 Reconciliation reads obligation and allocation totals without modifying either source and derives
 all status values through one service path.
+Review reuses canonical identity resolution and reconciliation, plus aggregate read-only queries;
+it adds no workflow or review-state storage.
 
 ## Intentionally out of scope
 
 - Tenant legal status, formal leases, recurring obligation generation, proration, deposits, late
   fees, automatic matching, credits/prepayments, tenant balances, overdue/late status, or
-  persisted reconciliation state
+  persisted reconciliation/review state
 - Fuzzy, phonetic, nickname, typo-correcting, or AI-assisted identity matching
 - Gmail writes, label creation, or label changes
 - Web UI, visualization, cloud deployment, or background processing
+- Review acknowledgement, dismissal, assignment, tickets, notifications, or scheduled jobs
 - Schema migration tooling; the current schemas use additive `CREATE TABLE IF NOT EXISTS`

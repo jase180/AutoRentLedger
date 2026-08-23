@@ -156,6 +156,20 @@ class ReconciliationSourceRecord:
     allocated_cents: int
 
 
+@dataclass(frozen=True)
+class UnallocatedPaymentSourceRecord:
+    payment_event_id: int
+    amount_cents: int
+    allocated_cents: int
+
+
+@dataclass(frozen=True)
+class UnparsedEmailSourceRecord:
+    raw_email_id: int
+    received_at: str
+    subject: str
+
+
 class AllocationStorageError(Exception):
     """Base error for transactional allocation validation."""
 
@@ -461,6 +475,13 @@ class SQLitePayerRepository:
                 (payer_id,),
             ).fetchall()
         return [PayerAliasRecord(**dict(row)) for row in rows]
+
+    def list_normalized_aliases(self) -> set[str]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT normalized_alias FROM payer_aliases ORDER BY normalized_alias"
+            ).fetchall()
+        return {str(row["normalized_alias"]) for row in rows}
 
 
 class SQLiteRentalRepository:
@@ -1007,7 +1028,9 @@ class SQLiteReconciliationRepository:
         self.database_path = database_path
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.database_path)
+        connection = sqlite3.connect(
+            self.database_path.resolve().as_uri() + "?mode=ro", uri=True
+        )
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
         return connection
@@ -1018,6 +1041,13 @@ class SQLiteReconciliationRepository:
                 self._source_query("WHERE rent_obligations.period = ?")
                 + " ORDER BY rent_obligations.id",
                 (period,),
+            ).fetchall()
+        return [ReconciliationSourceRecord(**dict(row)) for row in rows]
+
+    def list_sources(self) -> list[ReconciliationSourceRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                self._source_query("") + " ORDER BY rent_obligations.id"
             ).fetchall()
         return [ReconciliationSourceRecord(**dict(row)) for row in rows]
 
@@ -1058,3 +1088,70 @@ class SQLiteReconciliationRepository:
                 rent_obligations.due_date,
                 rent_obligations.amount_cents
         """
+
+
+class SQLiteReviewRepository:
+    """Read source facts needed to derive the current review list."""
+
+    def __init__(self, database_path: Path) -> None:
+        self.database_path = database_path
+
+    def _connect(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(
+            self.database_path.resolve().as_uri() + "?mode=ro", uri=True
+        )
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        return connection
+
+    def list_sender_counts(self) -> list[PaymentSenderCount]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT sender_name, COUNT(*) AS count
+                FROM payment_events
+                GROUP BY sender_name
+                ORDER BY sender_name COLLATE NOCASE, sender_name
+                """
+            ).fetchall()
+        return [PaymentSenderCount(**dict(row)) for row in rows]
+
+    def list_normalized_aliases(self) -> set[str]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT normalized_alias FROM payer_aliases ORDER BY normalized_alias"
+            ).fetchall()
+        return {str(row["normalized_alias"]) for row in rows}
+
+    def list_payment_allocation_totals(self) -> list[UnallocatedPaymentSourceRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    payment_events.id AS payment_event_id,
+                    payment_events.amount_cents,
+                    COALESCE(SUM(payment_allocations.amount_cents), 0) AS allocated_cents
+                FROM payment_events
+                LEFT JOIN payment_allocations
+                    ON payment_allocations.payment_event_id = payment_events.id
+                GROUP BY payment_events.id, payment_events.amount_cents
+                ORDER BY payment_events.id
+                """
+            ).fetchall()
+        return [UnallocatedPaymentSourceRecord(**dict(row)) for row in rows]
+
+    def list_unparsed_emails(self) -> list[UnparsedEmailSourceRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    raw_emails.id AS raw_email_id,
+                    raw_emails.received_at,
+                    raw_emails.subject
+                FROM raw_emails
+                LEFT JOIN payment_events ON payment_events.raw_email_id = raw_emails.id
+                WHERE payment_events.id IS NULL
+                ORDER BY raw_emails.id
+                """
+            ).fetchall()
+        return [UnparsedEmailSourceRecord(**dict(row)) for row in rows]
