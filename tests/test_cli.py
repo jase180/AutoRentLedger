@@ -21,6 +21,7 @@ from autorentledger.cli import (
     run_payer_listing,
     run_payment_listing,
     run_processing,
+    run_reconciliation,
     run_rent_account_add,
     run_rent_account_add_payer,
     run_rent_account_listing,
@@ -164,6 +165,13 @@ def test_allocation_command_defaults():
     assert listing.database == DEFAULT_DATABASE
     assert listing.payment == 1
     assert listing.obligation == 2
+
+
+def test_reconcile_command_defaults():
+    args = build_parser().parse_args(["reconcile", "--period", "2026-08"])
+
+    assert args.database == DEFAULT_DATABASE
+    assert args.period == "2026-08"
 
 
 def test_print_search_results_uses_source_neutral_interface(capsys):
@@ -586,3 +594,45 @@ def test_allocation_cli_add_list_remove_and_privacy(tmp_path, capsys):
     assert payments.get_by_raw_email_id(raw.id) == payment_before
     assert obligations.get(obligation.id) == obligation_before
     assert SQLiteAllocationRepository(database_path).count() == 0
+
+
+def test_reconciliation_cli_and_obligation_show_use_derived_state(tmp_path, capsys):
+    database_path = tmp_path / "reconciliation-cli.sqlite3"
+    raws = SQLiteRawEmailRepository(database_path)
+    payments = SQLitePaymentEventRepository(database_path)
+    rentals = SQLiteRentalRepository(database_path)
+    obligations = SQLiteObligationRepository(database_path)
+    allocations = SQLiteAllocationRepository(database_path)
+    unit = rentals.create_unit("Unit A")
+    account = rentals.create_rent_account(unit.id, "Synthetic Household", None, None)
+    obligation = obligations.create(account.id, "2026-08", 123456, date(2026, 8, 1))
+    raws.insert(
+        EmailMessageSummary(
+            "synthetic-reconciliation-cli-1",
+            datetime(2026, 8, 1, 12, 0, tzinfo=UTC),
+            "forwarder@example.test",
+            "Synthetic notification",
+        ),
+        b"RECONCILIATION_CLI_PRIVATE_RAW_SENTINEL",
+    )
+    raw = raws.get("synthetic-reconciliation-cli-1")
+    payments.insert(
+        raw.id,
+        PaymentNotification("synthetic_provider", "Alex Example", 70000, None, None),
+    )
+    payment = payments.get_by_raw_email_id(raw.id)
+    allocations.create_checked(payment.id, obligation.id, 60000)
+
+    assert run_reconciliation(database_path, "2026-08") == 0
+    assert run_obligation_show(database_path, obligation.id) == 0
+    assert run_reconciliation(database_path, "2026-8") == 1
+
+    output = capsys.readouterr().out
+    assert "ALLOCATED" in output
+    assert "$1,234.56" in output
+    assert "$600.00" in output
+    assert "$634.56" in output
+    assert "PARTIAL" in output
+    assert "Due date: 2026-08-01" in output
+    assert "expected canonical YYYY-MM" in output
+    assert "RECONCILIATION_CLI_PRIVATE_RAW_SENTINEL" not in output

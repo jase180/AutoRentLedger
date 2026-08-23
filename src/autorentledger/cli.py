@@ -25,6 +25,11 @@ from autorentledger.obligations import (
 )
 from autorentledger.parsing import NotificationParseError, parse_payment_notification
 from autorentledger.processing import process_raw_emails
+from autorentledger.reconciliation import (
+    ReconciliationInvariantError,
+    get_reconciliation,
+    reconcile_period,
+)
 from autorentledger.rental import (
     DuplicateAssociationError,
     DuplicateUnitError,
@@ -40,6 +45,7 @@ from autorentledger.storage.sqlite import (
     SQLitePayerRepository,
     SQLitePaymentEventRepository,
     SQLiteRawEmailRepository,
+    SQLiteReconciliationRepository,
     SQLiteRentalRepository,
 )
 
@@ -164,6 +170,12 @@ def build_parser() -> argparse.ArgumentParser:
     allocations.add_argument("--payment", type=int)
     allocations.add_argument("--obligation", type=int)
     allocations.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+    reconcile = subparsers.add_parser(
+        "reconcile", help="derive obligation payment state for a period"
+    )
+    reconcile.add_argument("--period", required=True)
+    reconcile.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
     return parser
 
 
@@ -464,18 +476,26 @@ def run_obligation_listing(database_path: Path, account_id: int | None = None) -
 
 
 def run_obligation_show(database_path: Path, obligation_id: int) -> int:
-    SQLiteRentalRepository(database_path)
-    obligation = SQLiteObligationRepository(database_path).get_summary(obligation_id)
+    repository = _reconciliation_repository(database_path)
+    try:
+        obligation = get_reconciliation(repository, obligation_id)
+    except ReconciliationInvariantError as error:
+        print(error)
+        return 1
     if obligation is None:
         print(f"Rent obligation {obligation_id} does not exist.")
         return 1
 
-    print(f"Rent obligation {obligation.id}")
+    print(f"Rent obligation {obligation.obligation_id}")
     print(f"Account: {obligation.account_display_name}")
     print(f"Unit: {obligation.unit_label}")
     print(f"Period: {obligation.period}")
-    print(f"Amount: {_format_currency(obligation.amount_cents)}")
     print(f"Due date: {obligation.due_date}")
+    print()
+    print(f"Owed: {_format_currency(obligation.owed_cents)}")
+    print(f"Allocated: {_format_currency(obligation.allocated_cents)}")
+    print(f"Remaining: {_format_currency(obligation.remaining_cents)}")
+    print(f"Status: {obligation.status}")
     return 0
 
 
@@ -485,6 +505,11 @@ def _allocation_repository(database_path: Path) -> SQLiteAllocationRepository:
     SQLiteRentalRepository(database_path)
     SQLiteObligationRepository(database_path)
     return SQLiteAllocationRepository(database_path)
+
+
+def _reconciliation_repository(database_path: Path) -> SQLiteReconciliationRepository:
+    _allocation_repository(database_path)
+    return SQLiteReconciliationRepository(database_path)
 
 
 def run_allocation_add(
@@ -538,6 +563,29 @@ def run_allocation_remove(database_path: Path, allocation_id: int) -> int:
         print(error)
         return 1
     print(f"Removed allocation {allocation_id}.")
+    return 0
+
+
+def run_reconciliation(database_path: Path, period: str) -> int:
+    repository = _reconciliation_repository(database_path)
+    try:
+        records = reconcile_period(repository, period)
+    except (ObligationValidationError, ReconciliationInvariantError) as error:
+        print(error)
+        return 1
+
+    print(
+        f"{'PERIOD':<8} {'UNIT':<12} {'ACCOUNT':<24} {'DUE':<10} "
+        f"{'OWED':>12} {'ALLOCATED':>12} {'REMAINING':>12} STATUS"
+    )
+    for record in records:
+        print(
+            f"{record.period:<8} {record.unit_label:<12} "
+            f"{record.account_display_name:<24} {record.due_date:<10} "
+            f"{_format_currency(record.owed_cents):>12} "
+            f"{_format_currency(record.allocated_cents):>12} "
+            f"{_format_currency(record.remaining_cents):>12} {record.status}"
+        )
     return 0
 
 
@@ -616,6 +664,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise AssertionError(f"Unhandled allocation command: {args.allocation_command}")
     if args.command == "allocations":
         return run_allocation_listing(args.database, args.payment, args.obligation)
+    if args.command == "reconcile":
+        return run_reconciliation(args.database, args.period)
     raise AssertionError(f"Unhandled command: {args.command}")
 
 

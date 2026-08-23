@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "autorentledger"
 version = "0.1.0"
-description = "Local rent obligations and explicit payment allocation for AutoRentLedger"
+description = "Local rent obligations, explicit allocations, and derived reconciliation"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

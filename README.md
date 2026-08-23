@@ -1,13 +1,13 @@
 # AutoRentLedger
 
-AutoRentLedger Milestone 8 is a small, read-only Gmail ingestion and deterministic payment-event
+AutoRentLedger Milestone 9 is a small, read-only Gmail ingestion and deterministic payment-event
 pipeline with explicit payer identities, rent accounts, monthly obligations, and manual payment
-allocations. It stores complete original raw MIME bytes in local SQLite while keeping observed
-payments and debt records unchanged; allocation rows record deliberate accounting interpretation.
+allocations. It derives each obligation's current reconciliation state without persisting status.
+It stores complete original raw MIME bytes in local SQLite while keeping observed payments and
+debt records unchanged; allocation rows record deliberate accounting interpretation.
 
 It does not modify messages or labels, print message bodies, match tenants, assign units or rent
-periods automatically, match payments automatically, reconcile balances, or calculate payment
-status.
+periods automatically, match payments automatically, or calculate late/overdue state.
 
 ## Requirements
 
@@ -67,6 +67,7 @@ autorentledger obligation show 1
 autorentledger allocation add --payment 1 --obligation 1 --amount 675.00
 autorentledger allocations
 autorentledger allocation remove 1
+autorentledger reconcile --period 2026-08
 ```
 
 macOS or Linux:
@@ -98,6 +99,7 @@ autorentledger obligation show 1
 autorentledger allocation add --payment 1 --obligation 1 --amount 675.00
 autorentledger allocations
 autorentledger allocation remove 1
+autorentledger reconcile --period 2026-08
 ```
 
 The default Gmail query is `subject:zelle`. Override it when your bank uses different wording:
@@ -332,9 +334,9 @@ without binary floating point, and due dates must use `YYYY-MM-DD`. The account 
 least one day of the requested month. Due dates are explicit and are not required to fall inside
 the obligation month.
 
-Obligations record only what was owed. They do not reference payment events, track amounts paid,
-or expose paid/partial/unpaid status. Each obligation is created manually; there is no recurring
-schedule or automatic generation.
+Obligations record only what was owed. They do not reference payment events or store amounts paid
+or paid/partial/unpaid status. Each obligation is created manually; there is no recurring schedule
+or automatic generation.
 
 ```text
 rent_obligations
@@ -391,6 +393,35 @@ payment_allocations
   unique              (payment_event_id, rent_obligation_id)
 ```
 
+## Reconcile existing obligations
+
+Derive the state of every existing obligation in one canonical month:
+
+```powershell
+autorentledger reconcile --period 2026-08
+```
+
+`obligation show` uses the same derivation and includes owed, allocated, remaining, and status:
+
+```powershell
+autorentledger obligation show 1
+```
+
+The storage query groups obligations with a `LEFT JOIN` to allocations, so obligations with no
+allocations are included. One canonical service derives exactly these states:
+
+```text
+UNPAID   allocated_cents == 0
+PARTIAL  0 < allocated_cents < owed_cents
+PAID     allocated_cents == owed_cents
+```
+
+No reconciliation table or status/balance columns exist. Removing an allocation therefore changes
+the next derived result immediately. Due dates are displayed but do not affect classification,
+missing obligations are not invented, and extra unallocated payment money does not create an
+overpaid state or credit. An allocated total above the obligation amount raises a clear invariant
+error rather than hiding corrupt data.
+
 ## Development checks
 
 ```powershell
@@ -416,6 +447,8 @@ src/autorentledger/
     service.py       # period, currency, due-date, and active-range validation
   allocations/
     service.py       # explicit allocation validation and error translation
+  reconciliation/
+    service.py       # read-only amount and status derivation
   parsing/
     mime.py         # source-neutral MIME text decoding
     models.py       # normalized result and structured parse failure
@@ -425,7 +458,7 @@ src/autorentledger/
     values.py       # shared exact value normalization
   ingestion.py      # source-to-repository idempotent workflow
   processing.py     # idempotent raw-email to payment-event workflow
-  cli.py            # ingestion, rental, obligation, and allocation commands
+  cli.py            # ingestion, rental, obligation, allocation, and reconciliation commands
 tests/              # synthetic adapter, storage, service, and CLI tests
 pyproject.toml      # package, command, dependencies, and tool configuration
 ```
@@ -439,12 +472,14 @@ identities and rental storage, never Gmail, MIME parsing, or payment allocation.
 Obligation logic depends only on rent-account records and obligation storage; it never interprets
 or mutates payment events. Allocation creation is explicit and transactional; it never infers a
 target from payer identity, dates, amounts, memos, or rent-account membership.
+Reconciliation reads obligation and allocation totals without modifying either source and derives
+all status values through one service path.
 
 ## Intentionally out of scope
 
 - Tenant legal status, formal leases, recurring obligation generation, proration, deposits, late
-  fees, automatic matching, credits/prepayments, balances, reconciliation, or
-  paid/partial/unpaid status
+  fees, automatic matching, credits/prepayments, tenant balances, overdue/late status, or
+  persisted reconciliation state
 - Fuzzy, phonetic, nickname, typo-correcting, or AI-assisted identity matching
 - Gmail writes, label creation, or label changes
 - Web UI, visualization, cloud deployment, or background processing
