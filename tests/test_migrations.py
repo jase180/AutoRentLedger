@@ -1,0 +1,293 @@
+import sqlite3
+from datetime import UTC, date, datetime
+
+import pytest
+
+from autorentledger.cli import main
+from autorentledger.email import EmailMessageSummary
+from autorentledger.identity import normalize_alias
+from autorentledger.parsing import PaymentNotification
+from autorentledger.storage import (
+    SQLiteObligationRepository,
+    SQLitePayerRepository,
+    SQLitePaymentEventRepository,
+    SQLiteRawEmailRepository,
+    SQLiteRentalRepository,
+)
+from autorentledger.storage.migrations import (
+    CURRENT_SCHEMA_VERSION,
+    EXPECTED_COLUMNS,
+    MIGRATIONS,
+    LegacySchemaDetectionError,
+    MigrationError,
+    create_raw_email_schema,
+    get_schema_status,
+    upgrade_database,
+)
+
+
+def add_payment_era_rows(database_path):
+    raws = SQLiteRawEmailRepository(database_path)
+    payments = SQLitePaymentEventRepository(database_path)
+    payers = SQLitePayerRepository(database_path)
+    raw_bytes = b"PRIVATE_SYNTHETIC_RAW_SENTINEL\x00preserve byte for byte"
+    raws.insert(
+        EmailMessageSummary(
+            "synthetic-legacy-1",
+            datetime(2026, 8, 1, 12, 0, tzinfo=UTC),
+            "forwarder@example.test",
+            "Synthetic legacy notification",
+        ),
+        raw_bytes,
+    )
+    raw = raws.get("synthetic-legacy-1")
+    payments.insert(
+        raw.id,
+        PaymentNotification(
+            "synthetic_provider", "ALEX EXAMPLE", 123456, date(2026, 8, 1), None
+        ),
+    )
+    payer = payers.create_payer("Alex Example")
+    alias = payers.add_alias(
+        payer.id, "ALEX EXAMPLE", normalize_alias("ALEX EXAMPLE")
+    )
+    return raw, payments.get_by_raw_email_id(raw.id), payer, alias, raw_bytes
+
+
+def table_names(database_path):
+    with sqlite3.connect(database_path) as connection:
+        return {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' "
+                "AND name NOT LIKE 'sqlite_%'"
+            )
+        }
+
+
+def snapshot_tables(database_path, tables):
+    with sqlite3.connect(database_path) as connection:
+        return {
+            table: connection.execute(f"SELECT * FROM {table} ORDER BY rowid").fetchall()
+            for table in tables
+        }
+
+
+def test_fresh_upgrade_runs_in_order_and_creates_only_current_schema(tmp_path):
+    database_path = tmp_path / "fresh.sqlite3"
+    executed = []
+    migrations = {}
+    for version, migration in MIGRATIONS.items():
+        def tracked(connection, *, version=version, migration=migration):
+            executed.append(version)
+            migration(connection)
+
+        migrations[version] = tracked
+
+    initial = get_schema_status(database_path)
+    result = upgrade_database(database_path, migrations=migrations)
+    current = get_schema_status(database_path)
+
+    assert initial.exists is False
+    assert initial.state == "not initialized"
+    assert result.from_version == 0
+    assert result.to_version == CURRENT_SCHEMA_VERSION
+    assert result.backup_path is None
+    assert executed == list(range(1, CURRENT_SCHEMA_VERSION + 1))
+    assert current.schema_version == CURRENT_SCHEMA_VERSION
+    assert current.state == "current"
+    assert table_names(database_path) == set(EXPECTED_COLUMNS)
+    assert "review_items" not in table_names(database_path)
+    assert "reconciliation" not in table_names(database_path)
+    with sqlite3.connect(database_path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
+def test_current_upgrade_is_a_no_op_and_does_not_duplicate_data(tmp_path):
+    database_path = tmp_path / "current.sqlite3"
+    upgrade_database(database_path)
+    payers = SQLitePayerRepository(database_path)
+    payer = payers.create_payer("Alex Example")
+    before = snapshot_tables(database_path, ["payers"])
+
+    result = upgrade_database(database_path)
+
+    assert result.changed is False
+    assert result.backup_path is None
+    assert snapshot_tables(database_path, ["payers"]) == before
+    assert payers.get_payer(payer.id) == payer
+
+
+def test_unversioned_payment_era_upgrade_preserves_rows_ids_blobs_and_aliases(tmp_path):
+    database_path = tmp_path / "legacy-payment.sqlite3"
+    raw, payment, payer, alias, raw_bytes = add_payment_era_rows(database_path)
+    tables = ["raw_emails", "payment_events", "payers", "payer_aliases"]
+    before = snapshot_tables(database_path, tables)
+    status = get_schema_status(database_path)
+
+    result = upgrade_database(
+        database_path, now=datetime(2026, 8, 23, 22, 0, tzinfo=UTC)
+    )
+
+    assert status.schema_version == 0
+    assert status.detected_legacy_version == 3
+    assert status.state == "upgrade required"
+    assert result.from_version == 3
+    assert result.backup_path == tmp_path / "legacy-payment.sqlite3.bak-20260823T220000Z"
+    assert result.backup_path.exists()
+    assert snapshot_tables(database_path, tables) == before
+    assert SQLiteRawEmailRepository(database_path).get(raw.gmail_message_id).raw_mime == raw_bytes
+    assert SQLitePaymentEventRepository(database_path).get_by_raw_email_id(raw.id) == payment
+    payers = SQLitePayerRepository(database_path)
+    assert payers.get_payer(payer.id) == payer
+    assert payers.get_alias(alias.normalized_alias) == alias
+    assert payers.create_payer("Morgan Example").id > payer.id
+    assert table_names(database_path) == set(EXPECTED_COLUMNS)
+    with sqlite3.connect(result.backup_path) as connection:
+        assert connection.execute(
+            "SELECT raw_mime FROM raw_emails WHERE id = ?", (raw.id,)
+        ).fetchone()[0] == raw_bytes
+
+
+def test_unversioned_rental_and_obligation_eras_upgrade_without_data_loss(tmp_path):
+    rental_path = tmp_path / "legacy-rental.sqlite3"
+    *_, payer, _, _ = add_payment_era_rows(rental_path)
+    rentals = SQLiteRentalRepository(rental_path)
+    unit = rentals.create_unit("Unit A")
+    account = rentals.create_rent_account(
+        unit.id, "Synthetic Household", date(2026, 5, 1), None
+    )
+    association = rentals.add_payer(account.id, payer.id)
+    rental_tables = ["units", "rent_accounts", "rent_account_payers"]
+    rental_before = snapshot_tables(rental_path, rental_tables)
+
+    assert get_schema_status(rental_path).detected_legacy_version == 4
+    upgrade_database(rental_path)
+    assert snapshot_tables(rental_path, rental_tables) == rental_before
+    assert SQLiteRentalRepository(rental_path).get_unit(unit.id) == unit
+    assert SQLiteRentalRepository(rental_path).has_payer(
+        association.rent_account_id, association.payer_id
+    )
+
+    obligation_path = tmp_path / "legacy-obligation.sqlite3"
+    *_, payer, _, _ = add_payment_era_rows(obligation_path)
+    rentals = SQLiteRentalRepository(obligation_path)
+    unit = rentals.create_unit("Unit A")
+    account = rentals.create_rent_account(unit.id, "Synthetic Household", None, None)
+    rentals.add_payer(account.id, payer.id)
+    obligations = SQLiteObligationRepository(obligation_path)
+    obligation = obligations.create(
+        account.id, "2026-08", 123456, date(2026, 8, 1)
+    )
+    obligation_before = snapshot_tables(obligation_path, ["rent_obligations"])
+
+    assert get_schema_status(obligation_path).detected_legacy_version == 5
+    upgrade_database(obligation_path)
+    assert snapshot_tables(obligation_path, ["rent_obligations"]) == obligation_before
+    assert SQLiteObligationRepository(obligation_path).get(obligation.id) == obligation
+    assert "payment_allocations" in table_names(obligation_path)
+
+
+def test_ambiguous_legacy_schema_fails_instead_of_guessing(tmp_path):
+    database_path = tmp_path / "ambiguous.sqlite3"
+    SQLiteRawEmailRepository(database_path)
+    SQLitePayerRepository(database_path)
+
+    with pytest.raises(LegacySchemaDetectionError, match="Cannot safely infer"):
+        get_schema_status(database_path)
+    with pytest.raises(LegacySchemaDetectionError, match="Cannot safely infer"):
+        upgrade_database(database_path)
+    with sqlite3.connect(database_path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 0
+
+
+def test_failed_migration_rolls_back_schema_and_user_version(tmp_path):
+    database_path = tmp_path / "rollback.sqlite3"
+    with sqlite3.connect(database_path) as connection:
+        create_raw_email_schema(connection)
+        connection.execute("PRAGMA user_version = 1")
+        connection.execute(
+            """
+            INSERT INTO raw_emails (
+                gmail_message_id, received_at, sender, subject,
+                raw_mime, content_sha256, ingested_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "synthetic-rollback-1",
+                "2026-08-01T12:00:00+00:00",
+                "forwarder@example.test",
+                "Synthetic notification",
+                b"ROLLBACK_PRIVATE_SYNTHETIC_SENTINEL",
+                "synthetic-hash",
+                "2026-08-01T12:00:00+00:00",
+            ),
+        )
+    before = snapshot_tables(database_path, ["raw_emails"])
+    migrations = dict(MIGRATIONS)
+
+    def fail_second_migration(connection):
+        connection.execute("CREATE TABLE should_rollback (id INTEGER PRIMARY KEY)")
+        raise RuntimeError("synthetic migration failure")
+
+    migrations[2] = fail_second_migration
+
+    with pytest.raises(MigrationError, match="synthetic migration failure"):
+        upgrade_database(database_path, migrations=migrations)
+
+    assert snapshot_tables(database_path, ["raw_emails"]) == before
+    assert "should_rollback" not in table_names(database_path)
+    with sqlite3.connect(database_path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 1
+
+
+def test_cli_rejects_legacy_and_missing_databases_without_mutation(tmp_path, capsys):
+    legacy_path = tmp_path / "legacy-cli.sqlite3"
+    add_payment_era_rows(legacy_path)
+    before_tables = table_names(legacy_path)
+    with sqlite3.connect(legacy_path) as connection:
+        before_version = connection.execute("PRAGMA user_version").fetchone()[0]
+
+    for command in [
+        ["review", "--database", str(legacy_path)],
+        ["reconcile", "--period", "2026-08", "--database", str(legacy_path)],
+        ["payer", "add", "Morgan Example", "--database", str(legacy_path)],
+    ]:
+        assert main(command) == 1
+    output = capsys.readouterr().out
+    assert "upgrade" in output.casefold()
+    assert "autorentledger db upgrade" in output
+    assert "Traceback" not in output
+    assert table_names(legacy_path) == before_tables
+    with sqlite3.connect(legacy_path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == before_version
+
+    missing_path = tmp_path / "missing.sqlite3"
+    assert main(["review", "--database", str(missing_path)]) == 1
+    missing_output = capsys.readouterr().out
+    assert "Database does not exist" in missing_output
+    assert "autorentledger db upgrade" in missing_output
+    assert "Traceback" not in missing_output
+    assert not missing_path.exists()
+
+
+def test_real_style_legacy_database_runs_review_after_explicit_upgrade(tmp_path, capsys):
+    database_path = tmp_path / "real-style.sqlite3"
+    add_payment_era_rows(database_path)
+
+    assert main(["review", "--database", str(database_path)]) == 1
+    assert "upgrade" in capsys.readouterr().out.casefold()
+    assert main(["db", "upgrade", "--database", str(database_path)]) == 0
+    upgrade_output = capsys.readouterr().out
+    assert "upgraded from version 3" in upgrade_output
+    assert "PRIVATE_SYNTHETIC_RAW_SENTINEL" not in upgrade_output
+    assert main(["review", "--database", str(database_path)]) == 0
+    review_output = capsys.readouterr().out
+    assert "TYPE" in review_output
+    assert "PRIVATE_SYNTHETIC_RAW_SENTINEL" not in review_output
+    assert main(["db", "status", "--database", str(database_path)]) == 0
+    status_output = capsys.readouterr().out
+    assert f"Schema version: {CURRENT_SCHEMA_VERSION}" in status_output
+    assert "Status: current" in status_output
+    assert "PRIVATE_SYNTHETIC_RAW_SENTINEL" not in status_output

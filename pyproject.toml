@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "autorentledger"
 version = "0.1.0"
-description = "Local rent ledger with derived reconciliation and review items"
+description = "Versioned local rent ledger with derived reconciliation and review items"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

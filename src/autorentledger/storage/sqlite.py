@@ -10,6 +10,14 @@ from pathlib import Path
 
 from autorentledger.email.source import EmailMessageSummary
 from autorentledger.parsing.models import PaymentNotification
+from autorentledger.storage.migrations import (
+    create_allocation_schema,
+    create_obligation_schema,
+    create_payer_schema,
+    create_payment_event_schema,
+    create_raw_email_schema,
+    create_rental_schema,
+)
 
 
 @dataclass(frozen=True)
@@ -212,20 +220,7 @@ class SQLiteRawEmailRepository:
 
     def _initialize_schema(self) -> None:
         with self._connect() as connection:
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS raw_emails (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    gmail_message_id TEXT NOT NULL UNIQUE,
-                    received_at TEXT NOT NULL,
-                    sender TEXT NOT NULL,
-                    subject TEXT NOT NULL,
-                    raw_mime BLOB NOT NULL,
-                    content_sha256 TEXT NOT NULL,
-                    ingested_at TEXT NOT NULL
-                )
-                """
-            )
+            create_raw_email_schema(connection)
 
     def contains(self, gmail_message_id: str) -> bool:
         with self._connect() as connection:
@@ -299,23 +294,7 @@ class SQLitePaymentEventRepository:
 
     def _initialize_schema(self) -> None:
         with self._connect() as connection:
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS payment_events (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    raw_email_id INTEGER NOT NULL UNIQUE,
-                    provider TEXT NOT NULL,
-                    sender_name TEXT NOT NULL,
-                    amount_cents INTEGER NOT NULL,
-                    occurred_on TEXT,
-                    memo TEXT,
-                    parsed_at TEXT NOT NULL,
-                    FOREIGN KEY (raw_email_id)
-                        REFERENCES raw_emails(id)
-                        ON DELETE RESTRICT
-                )
-                """
-            )
+            create_payment_event_schema(connection)
 
     def contains_raw_email(self, raw_email_id: int) -> bool:
         with self._connect() as connection:
@@ -402,26 +381,7 @@ class SQLitePayerRepository:
 
     def _initialize_schema(self) -> None:
         with self._connect() as connection:
-            connection.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS payers (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    display_name TEXT NOT NULL,
-                    created_at TEXT NOT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS payer_aliases (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    payer_id INTEGER NOT NULL,
-                    alias TEXT NOT NULL,
-                    normalized_alias TEXT NOT NULL UNIQUE,
-                    created_at TEXT NOT NULL,
-                    FOREIGN KEY (payer_id)
-                        REFERENCES payers(id)
-                        ON DELETE RESTRICT
-                );
-                """
-            )
+            create_payer_schema(connection)
 
     def create_payer(self, display_name: str) -> PayerRecord:
         created_at = datetime.now(UTC).isoformat()
@@ -500,45 +460,7 @@ class SQLiteRentalRepository:
 
     def _initialize_schema(self) -> None:
         with self._connect() as connection:
-            connection.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS units (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    label TEXT NOT NULL UNIQUE CHECK (length(trim(label)) > 0),
-                    created_at TEXT NOT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS rent_accounts (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    unit_id INTEGER NOT NULL,
-                    display_name TEXT NOT NULL CHECK (length(trim(display_name)) > 0),
-                    active_from TEXT,
-                    active_to TEXT,
-                    created_at TEXT NOT NULL,
-                    CHECK (
-                        active_from IS NULL
-                        OR active_to IS NULL
-                        OR active_to >= active_from
-                    ),
-                    FOREIGN KEY (unit_id)
-                        REFERENCES units(id)
-                        ON DELETE RESTRICT
-                );
-
-                CREATE TABLE IF NOT EXISTS rent_account_payers (
-                    rent_account_id INTEGER NOT NULL,
-                    payer_id INTEGER NOT NULL,
-                    created_at TEXT NOT NULL,
-                    UNIQUE (rent_account_id, payer_id),
-                    FOREIGN KEY (rent_account_id)
-                        REFERENCES rent_accounts(id)
-                        ON DELETE RESTRICT,
-                    FOREIGN KEY (payer_id)
-                        REFERENCES payers(id)
-                        ON DELETE RESTRICT
-                );
-                """
-            )
+            create_rental_schema(connection)
 
     def create_unit(self, label: str) -> UnitRecord:
         created_at = datetime.now(UTC).isoformat()
@@ -712,22 +634,7 @@ class SQLiteObligationRepository:
 
     def _initialize_schema(self) -> None:
         with self._connect() as connection:
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS rent_obligations (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    rent_account_id INTEGER NOT NULL,
-                    period TEXT NOT NULL,
-                    amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
-                    due_date TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    UNIQUE (rent_account_id, period),
-                    FOREIGN KEY (rent_account_id)
-                        REFERENCES rent_accounts(id)
-                        ON DELETE RESTRICT
-                )
-                """
-            )
+            create_obligation_schema(connection)
 
     def create(
         self,
@@ -839,24 +746,7 @@ class SQLiteAllocationRepository:
 
     def _initialize_schema(self) -> None:
         with self._connect() as connection:
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS payment_allocations (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    payment_event_id INTEGER NOT NULL,
-                    rent_obligation_id INTEGER NOT NULL,
-                    amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
-                    created_at TEXT NOT NULL,
-                    UNIQUE (payment_event_id, rent_obligation_id),
-                    FOREIGN KEY (payment_event_id)
-                        REFERENCES payment_events(id)
-                        ON DELETE RESTRICT,
-                    FOREIGN KEY (rent_obligation_id)
-                        REFERENCES rent_obligations(id)
-                        ON DELETE RESTRICT
-                )
-                """
-            )
+            create_allocation_schema(connection)
 
     def create_checked(
         self,

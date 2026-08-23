@@ -181,6 +181,14 @@ def test_review_command_defaults():
     assert args.database == DEFAULT_DATABASE
 
 
+def test_database_command_defaults():
+    status = build_parser().parse_args(["db", "status"])
+    upgrade = build_parser().parse_args(["db", "upgrade"])
+
+    assert status.database == DEFAULT_DATABASE
+    assert upgrade.database == DEFAULT_DATABASE
+
+
 def test_print_search_results_uses_source_neutral_interface(capsys):
     source = StubEmailSource(
         [
@@ -489,6 +497,7 @@ def test_obligation_cli_workflow_is_exact_and_privacy_safe(tmp_path, capsys):
         PaymentNotification("synthetic_provider", "Alex Example", 98765, None, None),
     )
     payment_before = payments.list_all()
+    SQLiteAllocationRepository(database_path)
 
     assert (
         run_obligation_add(

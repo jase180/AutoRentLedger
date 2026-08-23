@@ -1,11 +1,12 @@
 # AutoRentLedger
 
-AutoRentLedger Milestone 10 is a small, read-only Gmail ingestion and deterministic payment-event
+AutoRentLedger Milestone 10.5 is a small, read-only Gmail ingestion and deterministic payment-event
 pipeline with explicit payer identities, rent accounts, monthly obligations, and manual payment
 allocations. It derives each obligation's current reconciliation state without persisting status.
 It also derives one operational review list from unresolved identities, unallocated money,
 incomplete obligations, and unparsed raw emails. It stores complete original raw MIME bytes in
-local SQLite while keeping observed payments and debt records unchanged.
+local SQLite while keeping observed payments and debt records unchanged. A built-in, explicit,
+versioned schema upgrade path keeps long-lived local databases compatible.
 
 It does not modify messages or labels, print message bodies, match tenants, assign units or rent
 periods automatically, match payments automatically, or calculate late/overdue state.
@@ -46,6 +47,8 @@ py -3.11 -m venv .venv
 .venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
+autorentledger db status
+autorentledger db upgrade
 autorentledger search
 autorentledger ingest
 autorentledger parse
@@ -79,6 +82,8 @@ python3.11 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e '.[dev]'
+autorentledger db status
+autorentledger db upgrade
 autorentledger search
 autorentledger ingest
 autorentledger parse
@@ -104,6 +109,44 @@ autorentledger allocation remove 1
 autorentledger reconcile --period 2026-08
 autorentledger review
 ```
+
+## Database schema lifecycle
+
+Initialize a new database or explicitly upgrade an older one before running normal commands:
+
+```powershell
+autorentledger db status
+autorentledger db upgrade
+```
+
+AutoRentLedger uses monotonic `PRAGMA user_version` values and six built-in schema migrations for
+the existing persisted schema epochs: raw emails, payment events, payer identities, rental
+accounts, obligations, and allocations. This is a small application-specific mechanism, not a
+general migration framework.
+
+Legacy databases with `user_version = 0` are inspected conservatively using known table and column
+signatures. Ambiguous or inconsistent schemas are rejected rather than guessed. All required
+migrations run in one `BEGIN IMMEDIATE` transaction, followed by foreign-key and integrity checks;
+any failure rolls back both schema changes and `user_version`.
+
+Before mutating an existing database, upgrade creates a sibling SQLite backup such as:
+
+```text
+data/autorentledger.db.bak-20260823T220000Z
+```
+
+Backups, databases, OAuth files, and downloaded email data remain local and are ignored by Git.
+A database already at the current version is a no-op and does not create another backup.
+
+Read-only commands never upgrade automatically. Normal read and write commands require the current
+schema and provide a clean `autorentledger db upgrade` instruction for missing or outdated
+databases. Repository constructors reuse the same centralized table definitions for isolated test
+fixtures, while the CLI upgrade command is the authoritative production lifecycle path.
+
+The historical `payment_events.amount_cents` definition does not yet carry the positive-value
+database check used by obligations and allocations. Adding it requires a carefully validated SQLite
+table rebuild and is intentionally deferred rather than increasing migration risk in this hardening
+milestone.
 
 The default Gmail query is `subject:zelle`. Override it when your bank uses different wording:
 
@@ -468,6 +511,7 @@ src/autorentledger/
     source.py       # provider-neutral message model and EmailSource protocol
     gmail.py        # Gmail OAuth, metadata search, and raw MIME adapter
   storage/
+    migrations.py   # schema versions, legacy detection, backup, and atomic upgrade
     sqlite.py       # SQLite schemas and repositories
   identity/
     normalization.py # conservative sender-alias normalization
@@ -509,6 +553,8 @@ Reconciliation reads obligation and allocation totals without modifying either s
 all status values through one service path.
 Review reuses canonical identity resolution and reconciliation, plus aggregate read-only queries;
 it adds no workflow or review-state storage.
+Normal CLI operations require the current schema; only `db upgrade` changes schema version or
+applies migrations.
 
 ## Intentionally out of scope
 
@@ -519,4 +565,4 @@ it adds no workflow or review-state storage.
 - Gmail writes, label creation, or label changes
 - Web UI, visualization, cloud deployment, or background processing
 - Review acknowledgement, dismissal, assignment, tickets, notifications, or scheduled jobs
-- Schema migration tooling; the current schemas use additive `CREATE TABLE IF NOT EXISTS`
+- External or general-purpose migration frameworks

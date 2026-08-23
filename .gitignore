@@ -29,6 +29,9 @@ data/
 *.db-wal
 *.db-shm
 *.db-journal
+*.db.bak-*
+*.sqlite.bak-*
+*.sqlite3.bak-*
 
 # Editors and operating systems
 .idea/
