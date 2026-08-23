@@ -9,6 +9,7 @@ from pathlib import Path
 from autorentledger.email.gmail import GmailSource
 from autorentledger.email.source import EmailSource
 from autorentledger.ingestion import ingest_raw_emails
+from autorentledger.parsing import NotificationParseError, parse_payment_notification
 from autorentledger.storage.sqlite import SQLiteRawEmailRepository
 
 DEFAULT_QUERY = "subject:zelle"
@@ -31,6 +32,9 @@ def build_parser() -> argparse.ArgumentParser:
     ingest.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
     ingest.add_argument("--credentials", type=Path, default=Path("credentials.json"))
     ingest.add_argument("--token", type=Path, default=Path("token.json"))
+
+    parse = subparsers.add_parser("parse", help="parse locally stored raw emails")
+    parse.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
     return parser
 
 
@@ -63,6 +67,45 @@ def run_ingestion(
     return 0
 
 
+def run_parsing(database_path: Path) -> int:
+    repository = SQLiteRawEmailRepository(database_path)
+    records = repository.list_all()
+    parsed_count = 0
+    failed_count = 0
+
+    for record in records:
+        print(f"Message: {record.gmail_message_id}")
+        try:
+            notification = parse_payment_notification(record.raw_mime)
+        except NotificationParseError as error:
+            failed_count += 1
+            if error.provider:
+                print(f"Provider: {error.provider}")
+            print("Status: failed")
+            print(f"Reason: {error.reason}")
+        else:
+            parsed_count += 1
+            print(f"Provider: {notification.provider}")
+            print(f"Sender: {notification.sender_name}")
+            print(f"Amount: {_format_currency(notification.amount_cents)}")
+            occurred = (
+                notification.occurred_on.isoformat() if notification.occurred_on else "unknown"
+            )
+            print(f"Occurred: {occurred}")
+            print("Status: parsed")
+        print()
+
+    print(f"Stored: {len(records)}")
+    print(f"Parsed: {parsed_count}")
+    print(f"Failed: {failed_count}")
+    return 0
+
+
+def _format_currency(amount_cents: int) -> str:
+    dollars, cents = divmod(amount_cents, 100)
+    return f"${dollars:,}.{cents:02d}"
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "search":
@@ -71,6 +114,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "ingest":
         source = GmailSource.authenticate(args.credentials, args.token)
         return run_ingestion(source, args.database, args.query, args.max_results)
+    if args.command == "parse":
+        return run_parsing(args.database)
     raise AssertionError(f"Unhandled command: {args.command}")
 
 

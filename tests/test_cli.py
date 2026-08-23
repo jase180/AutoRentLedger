@@ -1,4 +1,6 @@
 from datetime import UTC, datetime
+from email.message import EmailMessage
+from email.policy import SMTP
 
 from autorentledger.cli import (
     DEFAULT_DATABASE,
@@ -6,8 +8,10 @@ from autorentledger.cli import (
     build_parser,
     print_search_results,
     run_ingestion,
+    run_parsing,
 )
 from autorentledger.email import EmailMessageSummary
+from autorentledger.storage import SQLiteRawEmailRepository
 
 
 class StubEmailSource:
@@ -35,6 +39,12 @@ def test_ingest_command_defaults():
 
     assert args.query == "subject:zelle"
     assert args.max_results == 100
+    assert args.database == DEFAULT_DATABASE
+
+
+def test_parse_command_defaults():
+    args = build_parser().parse_args(["parse"])
+
     assert args.database == DEFAULT_DATABASE
 
 
@@ -86,10 +96,30 @@ def test_run_ingestion_prints_safe_summary(tmp_path, capsys):
     assert run_ingestion(source, database_path, "subject:synthetic", 10) == 0
 
     assert capsys.readouterr().out == (
-        "Found: 1\n"
-        "Inserted: 1\n"
-        "Already present: 0\n"
-        "Found: 1\n"
-        "Inserted: 0\n"
-        "Already present: 1\n"
+        "Found: 1\nInserted: 1\nAlready present: 0\nFound: 1\nInserted: 0\nAlready present: 1\n"
     )
+
+
+def test_parse_cli_never_prints_raw_body(tmp_path, capsys):
+    database_path = tmp_path / "parse.sqlite3"
+    repository = SQLiteRawEmailRepository(database_path)
+    message = EmailMessage()
+    message["From"] = "unknown@example.test"
+    message["Subject"] = "Unknown synthetic message"
+    message.set_content("PRIVATE_RAW_SENTINEL must never appear in CLI output")
+    summary = EmailMessageSummary(
+        message_id="synthetic-cli-parse-1",
+        received_at=datetime(2024, 8, 22, 14, 0, tzinfo=UTC),
+        sender="unknown@example.test",
+        subject="Unknown synthetic message",
+    )
+    repository.insert(summary, message.as_bytes(policy=SMTP))
+
+    assert run_parsing(database_path) == 0
+
+    output = capsys.readouterr().out
+    assert "PRIVATE_RAW_SENTINEL" not in output
+    assert "Message: synthetic-cli-parse-1" in output
+    assert "Status: failed" in output
+    assert "Reason: unsupported_provider" in output
+    assert "Stored: 1\nParsed: 0\nFailed: 1\n" in output

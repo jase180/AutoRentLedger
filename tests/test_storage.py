@@ -22,9 +22,7 @@ def test_initializes_database_schema(tmp_path):
 
     assert database_path.exists()
     with sqlite3.connect(database_path) as connection:
-        columns = {
-            row[1] for row in connection.execute("PRAGMA table_info(raw_emails)").fetchall()
-        }
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(raw_emails)").fetchall()}
     assert columns == {
         "id",
         "gmail_message_id",
@@ -72,3 +70,14 @@ def test_different_gmail_ids_remain_distinct_with_identical_content(tmp_path):
     second = repository.get("synthetic-2")
     assert repository.count() == 2
     assert first.content_sha256 == second.content_sha256
+
+
+def test_lists_stored_messages_in_ingestion_order(tmp_path):
+    repository = SQLiteRawEmailRepository(tmp_path / "ledger.db")
+    repository.insert(synthetic_summary("synthetic-2"), b"second")
+    repository.insert(synthetic_summary("synthetic-1"), b"first")
+
+    assert [record.gmail_message_id for record in repository.list_all()] == [
+        "synthetic-2",
+        "synthetic-1",
+    ]

@@ -102,3 +102,8 @@ class SQLiteRawEmailRepository:
         with self._connect() as connection:
             row = connection.execute("SELECT COUNT(*) AS count FROM raw_emails").fetchone()
         return int(row["count"])
+
+    def list_all(self) -> list[RawEmailRecord]:
+        with self._connect() as connection:
+            rows = connection.execute("SELECT * FROM raw_emails ORDER BY id").fetchall()
+        return [RawEmailRecord(**dict(row)) for row in rows]
