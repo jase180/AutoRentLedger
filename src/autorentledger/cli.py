@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import argparse
+import sqlite3
 from collections.abc import Sequence
 from pathlib import Path
 
 from autorentledger.email.gmail import GmailSource
 from autorentledger.email.source import EmailSource
+from autorentledger.identity import normalize_alias, unresolved_senders
 from autorentledger.ingestion import ingest_raw_emails
 from autorentledger.parsing import NotificationParseError, parse_payment_notification
 from autorentledger.processing import process_raw_emails
 from autorentledger.storage.sqlite import (
+    SQLitePayerRepository,
     SQLitePaymentEventRepository,
     SQLiteRawEmailRepository,
 )
@@ -45,6 +48,30 @@ def build_parser() -> argparse.ArgumentParser:
 
     payments = subparsers.add_parser("payments", help="list persisted payment events")
     payments.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+    payer = subparsers.add_parser("payer", help="manage payer identities")
+    payer_commands = payer.add_subparsers(dest="payer_command", required=True)
+
+    payer_add = payer_commands.add_parser("add", help="create a payer")
+    payer_add.add_argument("display_name")
+    payer_add.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+    alias_add = payer_commands.add_parser("alias-add", help="assign an alias to a payer")
+    alias_add.add_argument("payer_id", type=int)
+    alias_add.add_argument("alias")
+    alias_add.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+    aliases = payer_commands.add_parser("aliases", help="list aliases for a payer")
+    aliases.add_argument("payer_id", type=int)
+    aliases.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+    payers = subparsers.add_parser("payers", help="list payer identities")
+    payers.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+    unresolved = subparsers.add_parser(
+        "unresolved-payers", help="list payment senders without a payer alias"
+    )
+    unresolved.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
     return parser
 
 
@@ -143,6 +170,77 @@ def run_payment_listing(database_path: Path) -> int:
     return 0
 
 
+def run_payer_add(database_path: Path, display_name: str) -> int:
+    if not display_name.strip():
+        print("Payer display name must not be empty.")
+        return 1
+    payer = SQLitePayerRepository(database_path).create_payer(display_name)
+    print(f"Created payer {payer.id}: {payer.display_name}")
+    return 0
+
+
+def run_payer_listing(database_path: Path) -> int:
+    payers = SQLitePayerRepository(database_path).list_payers()
+    print(f"{'ID':<4} NAME")
+    for payer in payers:
+        print(f"{payer.id:<4} {payer.display_name}")
+    return 0
+
+
+def run_alias_add(database_path: Path, payer_id: int, alias: str) -> int:
+    repository = SQLitePayerRepository(database_path)
+    payer = repository.get_payer(payer_id)
+    if payer is None:
+        print(f"Payer {payer_id} does not exist.")
+        return 1
+
+    normalized_alias = normalize_alias(alias)
+    if not normalized_alias:
+        print("Alias must not be empty.")
+        return 1
+
+    existing = repository.get_alias(normalized_alias)
+    if existing is not None:
+        print(f"Alias already assigned to payer {existing.payer_id}.")
+        return 1
+
+    try:
+        repository.add_alias(payer_id, alias, normalized_alias)
+    except sqlite3.IntegrityError:
+        existing = repository.get_alias(normalized_alias)
+        if existing is None:
+            raise
+        print(f"Alias already assigned to payer {existing.payer_id}.")
+        return 1
+
+    print(f'Added alias "{alias}" -> {payer.display_name}')
+    return 0
+
+
+def run_alias_listing(database_path: Path, payer_id: int) -> int:
+    repository = SQLitePayerRepository(database_path)
+    payer = repository.get_payer(payer_id)
+    if payer is None:
+        print(f"Payer {payer_id} does not exist.")
+        return 1
+
+    print(f"Aliases for payer {payer.id}: {payer.display_name}")
+    print(f"{'ID':<4} ALIAS")
+    for alias in repository.list_aliases(payer_id):
+        print(f"{alias.id:<4} {alias.alias}")
+    return 0
+
+
+def run_unresolved_payers(database_path: Path) -> int:
+    payments = SQLitePaymentEventRepository(database_path)
+    payers = SQLitePayerRepository(database_path)
+    unresolved = unresolved_senders(payments, payers)
+    print(f"{'SENDER':<32} COUNT")
+    for sender in unresolved:
+        print(f"{sender.sender_name:<32} {sender.count}")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "search":
@@ -157,6 +255,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_processing(args.database)
     if args.command == "payments":
         return run_payment_listing(args.database)
+    if args.command == "payer":
+        if args.payer_command == "add":
+            return run_payer_add(args.database, args.display_name)
+        if args.payer_command == "alias-add":
+            return run_alias_add(args.database, args.payer_id, args.alias)
+        if args.payer_command == "aliases":
+            return run_alias_listing(args.database, args.payer_id)
+        raise AssertionError(f"Unhandled payer command: {args.payer_command}")
+    if args.command == "payers":
+        return run_payer_listing(args.database)
+    if args.command == "unresolved-payers":
+        return run_unresolved_payers(args.database)
     raise AssertionError(f"Unhandled command: {args.command}")
 
 

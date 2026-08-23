@@ -1,12 +1,13 @@
 # AutoRentLedger
 
-AutoRentLedger Milestone 4 is a small, read-only Gmail ingestion and deterministic payment-event
-pipeline. It stores complete original raw MIME bytes in local SQLite, converts supported Zelle
-notifications into source-neutral payment notifications, and persists successful results as
-derived payment events.
+AutoRentLedger Milestone 5 is a small, read-only Gmail ingestion and deterministic payment-event
+pipeline with explicit payer identity resolution. It stores complete original raw MIME bytes in
+local SQLite, converts supported Zelle notifications into source-neutral payment notifications,
+persists successful results as derived payment events, and maps observed sender aliases to
+user-managed payer identities at read time.
 
 It does not modify messages or labels, print message bodies, match tenants, assign units or rent
-periods, reconcile rent, or implement accounting logic.
+periods, infer payer identities, reconcile rent, or implement accounting logic.
 
 ## Requirements
 
@@ -49,6 +50,11 @@ autorentledger ingest
 autorentledger parse
 autorentledger process
 autorentledger payments
+autorentledger payer add "Alex Example"
+autorentledger payer alias-add 1 "ALEX Q EXAMPLE"
+autorentledger payer aliases 1
+autorentledger payers
+autorentledger unresolved-payers
 ```
 
 macOS or Linux:
@@ -63,6 +69,11 @@ autorentledger ingest
 autorentledger parse
 autorentledger process
 autorentledger payments
+autorentledger payer add 'Alex Example'
+autorentledger payer alias-add 1 'ALEX Q EXAMPLE'
+autorentledger payer aliases 1
+autorentledger payers
+autorentledger unresolved-payers
 ```
 
 The default Gmail query is `subject:zelle`. Override it when your bank uses different wording:
@@ -176,6 +187,52 @@ payment_events
 The unique foreign key enforces at most one payment event per raw email at the database level.
 Payment events represent only observed notification facts, not tenant identity or rent status.
 
+## Manage payer identities
+
+Create and inspect canonical payer identities locally:
+
+```powershell
+autorentledger payer add "Alex Example"
+autorentledger payers
+```
+
+Assign and inspect explicitly chosen sender aliases:
+
+```powershell
+autorentledger payer alias-add 1 "ALEX Q EXAMPLE"
+autorentledger payer aliases 1
+```
+
+Aliases are normalized conservatively by trimming surrounding whitespace, collapsing internal
+whitespace, and applying case-insensitive `casefold()` normalization. The entered alias is also
+preserved unchanged. A normalized alias can belong to only one payer, and conflicts are rejected
+instead of silently reassigned. No payer is created automatically.
+
+Show distinct observed payment senders that do not currently resolve, including their event
+counts:
+
+```powershell
+autorentledger unresolved-payers
+```
+
+Resolution is dynamic. `payment_events.sender_name` remains the original parsed bank evidence;
+adding or correcting an alias changes its current payer interpretation without rewriting the
+payment event.
+
+```text
+payers
+  id                integer primary key
+  display_name      text (not unique)
+  created_at        UTC ISO timestamp
+
+payer_aliases
+  id                integer primary key
+  payer_id          foreign key -> payers.id ON DELETE RESTRICT
+  alias             original entered text
+  normalized_alias  unique normalized lookup key
+  created_at        UTC ISO timestamp
+```
+
 ## Development checks
 
 ```powershell
@@ -191,7 +248,10 @@ src/autorentledger/
     source.py       # provider-neutral message model and EmailSource protocol
     gmail.py        # Gmail OAuth, metadata search, and raw MIME adapter
   storage/
-    sqlite.py       # SQLite schema and raw email repository
+    sqlite.py       # SQLite schemas and repositories
+  identity/
+    normalization.py # conservative sender-alias normalization
+    service.py       # read-time payer resolution and unresolved inspection
   parsing/
     mime.py         # source-neutral MIME text decoding
     models.py       # normalized result and structured parse failure
@@ -201,7 +261,7 @@ src/autorentledger/
     values.py       # shared exact value normalization
   ingestion.py      # source-to-repository idempotent workflow
   processing.py     # idempotent raw-email to payment-event workflow
-  cli.py            # search, ingest, parse, process, and payments commands
+  cli.py            # ingestion, processing, payment, and payer commands
 tests/              # synthetic adapter, storage, service, and CLI tests
 pyproject.toml      # package, command, dependencies, and tool configuration
 ```
@@ -209,12 +269,14 @@ pyproject.toml      # package, command, dependencies, and tool configuration
 The ingestion service depends on the provider-neutral `EmailSource` interface and raw email
 repository. Parsing accepts raw MIME bytes and has no Gmail dependency. Processing connects the
 parser to the payment-event repository. Google SDK response objects remain inside the Gmail
-adapter, and SQLite has no provider-specific parsing knowledge.
+adapter, and SQLite has no provider-specific parsing knowledge. Identity resolution depends only
+on payment sender values and locally managed payer aliases.
 
 ## Intentionally out of scope
 
-- Tenant or sender identity mapping, unit assignments, rent obligations, reconciliation, or
-  accounting
+- Tenant mapping, unit assignments, leases, rent obligations, payment allocation, reconciliation,
+  or accounting
+- Fuzzy, phonetic, nickname, typo-correcting, or AI-assisted identity matching
 - Gmail writes, label creation, or label changes
 - Web UI, visualization, cloud deployment, or background processing
 - Schema migration tooling; the current schemas use additive `CREATE TABLE IF NOT EXISTS`

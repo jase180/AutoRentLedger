@@ -7,14 +7,23 @@ from autorentledger.cli import (
     DEFAULT_QUERY,
     build_parser,
     print_search_results,
+    run_alias_add,
+    run_alias_listing,
     run_ingestion,
     run_parsing,
+    run_payer_add,
+    run_payer_listing,
     run_payment_listing,
     run_processing,
+    run_unresolved_payers,
 )
 from autorentledger.email import EmailMessageSummary
 from autorentledger.parsing import PaymentNotification
-from autorentledger.storage import SQLitePaymentEventRepository, SQLiteRawEmailRepository
+from autorentledger.storage import (
+    SQLitePayerRepository,
+    SQLitePaymentEventRepository,
+    SQLiteRawEmailRepository,
+)
 
 
 class StubEmailSource:
@@ -57,6 +66,20 @@ def test_process_and_payments_command_defaults():
 
     assert process_args.database == DEFAULT_DATABASE
     assert payment_args.database == DEFAULT_DATABASE
+
+
+def test_identity_command_defaults():
+    payer_add = build_parser().parse_args(["payer", "add", "Alex Example"])
+    alias_add = build_parser().parse_args(["payer", "alias-add", "1", "ALEX EXAMPLE"])
+    aliases = build_parser().parse_args(["payer", "aliases", "1"])
+    payers = build_parser().parse_args(["payers"])
+    unresolved = build_parser().parse_args(["unresolved-payers"])
+
+    assert payer_add.database == DEFAULT_DATABASE
+    assert alias_add.database == DEFAULT_DATABASE
+    assert aliases.database == DEFAULT_DATABASE
+    assert payers.database == DEFAULT_DATABASE
+    assert unresolved.database == DEFAULT_DATABASE
 
 
 def test_print_search_results_uses_source_neutral_interface(capsys):
@@ -195,3 +218,58 @@ def test_payments_cli_displays_normalized_event(tmp_path, capsys):
     assert "Alex Example" in output
     assert "$1,234.56" in output
     assert "synthetic_provider" in output
+
+
+def test_payer_and_alias_cli_workflow_and_conflict(tmp_path, capsys):
+    database_path = tmp_path / "identity.sqlite3"
+
+    assert run_payer_add(database_path, "Alex Example") == 0
+    assert run_payer_add(database_path, "Morgan Example") == 0
+    assert run_payer_listing(database_path) == 0
+    assert run_alias_add(database_path, 1, "  ALEX   EXAMPLE ") == 0
+    assert run_alias_listing(database_path, 1) == 0
+    assert run_alias_add(database_path, 2, "alex example") == 1
+
+    output = capsys.readouterr().out
+    assert "Created payer 1: Alex Example" in output
+    assert "Created payer 2: Morgan Example" in output
+    assert 'Added alias "  ALEX   EXAMPLE " -> Alex Example' in output
+    assert "Aliases for payer 1: Alex Example" in output
+    assert "Alias already assigned to payer 1." in output
+
+    aliases = SQLitePayerRepository(database_path).list_aliases(1)
+    assert len(aliases) == 1
+    assert aliases[0].alias == "  ALEX   EXAMPLE "
+
+
+def test_unresolved_cli_counts_senders_and_never_prints_raw_mime(tmp_path, capsys):
+    database_path = tmp_path / "unresolved.sqlite3"
+    raws = SQLiteRawEmailRepository(database_path)
+    payments = SQLitePaymentEventRepository(database_path)
+    summary = EmailMessageSummary(
+        message_id="synthetic-unresolved-1",
+        received_at=datetime(2026, 1, 15, 12, 0, tzinfo=UTC),
+        sender="forwarder@example.test",
+        subject="Synthetic notification",
+    )
+    raws.insert(summary, b"UNRESOLVED_PRIVATE_RAW_SENTINEL")
+    raw = raws.get("synthetic-unresolved-1")
+    payments.insert(
+        raw.id,
+        PaymentNotification(
+            provider="synthetic_provider",
+            sender_name="Taylor Example",
+            amount_cents=55500,
+            occurred_on=None,
+            memo=None,
+        ),
+    )
+
+    assert run_unresolved_payers(database_path) == 0
+
+    output = capsys.readouterr().out
+    assert "SENDER" in output
+    assert "Taylor Example" in output
+    assert "1" in output
+    assert "UNRESOLVED_PRIVATE_RAW_SENTINEL" not in output
+    assert "$555.00" not in output

@@ -36,6 +36,28 @@ class PaymentEventRecord:
     parsed_at: str
 
 
+@dataclass(frozen=True)
+class PaymentSenderCount:
+    sender_name: str
+    count: int
+
+
+@dataclass(frozen=True)
+class PayerRecord:
+    id: int
+    display_name: str
+    created_at: str
+
+
+@dataclass(frozen=True)
+class PayerAliasRecord:
+    id: int
+    payer_id: int
+    alias: str
+    normalized_alias: str
+    created_at: str
+
+
 class SQLiteRawEmailRepository:
     """Persist raw emails in a local SQLite database."""
 
@@ -212,3 +234,106 @@ class SQLitePaymentEventRepository:
         with self._connect() as connection:
             row = connection.execute("SELECT COUNT(*) AS count FROM payment_events").fetchone()
         return int(row["count"])
+
+    def list_sender_counts(self) -> list[PaymentSenderCount]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT sender_name, COUNT(*) AS count
+                FROM payment_events
+                GROUP BY sender_name
+                ORDER BY sender_name COLLATE NOCASE, sender_name
+                """
+            ).fetchall()
+        return [PaymentSenderCount(**dict(row)) for row in rows]
+
+
+class SQLitePayerRepository:
+    """Persist canonical payer identities and their observed aliases."""
+
+    def __init__(self, database_path: Path) -> None:
+        self.database_path = database_path
+        self.database_path.parent.mkdir(parents=True, exist_ok=True)
+        self._initialize_schema()
+
+    def _connect(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(self.database_path)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        return connection
+
+    def _initialize_schema(self) -> None:
+        with self._connect() as connection:
+            connection.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS payers (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    display_name TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS payer_aliases (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    payer_id INTEGER NOT NULL,
+                    alias TEXT NOT NULL,
+                    normalized_alias TEXT NOT NULL UNIQUE,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (payer_id)
+                        REFERENCES payers(id)
+                        ON DELETE RESTRICT
+                );
+                """
+            )
+
+    def create_payer(self, display_name: str) -> PayerRecord:
+        created_at = datetime.now(UTC).isoformat()
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "INSERT INTO payers (display_name, created_at) VALUES (?, ?)",
+                (display_name, created_at),
+            )
+            payer_id = int(cursor.lastrowid)
+        return PayerRecord(payer_id, display_name, created_at)
+
+    def get_payer(self, payer_id: int) -> PayerRecord | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM payers WHERE id = ?", (payer_id,)
+            ).fetchone()
+        return PayerRecord(**dict(row)) if row else None
+
+    def list_payers(self) -> list[PayerRecord]:
+        with self._connect() as connection:
+            rows = connection.execute("SELECT * FROM payers ORDER BY id").fetchall()
+        return [PayerRecord(**dict(row)) for row in rows]
+
+    def add_alias(
+        self, payer_id: int, alias: str, normalized_alias: str
+    ) -> PayerAliasRecord:
+        created_at = datetime.now(UTC).isoformat()
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO payer_aliases (payer_id, alias, normalized_alias, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (payer_id, alias, normalized_alias, created_at),
+            )
+            alias_id = int(cursor.lastrowid)
+        return PayerAliasRecord(alias_id, payer_id, alias, normalized_alias, created_at)
+
+    def get_alias(self, normalized_alias: str) -> PayerAliasRecord | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM payer_aliases WHERE normalized_alias = ?",
+                (normalized_alias,),
+            ).fetchone()
+        return PayerAliasRecord(**dict(row)) if row else None
+
+    def list_aliases(self, payer_id: int) -> list[PayerAliasRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM payer_aliases WHERE payer_id = ? ORDER BY id",
+                (payer_id,),
+            ).fetchall()
+        return [PayerAliasRecord(**dict(row)) for row in rows]
