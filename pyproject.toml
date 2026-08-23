@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "autorentledger"
 version = "0.1.0"
-description = "Local payment ingestion and payer identity resolution for AutoRentLedger"
+description = "Local payment ingestion, payer identity, and rent accounts for AutoRentLedger"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

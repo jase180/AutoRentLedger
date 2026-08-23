@@ -1,13 +1,13 @@
 # AutoRentLedger
 
-AutoRentLedger Milestone 5 is a small, read-only Gmail ingestion and deterministic payment-event
-pipeline with explicit payer identity resolution. It stores complete original raw MIME bytes in
-local SQLite, converts supported Zelle notifications into source-neutral payment notifications,
-persists successful results as derived payment events, and maps observed sender aliases to
-user-managed payer identities at read time.
+AutoRentLedger Milestone 6 is a small, read-only Gmail ingestion and deterministic payment-event
+pipeline with explicit payer identity and rent-account relationships. It stores complete original
+raw MIME bytes in local SQLite, derives payment events, maps observed sender aliases to
+user-managed payer identities, and records which units and rent accounts those payers are
+associated with.
 
 It does not modify messages or labels, print message bodies, match tenants, assign units or rent
-periods, infer payer identities, reconcile rent, or implement accounting logic.
+periods, allocate payments, reconcile rent, or implement accounting logic.
 
 ## Requirements
 
@@ -55,6 +55,12 @@ autorentledger payer alias-add 1 "ALEX Q EXAMPLE"
 autorentledger payer aliases 1
 autorentledger payers
 autorentledger unresolved-payers
+autorentledger unit add "Unit A"
+autorentledger units
+autorentledger rent-account add --unit 1 --name "Synthetic Household"
+autorentledger rent-account add-payer --account 1 --payer 1
+autorentledger rent-accounts
+autorentledger rent-account show 1
 ```
 
 macOS or Linux:
@@ -74,6 +80,12 @@ autorentledger payer alias-add 1 'ALEX Q EXAMPLE'
 autorentledger payer aliases 1
 autorentledger payers
 autorentledger unresolved-payers
+autorentledger unit add 'Unit A'
+autorentledger units
+autorentledger rent-account add --unit 1 --name 'Synthetic Household'
+autorentledger rent-account add-payer --account 1 --payer 1
+autorentledger rent-accounts
+autorentledger rent-account show 1
 ```
 
 The default Gmail query is `subject:zelle`. Override it when your bank uses different wording:
@@ -233,6 +245,56 @@ payer_aliases
   created_at        UTC ISO timestamp
 ```
 
+## Manage units and rent accounts
+
+Create and list the local unit inventory:
+
+```powershell
+autorentledger unit add "Unit A"
+autorentledger units
+```
+
+Create a rent account for an existing unit, with optional ISO calendar dates:
+
+```powershell
+autorentledger rent-account add `
+  --unit 1 `
+  --name "Synthetic Household" `
+  --active-from 2026-05-01
+autorentledger rent-accounts
+```
+
+Associate existing payer identities and inspect the account:
+
+```powershell
+autorentledger rent-account add-payer --account 1 --payer 1
+autorentledger rent-account show 1
+```
+
+The association is domain interpretation only. It does not add a rent-account ID to a payment
+event, allocate a payment, create an obligation, or calculate a balance.
+
+```text
+units
+  id                integer primary key
+  label             unique nonempty text
+  created_at        UTC ISO timestamp
+
+rent_accounts
+  id                integer primary key
+  unit_id           foreign key -> units.id ON DELETE RESTRICT
+  display_name      nonempty text
+  active_from       nullable ISO date
+  active_to         nullable ISO date, not before active_from
+  created_at        UTC ISO timestamp
+
+rent_account_payers
+  rent_account_id   foreign key -> rent_accounts.id ON DELETE RESTRICT
+  payer_id          foreign key -> payers.id ON DELETE RESTRICT
+  created_at        UTC ISO timestamp
+  unique            (rent_account_id, payer_id)
+```
+
 ## Development checks
 
 ```powershell
@@ -252,6 +314,8 @@ src/autorentledger/
   identity/
     normalization.py # conservative sender-alias normalization
     service.py       # read-time payer resolution and unresolved inspection
+  rental/
+    service.py       # unit, account, date, and association validation
   parsing/
     mime.py         # source-neutral MIME text decoding
     models.py       # normalized result and structured parse failure
@@ -261,7 +325,7 @@ src/autorentledger/
     values.py       # shared exact value normalization
   ingestion.py      # source-to-repository idempotent workflow
   processing.py     # idempotent raw-email to payment-event workflow
-  cli.py            # ingestion, processing, payment, and payer commands
+  cli.py            # ingestion, payment, identity, unit, and account commands
 tests/              # synthetic adapter, storage, service, and CLI tests
 pyproject.toml      # package, command, dependencies, and tool configuration
 ```
@@ -270,12 +334,13 @@ The ingestion service depends on the provider-neutral `EmailSource` interface an
 repository. Parsing accepts raw MIME bytes and has no Gmail dependency. Processing connects the
 parser to the payment-event repository. Google SDK response objects remain inside the Gmail
 adapter, and SQLite has no provider-specific parsing knowledge. Identity resolution depends only
-on payment sender values and locally managed payer aliases.
+on payment sender values and locally managed payer aliases. Rental-domain logic depends on payer
+identities and rental storage, never Gmail, MIME parsing, or payment allocation.
 
 ## Intentionally out of scope
 
-- Tenant mapping, unit assignments, leases, rent obligations, payment allocation, reconciliation,
-  or accounting
+- Tenant legal status, formal leases, monthly rent obligations, deposits, payment allocation,
+  balances, reconciliation, or paid/partial/unpaid status
 - Fuzzy, phonetic, nickname, typo-correcting, or AI-assisted identity matching
 - Gmail writes, label creation, or label changes
 - Web UI, visualization, cloud deployment, or background processing

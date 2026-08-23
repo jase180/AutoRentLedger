@@ -15,6 +15,12 @@ from autorentledger.cli import (
     run_payer_listing,
     run_payment_listing,
     run_processing,
+    run_rent_account_add,
+    run_rent_account_add_payer,
+    run_rent_account_listing,
+    run_rent_account_show,
+    run_unit_add,
+    run_unit_listing,
     run_unresolved_payers,
 )
 from autorentledger.email import EmailMessageSummary
@@ -23,6 +29,7 @@ from autorentledger.storage import (
     SQLitePayerRepository,
     SQLitePaymentEventRepository,
     SQLiteRawEmailRepository,
+    SQLiteRentalRepository,
 )
 
 
@@ -80,6 +87,26 @@ def test_identity_command_defaults():
     assert aliases.database == DEFAULT_DATABASE
     assert payers.database == DEFAULT_DATABASE
     assert unresolved.database == DEFAULT_DATABASE
+
+
+def test_rental_command_defaults():
+    unit_add = build_parser().parse_args(["unit", "add", "Unit A"])
+    units = build_parser().parse_args(["units"])
+    account_add = build_parser().parse_args(
+        ["rent-account", "add", "--unit", "1", "--name", "Synthetic Household"]
+    )
+    add_payer = build_parser().parse_args(
+        ["rent-account", "add-payer", "--account", "1", "--payer", "2"]
+    )
+    show = build_parser().parse_args(["rent-account", "show", "1"])
+    accounts = build_parser().parse_args(["rent-accounts"])
+
+    assert unit_add.database == DEFAULT_DATABASE
+    assert units.database == DEFAULT_DATABASE
+    assert account_add.database == DEFAULT_DATABASE
+    assert add_payer.database == DEFAULT_DATABASE
+    assert show.database == DEFAULT_DATABASE
+    assert accounts.database == DEFAULT_DATABASE
 
 
 def test_print_search_results_uses_source_neutral_interface(capsys):
@@ -273,3 +300,91 @@ def test_unresolved_cli_counts_senders_and_never_prints_raw_mime(tmp_path, capsy
     assert "1" in output
     assert "UNRESOLVED_PRIVATE_RAW_SENTINEL" not in output
     assert "$555.00" not in output
+
+
+def test_rental_cli_workflow_and_inspection_are_privacy_safe(tmp_path, capsys):
+    database_path = tmp_path / "rental-cli.sqlite3"
+    payers = SQLitePayerRepository(database_path)
+    alex = payers.create_payer("Alex Example")
+    morgan = payers.create_payer("Morgan Example")
+    raws = SQLiteRawEmailRepository(database_path)
+    payments = SQLitePaymentEventRepository(database_path)
+    raws.insert(
+        EmailMessageSummary(
+            message_id="synthetic-rental-cli-1",
+            received_at=datetime(2026, 5, 1, 12, 0, tzinfo=UTC),
+            sender="forwarder@example.test",
+            subject="Synthetic notification",
+        ),
+        b"RENTAL_PRIVATE_RAW_SENTINEL",
+    )
+    raw = raws.get("synthetic-rental-cli-1")
+    payments.insert(
+        raw.id,
+        PaymentNotification(
+            provider="synthetic_provider",
+            sender_name="Alex Example",
+            amount_cents=98765,
+            occurred_on=None,
+            memo=None,
+        ),
+    )
+
+    assert run_unit_add(database_path, "Unit A") == 0
+    assert run_unit_add(database_path, "Unit B") == 0
+    assert run_unit_listing(database_path) == 0
+    assert (
+        run_rent_account_add(
+            database_path, 1, "Synthetic Household", "2026-05-01", None
+        )
+        == 0
+    )
+    assert run_rent_account_add(database_path, 2, "Second Household", None, None) == 0
+    assert run_rent_account_add_payer(database_path, 1, alex.id) == 0
+    assert run_rent_account_add_payer(database_path, 1, morgan.id) == 0
+    assert run_rent_account_add_payer(database_path, 2, alex.id) == 0
+    assert run_rent_account_add_payer(database_path, 1, alex.id) == 1
+    assert run_rent_account_listing(database_path) == 0
+    assert run_rent_account_show(database_path, 1) == 0
+
+    output = capsys.readouterr().out
+    assert "Created unit 1: Unit A" in output
+    assert "Created unit 2: Unit B" in output
+    assert "Synthetic Household" in output
+    assert "Payer 1 is already associated with rent account 1." in output
+    assert "Rent account 1" in output
+    assert "Unit: Unit A" in output
+    assert "Active from: 2026-05-01" in output
+    assert "- Alex Example" in output
+    assert "- Morgan Example" in output
+    assert "RENTAL_PRIVATE_RAW_SENTINEL" not in output
+    assert "$987.65" not in output
+    assert SQLiteRentalRepository(database_path).list_payer_accounts(alex.id)[1].id == 2
+
+
+def test_rental_cli_rejects_invalid_references_and_dates(tmp_path, capsys):
+    database_path = tmp_path / "rental-invalid.sqlite3"
+    payers = SQLitePayerRepository(database_path)
+    payer = payers.create_payer("Alex Example")
+    assert run_unit_add(database_path, "Unit A") == 0
+
+    assert run_rent_account_add(database_path, 999, "Synthetic Household", None, None) == 1
+    assert (
+        run_rent_account_add(
+            database_path,
+            1,
+            "Synthetic Household",
+            "2027-04-30",
+            "2026-05-01",
+        )
+        == 1
+    )
+    assert run_rent_account_add(database_path, 1, "Synthetic Household", None, None) == 0
+    assert run_rent_account_add_payer(database_path, 999, payer.id) == 1
+    assert run_rent_account_add_payer(database_path, 1, 999) == 1
+
+    output = capsys.readouterr().out
+    assert "Unit 999 does not exist." in output
+    assert "Active-to date must not be before active-from date." in output
+    assert "Rent account 999 does not exist." in output
+    assert "Payer 999 does not exist." in output

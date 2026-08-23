@@ -6,9 +6,14 @@ from autorentledger.storage.sqlite import (
     PaymentEventRecord,
     PaymentSenderCount,
     RawEmailRecord,
+    RentAccountPayerRecord,
+    RentAccountRecord,
+    RentAccountSummary,
     SQLitePayerRepository,
     SQLitePaymentEventRepository,
     SQLiteRawEmailRepository,
+    SQLiteRentalRepository,
+    UnitRecord,
 )
 
 __all__ = [
@@ -17,7 +22,12 @@ __all__ = [
     "PaymentEventRecord",
     "PaymentSenderCount",
     "RawEmailRecord",
+    "RentAccountPayerRecord",
+    "RentAccountRecord",
+    "RentAccountSummary",
     "SQLitePayerRepository",
     "SQLitePaymentEventRepository",
     "SQLiteRawEmailRepository",
+    "SQLiteRentalRepository",
+    "UnitRecord",
 ]

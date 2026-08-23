@@ -13,10 +13,20 @@ from autorentledger.identity import normalize_alias, unresolved_senders
 from autorentledger.ingestion import ingest_raw_emails
 from autorentledger.parsing import NotificationParseError, parse_payment_notification
 from autorentledger.processing import process_raw_emails
+from autorentledger.rental import (
+    DuplicateAssociationError,
+    DuplicateUnitError,
+    RentalEntityNotFoundError,
+    RentalValidationError,
+    associate_payer,
+    create_rent_account,
+    create_unit,
+)
 from autorentledger.storage.sqlite import (
     SQLitePayerRepository,
     SQLitePaymentEventRepository,
     SQLiteRawEmailRepository,
+    SQLiteRentalRepository,
 )
 
 DEFAULT_QUERY = "subject:zelle"
@@ -72,6 +82,40 @@ def build_parser() -> argparse.ArgumentParser:
         "unresolved-payers", help="list payment senders without a payer alias"
     )
     unresolved.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+    unit = subparsers.add_parser("unit", help="manage rental units")
+    unit_commands = unit.add_subparsers(dest="unit_command", required=True)
+    unit_add = unit_commands.add_parser("add", help="create a unit")
+    unit_add.add_argument("label")
+    unit_add.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+    units = subparsers.add_parser("units", help="list rental units")
+    units.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+    rent_account = subparsers.add_parser("rent-account", help="manage rent accounts")
+    rent_account_commands = rent_account.add_subparsers(
+        dest="rent_account_command", required=True
+    )
+    account_add = rent_account_commands.add_parser("add", help="create a rent account")
+    account_add.add_argument("--unit", type=int, required=True)
+    account_add.add_argument("--name", required=True)
+    account_add.add_argument("--active-from")
+    account_add.add_argument("--active-to")
+    account_add.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+    account_add_payer = rent_account_commands.add_parser(
+        "add-payer", help="associate a payer with a rent account"
+    )
+    account_add_payer.add_argument("--account", type=int, required=True)
+    account_add_payer.add_argument("--payer", type=int, required=True)
+    account_add_payer.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+    account_show = rent_account_commands.add_parser("show", help="inspect a rent account")
+    account_show.add_argument("account_id", type=int)
+    account_show.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+    rent_accounts = subparsers.add_parser("rent-accounts", help="list rent accounts")
+    rent_accounts.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
     return parser
 
 
@@ -241,6 +285,91 @@ def run_unresolved_payers(database_path: Path) -> int:
     return 0
 
 
+def run_unit_add(database_path: Path, label: str) -> int:
+    repository = SQLiteRentalRepository(database_path)
+    try:
+        unit = create_unit(repository, label)
+    except (DuplicateUnitError, RentalValidationError) as error:
+        print(error)
+        return 1
+    print(f"Created unit {unit.id}: {unit.label}")
+    return 0
+
+
+def run_unit_listing(database_path: Path) -> int:
+    units = SQLiteRentalRepository(database_path).list_units()
+    print(f"{'ID':<4} UNIT")
+    for unit in units:
+        print(f"{unit.id:<4} {unit.label}")
+    return 0
+
+
+def run_rent_account_add(
+    database_path: Path,
+    unit_id: int,
+    name: str,
+    active_from: str | None,
+    active_to: str | None,
+) -> int:
+    repository = SQLiteRentalRepository(database_path)
+    try:
+        account = create_rent_account(
+            repository, unit_id, name, active_from=active_from, active_to=active_to
+        )
+    except (RentalEntityNotFoundError, RentalValidationError) as error:
+        print(error)
+        return 1
+    print(f"Created rent account {account.id}: {account.display_name}")
+    return 0
+
+
+def run_rent_account_listing(database_path: Path) -> int:
+    accounts = SQLiteRentalRepository(database_path).list_rent_accounts()
+    print(f"{'ID':<4} {'UNIT':<12} {'ACCOUNT':<24} {'ACTIVE FROM':<12} ACTIVE TO")
+    for account in accounts:
+        active_from = account.active_from or "-"
+        active_to = account.active_to or "-"
+        print(
+            f"{account.id:<4} {account.unit_label:<12} {account.display_name:<24} "
+            f"{active_from:<12} {active_to}"
+        )
+    return 0
+
+
+def run_rent_account_add_payer(database_path: Path, account_id: int, payer_id: int) -> int:
+    rentals = SQLiteRentalRepository(database_path)
+    payers = SQLitePayerRepository(database_path)
+    try:
+        associate_payer(rentals, payers, account_id, payer_id)
+    except (DuplicateAssociationError, RentalEntityNotFoundError) as error:
+        print(error)
+        return 1
+    payer = payers.get_payer(payer_id)
+    print(
+        f"Associated payer {payer.id} ({payer.display_name}) "
+        f"with rent account {account_id}."
+    )
+    return 0
+
+
+def run_rent_account_show(database_path: Path, account_id: int) -> int:
+    repository = SQLiteRentalRepository(database_path)
+    account = repository.get_rent_account_summary(account_id)
+    if account is None:
+        print(f"Rent account {account_id} does not exist.")
+        return 1
+
+    print(f"Rent account {account.id}")
+    print(f"Unit: {account.unit_label}")
+    print(f"Name: {account.display_name}")
+    print(f"Active from: {account.active_from or '-'}")
+    print(f"Active to: {account.active_to or '-'}")
+    print("Payers:")
+    for payer in repository.list_account_payers(account_id):
+        print(f"- {payer.display_name}")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "search":
@@ -267,6 +396,28 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_payer_listing(args.database)
     if args.command == "unresolved-payers":
         return run_unresolved_payers(args.database)
+    if args.command == "unit":
+        if args.unit_command == "add":
+            return run_unit_add(args.database, args.label)
+        raise AssertionError(f"Unhandled unit command: {args.unit_command}")
+    if args.command == "units":
+        return run_unit_listing(args.database)
+    if args.command == "rent-account":
+        if args.rent_account_command == "add":
+            return run_rent_account_add(
+                args.database,
+                args.unit,
+                args.name,
+                args.active_from,
+                args.active_to,
+            )
+        if args.rent_account_command == "add-payer":
+            return run_rent_account_add_payer(args.database, args.account, args.payer)
+        if args.rent_account_command == "show":
+            return run_rent_account_show(args.database, args.account_id)
+        raise AssertionError(f"Unhandled rent-account command: {args.rent_account_command}")
+    if args.command == "rent-accounts":
+        return run_rent_account_listing(args.database)
     raise AssertionError(f"Unhandled command: {args.command}")
 
 
