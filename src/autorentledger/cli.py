@@ -11,6 +11,12 @@ from autorentledger.email.gmail import GmailSource
 from autorentledger.email.source import EmailSource
 from autorentledger.identity import normalize_alias, unresolved_senders
 from autorentledger.ingestion import ingest_raw_emails
+from autorentledger.obligations import (
+    DuplicateObligationError,
+    ObligationAccountNotFoundError,
+    ObligationValidationError,
+    create_obligation,
+)
 from autorentledger.parsing import NotificationParseError, parse_payment_notification
 from autorentledger.processing import process_raw_emails
 from autorentledger.rental import (
@@ -23,6 +29,7 @@ from autorentledger.rental import (
     create_unit,
 )
 from autorentledger.storage.sqlite import (
+    SQLiteObligationRepository,
     SQLitePayerRepository,
     SQLitePaymentEventRepository,
     SQLiteRawEmailRepository,
@@ -116,6 +123,23 @@ def build_parser() -> argparse.ArgumentParser:
 
     rent_accounts = subparsers.add_parser("rent-accounts", help="list rent accounts")
     rent_accounts.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+    obligation = subparsers.add_parser("obligation", help="manage monthly rent obligations")
+    obligation_commands = obligation.add_subparsers(dest="obligation_command", required=True)
+    obligation_add = obligation_commands.add_parser("add", help="create a rent obligation")
+    obligation_add.add_argument("--account", type=int, required=True)
+    obligation_add.add_argument("--period", required=True)
+    obligation_add.add_argument("--amount", required=True)
+    obligation_add.add_argument("--due-date", required=True)
+    obligation_add.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+    obligation_show = obligation_commands.add_parser("show", help="inspect a rent obligation")
+    obligation_show.add_argument("obligation_id", type=int)
+    obligation_show.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+    obligations = subparsers.add_parser("obligations", help="list rent obligations")
+    obligations.add_argument("--account", type=int)
+    obligations.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
     return parser
 
 
@@ -370,6 +394,67 @@ def run_rent_account_show(database_path: Path, account_id: int) -> int:
     return 0
 
 
+def run_obligation_add(
+    database_path: Path,
+    account_id: int,
+    period: str,
+    amount: str,
+    due_date: str,
+) -> int:
+    rentals = SQLiteRentalRepository(database_path)
+    obligations = SQLiteObligationRepository(database_path)
+    try:
+        obligation = create_obligation(
+            obligations,
+            rentals,
+            account_id,
+            period,
+            amount,
+            due_date,
+        )
+    except (
+        DuplicateObligationError,
+        ObligationAccountNotFoundError,
+        ObligationValidationError,
+    ) as error:
+        print(error)
+        return 1
+    print(
+        f"Created obligation {obligation.id}: {obligation.period} "
+        f"{_format_currency(obligation.amount_cents)}"
+    )
+    return 0
+
+
+def run_obligation_listing(database_path: Path, account_id: int | None = None) -> int:
+    SQLiteRentalRepository(database_path)
+    obligations = SQLiteObligationRepository(database_path).list_summaries(account_id)
+    print(f"{'ID':<4} {'PERIOD':<8} {'UNIT':<12} {'ACCOUNT':<24} {'DUE':<10} {'AMOUNT':>12}")
+    for obligation in obligations:
+        print(
+            f"{obligation.id:<4} {obligation.period:<8} {obligation.unit_label:<12} "
+            f"{obligation.account_display_name:<24} {obligation.due_date:<10} "
+            f"{_format_currency(obligation.amount_cents):>12}"
+        )
+    return 0
+
+
+def run_obligation_show(database_path: Path, obligation_id: int) -> int:
+    SQLiteRentalRepository(database_path)
+    obligation = SQLiteObligationRepository(database_path).get_summary(obligation_id)
+    if obligation is None:
+        print(f"Rent obligation {obligation_id} does not exist.")
+        return 1
+
+    print(f"Rent obligation {obligation.id}")
+    print(f"Account: {obligation.account_display_name}")
+    print(f"Unit: {obligation.unit_label}")
+    print(f"Period: {obligation.period}")
+    print(f"Amount: {_format_currency(obligation.amount_cents)}")
+    print(f"Due date: {obligation.due_date}")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "search":
@@ -418,6 +503,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise AssertionError(f"Unhandled rent-account command: {args.rent_account_command}")
     if args.command == "rent-accounts":
         return run_rent_account_listing(args.database)
+    if args.command == "obligation":
+        if args.obligation_command == "add":
+            return run_obligation_add(
+                args.database,
+                args.account,
+                args.period,
+                args.amount,
+                args.due_date,
+            )
+        if args.obligation_command == "show":
+            return run_obligation_show(args.database, args.obligation_id)
+        raise AssertionError(f"Unhandled obligation command: {args.obligation_command}")
+    if args.command == "obligations":
+        return run_obligation_listing(args.database, args.account)
     raise AssertionError(f"Unhandled command: {args.command}")
 
 

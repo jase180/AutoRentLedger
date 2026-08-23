@@ -1,13 +1,13 @@
 # AutoRentLedger
 
-AutoRentLedger Milestone 6 is a small, read-only Gmail ingestion and deterministic payment-event
-pipeline with explicit payer identity and rent-account relationships. It stores complete original
-raw MIME bytes in local SQLite, derives payment events, maps observed sender aliases to
-user-managed payer identities, and records which units and rent accounts those payers are
-associated with.
+AutoRentLedger Milestone 7 is a small, read-only Gmail ingestion and deterministic payment-event
+pipeline with explicit payer identities, rent-account relationships, and manually created monthly
+rent obligations. It stores complete original raw MIME bytes in local SQLite while keeping
+observed payments, current identity interpretation, rental relationships, and debt records
+separate.
 
 It does not modify messages or labels, print message bodies, match tenants, assign units or rent
-periods, allocate payments, reconcile rent, or implement accounting logic.
+periods automatically, allocate payments, reconcile balances, or calculate payment status.
 
 ## Requirements
 
@@ -61,6 +61,9 @@ autorentledger rent-account add --unit 1 --name "Synthetic Household"
 autorentledger rent-account add-payer --account 1 --payer 1
 autorentledger rent-accounts
 autorentledger rent-account show 1
+autorentledger obligation add --account 1 --period 2026-08 --amount 1234.56 --due-date 2026-08-01
+autorentledger obligations
+autorentledger obligation show 1
 ```
 
 macOS or Linux:
@@ -86,6 +89,9 @@ autorentledger rent-account add --unit 1 --name 'Synthetic Household'
 autorentledger rent-account add-payer --account 1 --payer 1
 autorentledger rent-accounts
 autorentledger rent-account show 1
+autorentledger obligation add --account 1 --period 2026-08 --amount 1234.56 --due-date 2026-08-01
+autorentledger obligations
+autorentledger obligation show 1
 ```
 
 The default Gmail query is `subject:zelle`. Override it when your bank uses different wording:
@@ -272,7 +278,7 @@ autorentledger rent-account show 1
 ```
 
 The association is domain interpretation only. It does not add a rent-account ID to a payment
-event, allocate a payment, create an obligation, or calculate a balance.
+event, allocate a payment, automatically create an obligation, or calculate a balance.
 
 ```text
 units
@@ -293,6 +299,46 @@ rent_account_payers
   payer_id          foreign key -> payers.id ON DELETE RESTRICT
   created_at        UTC ISO timestamp
   unique            (rent_account_id, payer_id)
+```
+
+## Manage monthly rent obligations
+
+Create one explicit obligation for one account and calendar month:
+
+```powershell
+autorentledger obligation add `
+  --account 1 `
+  --period 2026-08 `
+  --amount 1234.56 `
+  --due-date 2026-08-01
+```
+
+List all obligations, optionally filtered to one rent account, and inspect one obligation:
+
+```powershell
+autorentledger obligations
+autorentledger obligations --account 1
+autorentledger obligation show 1
+```
+
+Periods must use canonical `YYYY-MM`, amounts are parsed directly into positive integer cents
+without binary floating point, and due dates must use `YYYY-MM-DD`. The account must overlap at
+least one day of the requested month. Due dates are explicit and are not required to fall inside
+the obligation month.
+
+Obligations record only what was owed. They do not reference payment events, track amounts paid,
+calculate balances, or expose paid/partial/unpaid status. Each obligation is created manually;
+there is no recurring schedule or automatic generation.
+
+```text
+rent_obligations
+  id                integer primary key
+  rent_account_id   foreign key -> rent_accounts.id ON DELETE RESTRICT
+  period            canonical YYYY-MM
+  amount_cents      positive integer
+  due_date          ISO date
+  created_at        UTC ISO timestamp
+  unique            (rent_account_id, period)
 ```
 
 ## Development checks
@@ -316,6 +362,8 @@ src/autorentledger/
     service.py       # read-time payer resolution and unresolved inspection
   rental/
     service.py       # unit, account, date, and association validation
+  obligations/
+    service.py       # period, currency, due-date, and active-range validation
   parsing/
     mime.py         # source-neutral MIME text decoding
     models.py       # normalized result and structured parse failure
@@ -325,7 +373,7 @@ src/autorentledger/
     values.py       # shared exact value normalization
   ingestion.py      # source-to-repository idempotent workflow
   processing.py     # idempotent raw-email to payment-event workflow
-  cli.py            # ingestion, payment, identity, unit, and account commands
+  cli.py            # ingestion, payment, rental, and obligation commands
 tests/              # synthetic adapter, storage, service, and CLI tests
 pyproject.toml      # package, command, dependencies, and tool configuration
 ```
@@ -336,11 +384,13 @@ parser to the payment-event repository. Google SDK response objects remain insid
 adapter, and SQLite has no provider-specific parsing knowledge. Identity resolution depends only
 on payment sender values and locally managed payer aliases. Rental-domain logic depends on payer
 identities and rental storage, never Gmail, MIME parsing, or payment allocation.
+Obligation logic depends only on rent-account records and obligation storage; it never interprets
+or mutates payment events.
 
 ## Intentionally out of scope
 
-- Tenant legal status, formal leases, monthly rent obligations, deposits, payment allocation,
-  balances, reconciliation, or paid/partial/unpaid status
+- Tenant legal status, formal leases, recurring obligation generation, proration, deposits, late
+  fees, payment allocation, balances, reconciliation, or paid/partial/unpaid status
 - Fuzzy, phonetic, nickname, typo-correcting, or AI-assisted identity matching
 - Gmail writes, label creation, or label changes
 - Web UI, visualization, cloud deployment, or background processing

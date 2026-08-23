@@ -93,6 +93,29 @@ class RentAccountPayerRecord:
     created_at: str
 
 
+@dataclass(frozen=True)
+class RentObligationRecord:
+    id: int
+    rent_account_id: int
+    period: str
+    amount_cents: int
+    due_date: str
+    created_at: str
+
+
+@dataclass(frozen=True)
+class RentObligationSummary:
+    id: int
+    rent_account_id: int
+    unit_id: int
+    unit_label: str
+    account_display_name: str
+    period: str
+    amount_cents: int
+    due_date: str
+    created_at: str
+
+
 class SQLiteRawEmailRepository:
     """Persist raw emails in a local SQLite database."""
 
@@ -584,3 +607,130 @@ class SQLiteRentalRepository:
                 (payer_id,),
             ).fetchall()
         return [RentAccountSummary(**dict(row)) for row in rows]
+
+
+class SQLiteObligationRepository:
+    """Persist manually created monthly rent obligations."""
+
+    def __init__(self, database_path: Path) -> None:
+        self.database_path = database_path
+        self.database_path.parent.mkdir(parents=True, exist_ok=True)
+        self._initialize_schema()
+
+    def _connect(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(self.database_path)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        return connection
+
+    def _initialize_schema(self) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS rent_obligations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    rent_account_id INTEGER NOT NULL,
+                    period TEXT NOT NULL,
+                    amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+                    due_date TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE (rent_account_id, period),
+                    FOREIGN KEY (rent_account_id)
+                        REFERENCES rent_accounts(id)
+                        ON DELETE RESTRICT
+                )
+                """
+            )
+
+    def create(
+        self,
+        rent_account_id: int,
+        period: str,
+        amount_cents: int,
+        due_date: date,
+    ) -> RentObligationRecord:
+        created_at = datetime.now(UTC).isoformat()
+        due_date_text = due_date.isoformat()
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO rent_obligations (
+                    rent_account_id, period, amount_cents, due_date, created_at
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (rent_account_id, period, amount_cents, due_date_text, created_at),
+            )
+            obligation_id = int(cursor.lastrowid)
+        return RentObligationRecord(
+            obligation_id,
+            rent_account_id,
+            period,
+            amount_cents,
+            due_date_text,
+            created_at,
+        )
+
+    def get(self, obligation_id: int) -> RentObligationRecord | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM rent_obligations WHERE id = ?", (obligation_id,)
+            ).fetchone()
+        return RentObligationRecord(**dict(row)) if row else None
+
+    def get_for_account_period(
+        self, rent_account_id: int, period: str
+    ) -> RentObligationRecord | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM rent_obligations
+                WHERE rent_account_id = ? AND period = ?
+                """,
+                (rent_account_id, period),
+            ).fetchone()
+        return RentObligationRecord(**dict(row)) if row else None
+
+    def get_summary(self, obligation_id: int) -> RentObligationSummary | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                self._summary_query("WHERE rent_obligations.id = ?"),
+                (obligation_id,),
+            ).fetchone()
+        return RentObligationSummary(**dict(row)) if row else None
+
+    def list_summaries(self, rent_account_id: int | None = None) -> list[RentObligationSummary]:
+        where_clause = ""
+        parameters: tuple[int, ...] = ()
+        if rent_account_id is not None:
+            where_clause = "WHERE rent_obligations.rent_account_id = ?"
+            parameters = (rent_account_id,)
+        with self._connect() as connection:
+            rows = connection.execute(
+                self._summary_query(where_clause) + " ORDER BY rent_obligations.id",
+                parameters,
+            ).fetchall()
+        return [RentObligationSummary(**dict(row)) for row in rows]
+
+    def count(self) -> int:
+        with self._connect() as connection:
+            row = connection.execute("SELECT COUNT(*) AS count FROM rent_obligations").fetchone()
+        return int(row["count"])
+
+    @staticmethod
+    def _summary_query(where_clause: str) -> str:
+        return f"""
+            SELECT
+                rent_obligations.id,
+                rent_obligations.rent_account_id,
+                rent_accounts.unit_id,
+                units.label AS unit_label,
+                rent_accounts.display_name AS account_display_name,
+                rent_obligations.period,
+                rent_obligations.amount_cents,
+                rent_obligations.due_date,
+                rent_obligations.created_at
+            FROM rent_obligations
+            JOIN rent_accounts ON rent_accounts.id = rent_obligations.rent_account_id
+            JOIN units ON units.id = rent_accounts.unit_id
+            {where_clause}
+        """

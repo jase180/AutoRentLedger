@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from email.message import EmailMessage
 from email.policy import SMTP
 
@@ -10,6 +10,9 @@ from autorentledger.cli import (
     run_alias_add,
     run_alias_listing,
     run_ingestion,
+    run_obligation_add,
+    run_obligation_listing,
+    run_obligation_show,
     run_parsing,
     run_payer_add,
     run_payer_listing,
@@ -26,6 +29,7 @@ from autorentledger.cli import (
 from autorentledger.email import EmailMessageSummary
 from autorentledger.parsing import PaymentNotification
 from autorentledger.storage import (
+    SQLiteObligationRepository,
     SQLitePayerRepository,
     SQLitePaymentEventRepository,
     SQLiteRawEmailRepository,
@@ -107,6 +111,30 @@ def test_rental_command_defaults():
     assert add_payer.database == DEFAULT_DATABASE
     assert show.database == DEFAULT_DATABASE
     assert accounts.database == DEFAULT_DATABASE
+
+
+def test_obligation_command_defaults():
+    add = build_parser().parse_args(
+        [
+            "obligation",
+            "add",
+            "--account",
+            "1",
+            "--period",
+            "2026-08",
+            "--amount",
+            "1234.56",
+            "--due-date",
+            "2026-08-01",
+        ]
+    )
+    show = build_parser().parse_args(["obligation", "show", "1"])
+    listing = build_parser().parse_args(["obligations", "--account", "1"])
+
+    assert add.database == DEFAULT_DATABASE
+    assert show.database == DEFAULT_DATABASE
+    assert listing.database == DEFAULT_DATABASE
+    assert listing.account == 1
 
 
 def test_print_search_results_uses_source_neutral_interface(capsys):
@@ -388,3 +416,97 @@ def test_rental_cli_rejects_invalid_references_and_dates(tmp_path, capsys):
     assert "Active-to date must not be before active-from date." in output
     assert "Rent account 999 does not exist." in output
     assert "Payer 999 does not exist." in output
+
+
+def test_obligation_cli_workflow_is_exact_and_privacy_safe(tmp_path, capsys):
+    database_path = tmp_path / "obligation-cli.sqlite3"
+    rentals = SQLiteRentalRepository(database_path)
+    unit = rentals.create_unit("Unit A")
+    account = rentals.create_rent_account(
+        unit.id,
+        "Synthetic Household",
+        date(2026, 8, 15),
+        date(2026, 12, 15),
+    )
+    raws = SQLiteRawEmailRepository(database_path)
+    payments = SQLitePaymentEventRepository(database_path)
+    raws.insert(
+        EmailMessageSummary(
+            message_id="synthetic-obligation-cli-1",
+            received_at=datetime(2026, 8, 15, 12, 0, tzinfo=UTC),
+            sender="forwarder@example.test",
+            subject="Synthetic notification",
+        ),
+        b"OBLIGATION_PRIVATE_RAW_SENTINEL",
+    )
+    raw = raws.get("synthetic-obligation-cli-1")
+    payments.insert(
+        raw.id,
+        PaymentNotification("synthetic_provider", "Alex Example", 98765, None, None),
+    )
+    payment_before = payments.list_all()
+
+    assert (
+        run_obligation_add(
+            database_path, account.id, "2026-08", "1234.56", "2026-08-01"
+        )
+        == 0
+    )
+    assert run_obligation_listing(database_path) == 0
+    assert run_obligation_listing(database_path, account.id) == 0
+    assert run_obligation_show(database_path, 1) == 0
+    assert (
+        run_obligation_add(
+            database_path, account.id, "2026-08", "999.00", "2026-08-02"
+        )
+        == 1
+    )
+
+    output = capsys.readouterr().out
+    assert "Created obligation 1: 2026-08 $1,234.56" in output
+    assert "Unit A" in output
+    assert "Synthetic Household" in output
+    assert "Rent obligation 1" in output
+    assert "Due date: 2026-08-01" in output
+    assert "Obligation already exists for rent account 1 and period 2026-08." in output
+    assert "OBLIGATION_PRIVATE_RAW_SENTINEL" not in output
+    assert "$987.65" not in output
+    assert payments.list_all() == payment_before
+    assert SQLiteObligationRepository(database_path).get(1).amount_cents == 123456
+
+
+def test_obligation_cli_rejects_invalid_inputs_and_active_range(tmp_path, capsys):
+    database_path = tmp_path / "obligation-invalid.sqlite3"
+    rentals = SQLiteRentalRepository(database_path)
+    unit = rentals.create_unit("Unit A")
+    account = rentals.create_rent_account(
+        unit.id,
+        "Synthetic Household",
+        date(2026, 9, 15),
+        None,
+    )
+
+    assert run_obligation_add(database_path, 999, "2026-09", "1234.56", "2026-09-01") == 1
+    assert run_obligation_add(database_path, account.id, "2026-9", "1234.56", "2026-09-01") == 1
+    assert run_obligation_add(database_path, account.id, "2026-09", "0", "2026-09-01") == 1
+    assert run_obligation_add(database_path, account.id, "2026-09", "-1", "2026-09-01") == 1
+    assert (
+        run_obligation_add(
+            database_path, account.id, "2026-09", "1234.56", "09/01/2026"
+        )
+        == 1
+    )
+    assert (
+        run_obligation_add(
+            database_path, account.id, "2026-08", "1234.56", "2026-08-01"
+        )
+        == 1
+    )
+
+    output = capsys.readouterr().out
+    assert "Rent account 999 does not exist." in output
+    assert "expected canonical YYYY-MM" in output
+    assert "Amount must be greater than zero." in output
+    assert "expected a positive decimal amount" in output
+    assert "expected YYYY-MM-DD" in output
+    assert "entirely before" in output
