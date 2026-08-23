@@ -7,6 +7,12 @@ import sqlite3
 from collections.abc import Sequence
 from pathlib import Path
 
+from autorentledger.allocations import (
+    AllocationNotFoundError,
+    AllocationValidationError,
+    create_allocation,
+    remove_allocation,
+)
 from autorentledger.email.gmail import GmailSource
 from autorentledger.email.source import EmailSource
 from autorentledger.identity import normalize_alias, unresolved_senders
@@ -29,6 +35,7 @@ from autorentledger.rental import (
     create_unit,
 )
 from autorentledger.storage.sqlite import (
+    SQLiteAllocationRepository,
     SQLiteObligationRepository,
     SQLitePayerRepository,
     SQLitePaymentEventRepository,
@@ -140,6 +147,23 @@ def build_parser() -> argparse.ArgumentParser:
     obligations = subparsers.add_parser("obligations", help="list rent obligations")
     obligations.add_argument("--account", type=int)
     obligations.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+    allocation = subparsers.add_parser("allocation", help="manage payment allocations")
+    allocation_commands = allocation.add_subparsers(dest="allocation_command", required=True)
+    allocation_add = allocation_commands.add_parser("add", help="create an allocation")
+    allocation_add.add_argument("--payment", type=int, required=True)
+    allocation_add.add_argument("--obligation", type=int, required=True)
+    allocation_add.add_argument("--amount", required=True)
+    allocation_add.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+    allocation_remove = allocation_commands.add_parser("remove", help="remove an allocation")
+    allocation_remove.add_argument("allocation_id", type=int)
+    allocation_remove.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+    allocations = subparsers.add_parser("allocations", help="list payment allocations")
+    allocations.add_argument("--payment", type=int)
+    allocations.add_argument("--obligation", type=int)
+    allocations.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
     return parser
 
 
@@ -455,6 +479,68 @@ def run_obligation_show(database_path: Path, obligation_id: int) -> int:
     return 0
 
 
+def _allocation_repository(database_path: Path) -> SQLiteAllocationRepository:
+    SQLiteRawEmailRepository(database_path)
+    SQLitePaymentEventRepository(database_path)
+    SQLiteRentalRepository(database_path)
+    SQLiteObligationRepository(database_path)
+    return SQLiteAllocationRepository(database_path)
+
+
+def run_allocation_add(
+    database_path: Path,
+    payment_event_id: int,
+    rent_obligation_id: int,
+    amount: str,
+) -> int:
+    repository = _allocation_repository(database_path)
+    try:
+        allocation = create_allocation(
+            repository,
+            payment_event_id,
+            rent_obligation_id,
+            amount,
+        )
+    except AllocationValidationError as error:
+        print(error)
+        return 1
+    print(
+        f"Created allocation {allocation.id}: {_format_currency(allocation.amount_cents)} "
+        f"from payment {allocation.payment_event_id} "
+        f"to obligation {allocation.rent_obligation_id}"
+    )
+    return 0
+
+
+def run_allocation_listing(
+    database_path: Path,
+    payment_event_id: int | None = None,
+    rent_obligation_id: int | None = None,
+) -> int:
+    allocations = _allocation_repository(database_path).list_summaries(
+        payment_event_id, rent_obligation_id
+    )
+    print(f"{'ID':<4} {'PAYMENT':<9} {'OBLIGATION':<12} {'PERIOD':<8} {'UNIT':<12} {'AMOUNT':>12}")
+    for allocation in allocations:
+        print(
+            f"{allocation.id:<4} {allocation.payment_event_id:<9} "
+            f"{allocation.rent_obligation_id:<12} {allocation.period:<8} "
+            f"{allocation.unit_label:<12} {_format_currency(allocation.amount_cents):>12}"
+        )
+    return 0
+
+
+def run_allocation_remove(database_path: Path, allocation_id: int) -> int:
+    repository = _allocation_repository(database_path)
+    try:
+        remove_allocation(repository, allocation_id)
+    except AllocationNotFoundError as error:
+        print(error)
+        return 1
+    print(f"Removed allocation {allocation_id}.")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "search":
@@ -517,6 +603,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise AssertionError(f"Unhandled obligation command: {args.obligation_command}")
     if args.command == "obligations":
         return run_obligation_listing(args.database, args.account)
+    if args.command == "allocation":
+        if args.allocation_command == "add":
+            return run_allocation_add(
+                args.database,
+                args.payment,
+                args.obligation,
+                args.amount,
+            )
+        if args.allocation_command == "remove":
+            return run_allocation_remove(args.database, args.allocation_id)
+        raise AssertionError(f"Unhandled allocation command: {args.allocation_command}")
+    if args.command == "allocations":
+        return run_allocation_listing(args.database, args.payment, args.obligation)
     raise AssertionError(f"Unhandled command: {args.command}")
 
 

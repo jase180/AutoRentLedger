@@ -9,6 +9,9 @@ from autorentledger.cli import (
     print_search_results,
     run_alias_add,
     run_alias_listing,
+    run_allocation_add,
+    run_allocation_listing,
+    run_allocation_remove,
     run_ingestion,
     run_obligation_add,
     run_obligation_listing,
@@ -29,6 +32,7 @@ from autorentledger.cli import (
 from autorentledger.email import EmailMessageSummary
 from autorentledger.parsing import PaymentNotification
 from autorentledger.storage import (
+    SQLiteAllocationRepository,
     SQLiteObligationRepository,
     SQLitePayerRepository,
     SQLitePaymentEventRepository,
@@ -135,6 +139,31 @@ def test_obligation_command_defaults():
     assert show.database == DEFAULT_DATABASE
     assert listing.database == DEFAULT_DATABASE
     assert listing.account == 1
+
+
+def test_allocation_command_defaults():
+    add = build_parser().parse_args(
+        [
+            "allocation",
+            "add",
+            "--payment",
+            "1",
+            "--obligation",
+            "2",
+            "--amount",
+            "675.00",
+        ]
+    )
+    remove = build_parser().parse_args(["allocation", "remove", "3"])
+    listing = build_parser().parse_args(
+        ["allocations", "--payment", "1", "--obligation", "2"]
+    )
+
+    assert add.database == DEFAULT_DATABASE
+    assert remove.database == DEFAULT_DATABASE
+    assert listing.database == DEFAULT_DATABASE
+    assert listing.payment == 1
+    assert listing.obligation == 2
 
 
 def test_print_search_results_uses_source_neutral_interface(capsys):
@@ -510,3 +539,50 @@ def test_obligation_cli_rejects_invalid_inputs_and_active_range(tmp_path, capsys
     assert "expected a positive decimal amount" in output
     assert "expected YYYY-MM-DD" in output
     assert "entirely before" in output
+
+
+def test_allocation_cli_add_list_remove_and_privacy(tmp_path, capsys):
+    database_path = tmp_path / "allocation-cli.sqlite3"
+    raws = SQLiteRawEmailRepository(database_path)
+    payments = SQLitePaymentEventRepository(database_path)
+    rentals = SQLiteRentalRepository(database_path)
+    obligations = SQLiteObligationRepository(database_path)
+    raws.insert(
+        EmailMessageSummary(
+            message_id="synthetic-allocation-cli-1",
+            received_at=datetime(2026, 8, 1, 12, 0, tzinfo=UTC),
+            sender="forwarder@example.test",
+            subject="Synthetic notification",
+        ),
+        b"ALLOCATION_PRIVATE_RAW_SENTINEL",
+    )
+    raw = raws.get("synthetic-allocation-cli-1")
+    payments.insert(
+        raw.id,
+        PaymentNotification("synthetic_provider", "Alex Example", 150000, None, None),
+    )
+    payment = payments.get_by_raw_email_id(raw.id)
+    unit = rentals.create_unit("Unit A")
+    account = rentals.create_rent_account(unit.id, "Synthetic Household", None, None)
+    obligation = obligations.create(account.id, "2026-08", 135000, date(2026, 8, 1))
+    payment_before = payments.get_by_raw_email_id(raw.id)
+    obligation_before = obligations.get(obligation.id)
+
+    assert run_allocation_add(database_path, payment.id, obligation.id, "675.50") == 0
+    assert run_allocation_listing(database_path) == 0
+    assert run_allocation_listing(database_path, payment.id, obligation.id) == 0
+    assert run_allocation_add(database_path, payment.id, obligation.id, "1.00") == 1
+    assert run_allocation_remove(database_path, 1) == 0
+    assert run_allocation_remove(database_path, 999) == 1
+
+    output = capsys.readouterr().out
+    assert "Created allocation 1: $675.50 from payment 1 to obligation 1" in output
+    assert "2026-08" in output
+    assert "Unit A" in output
+    assert "Payment 1 already has an allocation to obligation 1." in output
+    assert "Removed allocation 1." in output
+    assert "Allocation 999 does not exist." in output
+    assert "ALLOCATION_PRIVATE_RAW_SENTINEL" not in output
+    assert payments.get_by_raw_email_id(raw.id) == payment_before
+    assert obligations.get(obligation.id) == obligation_before
+    assert SQLiteAllocationRepository(database_path).count() == 0

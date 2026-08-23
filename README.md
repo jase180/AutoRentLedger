@@ -1,13 +1,13 @@
 # AutoRentLedger
 
-AutoRentLedger Milestone 7 is a small, read-only Gmail ingestion and deterministic payment-event
-pipeline with explicit payer identities, rent-account relationships, and manually created monthly
-rent obligations. It stores complete original raw MIME bytes in local SQLite while keeping
-observed payments, current identity interpretation, rental relationships, and debt records
-separate.
+AutoRentLedger Milestone 8 is a small, read-only Gmail ingestion and deterministic payment-event
+pipeline with explicit payer identities, rent accounts, monthly obligations, and manual payment
+allocations. It stores complete original raw MIME bytes in local SQLite while keeping observed
+payments and debt records unchanged; allocation rows record deliberate accounting interpretation.
 
 It does not modify messages or labels, print message bodies, match tenants, assign units or rent
-periods automatically, allocate payments, reconcile balances, or calculate payment status.
+periods automatically, match payments automatically, reconcile balances, or calculate payment
+status.
 
 ## Requirements
 
@@ -64,6 +64,9 @@ autorentledger rent-account show 1
 autorentledger obligation add --account 1 --period 2026-08 --amount 1234.56 --due-date 2026-08-01
 autorentledger obligations
 autorentledger obligation show 1
+autorentledger allocation add --payment 1 --obligation 1 --amount 675.00
+autorentledger allocations
+autorentledger allocation remove 1
 ```
 
 macOS or Linux:
@@ -92,6 +95,9 @@ autorentledger rent-account show 1
 autorentledger obligation add --account 1 --period 2026-08 --amount 1234.56 --due-date 2026-08-01
 autorentledger obligations
 autorentledger obligation show 1
+autorentledger allocation add --payment 1 --obligation 1 --amount 675.00
+autorentledger allocations
+autorentledger allocation remove 1
 ```
 
 The default Gmail query is `subject:zelle`. Override it when your bank uses different wording:
@@ -327,8 +333,8 @@ least one day of the requested month. Due dates are explicit and are not require
 the obligation month.
 
 Obligations record only what was owed. They do not reference payment events, track amounts paid,
-calculate balances, or expose paid/partial/unpaid status. Each obligation is created manually;
-there is no recurring schedule or automatic generation.
+or expose paid/partial/unpaid status. Each obligation is created manually; there is no recurring
+schedule or automatic generation.
 
 ```text
 rent_obligations
@@ -339,6 +345,50 @@ rent_obligations
   due_date          ISO date
   created_at        UTC ISO timestamp
   unique            (rent_account_id, period)
+```
+
+## Allocate payments explicitly
+
+Create one deliberate allocation from an observed payment event to a rent obligation:
+
+```powershell
+autorentledger allocation add `
+  --payment 1 `
+  --obligation 1 `
+  --amount 675.00
+```
+
+List allocations with optional source or target filters:
+
+```powershell
+autorentledger allocations
+autorentledger allocations --payment 1
+autorentledger allocations --obligation 1
+```
+
+Remove an incorrect allocation before adding its replacement:
+
+```powershell
+autorentledger allocation remove 1
+```
+
+Allocation creation uses one SQLite `BEGIN IMMEDIATE` transaction to load the payment and
+obligation, calculate both allocated totals, validate both remaining amounts, and insert. A failed
+validation rolls back without inserting a row. Multiple payments may fund one obligation and one
+payment may fund multiple obligations, but a payment/obligation pair has only one allocation row.
+
+Remaining amounts are derived arithmetic only. Extra payment money does not create a credit,
+prepayment, balance, or unapplied-funds record. Payer-to-account membership is not consulted and
+no matching is automatic.
+
+```text
+payment_allocations
+  id                  integer primary key
+  payment_event_id    foreign key -> payment_events.id ON DELETE RESTRICT
+  rent_obligation_id  foreign key -> rent_obligations.id ON DELETE RESTRICT
+  amount_cents        positive integer
+  created_at          UTC ISO timestamp
+  unique              (payment_event_id, rent_obligation_id)
 ```
 
 ## Development checks
@@ -364,6 +414,8 @@ src/autorentledger/
     service.py       # unit, account, date, and association validation
   obligations/
     service.py       # period, currency, due-date, and active-range validation
+  allocations/
+    service.py       # explicit allocation validation and error translation
   parsing/
     mime.py         # source-neutral MIME text decoding
     models.py       # normalized result and structured parse failure
@@ -373,7 +425,7 @@ src/autorentledger/
     values.py       # shared exact value normalization
   ingestion.py      # source-to-repository idempotent workflow
   processing.py     # idempotent raw-email to payment-event workflow
-  cli.py            # ingestion, payment, rental, and obligation commands
+  cli.py            # ingestion, rental, obligation, and allocation commands
 tests/              # synthetic adapter, storage, service, and CLI tests
 pyproject.toml      # package, command, dependencies, and tool configuration
 ```
@@ -385,12 +437,14 @@ adapter, and SQLite has no provider-specific parsing knowledge. Identity resolut
 on payment sender values and locally managed payer aliases. Rental-domain logic depends on payer
 identities and rental storage, never Gmail, MIME parsing, or payment allocation.
 Obligation logic depends only on rent-account records and obligation storage; it never interprets
-or mutates payment events.
+or mutates payment events. Allocation creation is explicit and transactional; it never infers a
+target from payer identity, dates, amounts, memos, or rent-account membership.
 
 ## Intentionally out of scope
 
 - Tenant legal status, formal leases, recurring obligation generation, proration, deposits, late
-  fees, payment allocation, balances, reconciliation, or paid/partial/unpaid status
+  fees, automatic matching, credits/prepayments, balances, reconciliation, or
+  paid/partial/unpaid status
 - Fuzzy, phonetic, nickname, typo-correcting, or AI-assisted identity matching
 - Gmail writes, label creation, or label changes
 - Web UI, visualization, cloud deployment, or background processing

@@ -1,8 +1,16 @@
 """Local persistence adapters."""
 
 from autorentledger.storage.sqlite import (
+    AllocationBalance,
+    AllocationExceedsObligationError,
+    AllocationExceedsPaymentError,
+    AllocationObligationNotFoundError,
+    AllocationPairExistsError,
+    AllocationPaymentNotFoundError,
     PayerAliasRecord,
     PayerRecord,
+    PaymentAllocationRecord,
+    PaymentAllocationSummary,
     PaymentEventRecord,
     PaymentSenderCount,
     RawEmailRecord,
@@ -11,6 +19,7 @@ from autorentledger.storage.sqlite import (
     RentAccountSummary,
     RentObligationRecord,
     RentObligationSummary,
+    SQLiteAllocationRepository,
     SQLiteObligationRepository,
     SQLitePayerRepository,
     SQLitePaymentEventRepository,
@@ -20,8 +29,16 @@ from autorentledger.storage.sqlite import (
 )
 
 __all__ = [
+    "AllocationBalance",
+    "AllocationExceedsObligationError",
+    "AllocationExceedsPaymentError",
+    "AllocationObligationNotFoundError",
+    "AllocationPairExistsError",
+    "AllocationPaymentNotFoundError",
     "PayerAliasRecord",
     "PayerRecord",
+    "PaymentAllocationRecord",
+    "PaymentAllocationSummary",
     "PaymentEventRecord",
     "PaymentSenderCount",
     "RawEmailRecord",
@@ -30,6 +47,7 @@ __all__ = [
     "RentAccountSummary",
     "RentObligationRecord",
     "RentObligationSummary",
+    "SQLiteAllocationRepository",
     "SQLiteObligationRepository",
     "SQLitePayerRepository",
     "SQLitePaymentEventRepository",
