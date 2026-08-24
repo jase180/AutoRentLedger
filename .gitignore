@@ -23,6 +23,7 @@ downloads/
 
 # Local application data (may contain complete private emails)
 data/
+reports/
 *.db
 *.sqlite
 *.sqlite3

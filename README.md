@@ -496,6 +496,40 @@ The review adapters open the existing SQLite database in read-only mode. Output 
 and unparsed-email output is limited to its local raw record ID and subject; raw MIME, decoded body,
 memo text, and parser internals are never displayed.
 
+## Monthly reporting and CSV export
+
+Show the owner-facing projection for one canonical month:
+
+```powershell
+autorentledger report --period 2026-08
+```
+
+Write the same obligation rows as an exact, machine-readable CSV while still printing the terminal
+report:
+
+```powershell
+autorentledger report --period 2026-08 --csv reports/2026-08.csv
+```
+
+The CSV contains `period`, obligation/account/unit identifiers, due date, integer-cent amounts, and
+the canonical reconciliation status. Parent directories are created as needed, but an existing
+file is never overwritten. The local `reports/` directory is ignored by Git because exports may
+contain private rental data.
+
+The two report sections answer different questions:
+
+- Rent totals are grouped by obligation period and reuse canonical reconciliation. Only obligations
+  that actually exist for the requested month appear; missing obligations are not inferred.
+- Payment intake is grouped by `payment_events.occurred_on`. It sums every allocation originating
+  from those payments, including allocations to another month's obligation. Payments with no
+  `occurred_on` date are excluded rather than assigned a guessed month.
+
+Observed payment money is labeled neutrally. It becomes satisfied rent only through explicit
+allocation to an obligation. Consequently, monthly obligation allocation and monthly payment-side
+allocation need not equal one another. Report generation opens read adapters in SQLite read-only
+mode, stores no result, changes no schema or ledger row, and treats the CSV as a projection rather
+than a source of truth.
+
 ## Development checks
 
 ```powershell
@@ -524,6 +558,8 @@ src/autorentledger/
     service.py       # explicit allocation validation and error translation
   reconciliation/
     service.py       # read-only amount and status derivation
+  reporting/
+    service.py       # monthly obligation totals and occurrence-dated payment intake
   review/
     service.py       # derived operational review items
   parsing/
@@ -553,6 +589,8 @@ Reconciliation reads obligation and allocation totals without modifying either s
 all status values through one service path.
 Review reuses canonical identity resolution and reconciliation, plus aggregate read-only queries;
 it adds no workflow or review-state storage.
+Reporting composes canonical reconciliation with one payment-side read query; it stores no totals,
+statuses, or exports in SQLite.
 Normal CLI operations require the current schema; only `db upgrade` changes schema version or
 applies migrations.
 

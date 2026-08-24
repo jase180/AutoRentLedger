@@ -51,6 +51,13 @@ class PaymentSenderCount:
 
 
 @dataclass(frozen=True)
+class PaymentIntakeSourceRecord:
+    payment_event_id: int
+    amount_cents: int
+    allocated_cents: int
+
+
+@dataclass(frozen=True)
 class PayerRecord:
     id: int
     display_name: str
@@ -978,6 +985,43 @@ class SQLiteReconciliationRepository:
                 rent_obligations.due_date,
                 rent_obligations.amount_cents
         """
+
+
+class SQLiteReportingRepository:
+    """Read payment-side monthly facts without modifying the ledger."""
+
+    def __init__(self, database_path: Path) -> None:
+        self.database_path = database_path
+
+    def _connect(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(
+            self.database_path.resolve().as_uri() + "?mode=ro", uri=True
+        )
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        return connection
+
+    def list_payment_intake_sources(
+        self, start_on: str, end_before: str
+    ) -> list[PaymentIntakeSourceRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    payment_events.id AS payment_event_id,
+                    payment_events.amount_cents,
+                    COALESCE(SUM(payment_allocations.amount_cents), 0) AS allocated_cents
+                FROM payment_events
+                LEFT JOIN payment_allocations
+                    ON payment_allocations.payment_event_id = payment_events.id
+                WHERE payment_events.occurred_on >= ?
+                    AND payment_events.occurred_on < ?
+                GROUP BY payment_events.id, payment_events.amount_cents
+                ORDER BY payment_events.id
+                """,
+                (start_on, end_before),
+            ).fetchall()
+        return [PaymentIntakeSourceRecord(**dict(row)) for row in rows]
 
 
 class SQLiteReviewRepository:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import sqlite3
 from collections.abc import Sequence
 from pathlib import Path
@@ -39,6 +40,7 @@ from autorentledger.rental import (
     create_rent_account,
     create_unit,
 )
+from autorentledger.reporting import MonthlyReport, ReportingInvariantError, build_monthly_report
 from autorentledger.review import (
     ReviewInvariantError,
     ReviewKind,
@@ -58,6 +60,7 @@ from autorentledger.storage.sqlite import (
     SQLiteRawEmailRepository,
     SQLiteReconciliationRepository,
     SQLiteRentalRepository,
+    SQLiteReportingRepository,
     SQLiteReviewRepository,
 )
 
@@ -188,6 +191,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     reconcile.add_argument("--period", required=True)
     reconcile.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+    report = subparsers.add_parser("report", help="show a read-only monthly rent report")
+    report.add_argument("--period", required=True)
+    report.add_argument("--csv", type=Path, dest="csv_path")
+    report.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
 
     review = subparsers.add_parser("review", help="show ledger items needing attention")
     review.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
@@ -610,6 +618,95 @@ def run_reconciliation(database_path: Path, period: str) -> int:
     return 0
 
 
+def run_report(database_path: Path, period: str, csv_path: Path | None = None) -> int:
+    try:
+        report = build_monthly_report(
+            SQLiteReconciliationRepository(database_path),
+            SQLiteReportingRepository(database_path),
+            period,
+        )
+    except (
+        ObligationValidationError,
+        ReconciliationInvariantError,
+        ReportingInvariantError,
+    ) as error:
+        print(error)
+        return 1
+
+    _print_monthly_report(report)
+    if csv_path is not None:
+        try:
+            _write_report_csv(report, csv_path)
+        except FileExistsError:
+            print(f"CSV already exists; refusing to overwrite: {csv_path}")
+            return 1
+        except OSError as error:
+            print(f"Could not write CSV {csv_path}: {error}")
+            return 1
+        print(f"CSV written: {csv_path}")
+    return 0
+
+
+def _print_monthly_report(report: MonthlyReport) -> None:
+    print(f"Monthly Rent Report - {report.period}")
+    print(
+        f"{'UNIT':<12} {'ACCOUNT':<24} {'OWED':>12} "
+        f"{'ALLOCATED':>12} {'REMAINING':>12} STATUS"
+    )
+    for row in report.obligations:
+        print(
+            f"{row.unit_label:<12} {row.account_display_name:<24} "
+            f"{_format_currency(row.owed_cents):>12} "
+            f"{_format_currency(row.allocated_cents):>12} "
+            f"{_format_currency(row.remaining_cents):>12} {row.status}"
+        )
+    print("RENT TOTALS")
+    print(f"Owed: {_format_currency(report.total_owed_cents)}")
+    print(f"Allocated: {_format_currency(report.total_allocated_cents)}")
+    print(f"Remaining: {_format_currency(report.total_remaining_cents)}")
+    print("Obligations:")
+    print(f"Paid: {report.paid_count}")
+    print(f"Partial: {report.partial_count}")
+    print(f"Unpaid: {report.unpaid_count}")
+    print("PAYMENT INTAKE")
+    print(f"Observed payments: {_format_currency(report.payment_received_cents)}")
+    print(f"Allocated from payments: {_format_currency(report.payment_allocated_cents)}")
+    print(f"Unallocated money: {_format_currency(report.payment_unallocated_cents)}")
+
+
+def _write_report_csv(report: MonthlyReport, csv_path: Path) -> None:
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    with csv_path.open("x", encoding="utf-8", newline="") as csv_file:
+        writer = csv.writer(csv_file)
+        writer.writerow(
+            [
+                "period",
+                "obligation_id",
+                "unit",
+                "account",
+                "due_date",
+                "owed_cents",
+                "allocated_cents",
+                "remaining_cents",
+                "status",
+            ]
+        )
+        for row in report.obligations:
+            writer.writerow(
+                [
+                    row.period,
+                    row.obligation_id,
+                    row.unit_label,
+                    row.account_display_name,
+                    row.due_date,
+                    row.owed_cents,
+                    row.allocated_cents,
+                    row.remaining_cents,
+                    row.status,
+                ]
+            )
+
+
 def run_review(database_path: Path) -> int:
     try:
         items = collect_review_items(
@@ -767,6 +864,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_allocation_listing(args.database, args.payment, args.obligation)
     if args.command == "reconcile":
         return run_reconciliation(args.database, args.period)
+    if args.command == "report":
+        return run_report(args.database, args.period, args.csv_path)
     if args.command == "review":
         return run_review(args.database)
     raise AssertionError(f"Unhandled command: {args.command}")
