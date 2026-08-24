@@ -68,6 +68,9 @@ autorentledger rent-account show 1
 autorentledger obligation add --account 1 --period 2026-08 --amount 1234.56 --due-date 2026-08-01
 autorentledger obligations
 autorentledger obligation show 1
+autorentledger rent-schedule add --account 1 --amount 1450.00 --due-day 1 --active-from 2026-09-01
+autorentledger obligations generate --period 2026-09 --dry-run
+autorentledger obligations generate --period 2026-09
 autorentledger allocation add --payment 1 --obligation 1 --amount 675.00
 autorentledger allocations
 autorentledger allocation remove 1
@@ -381,8 +384,8 @@ least one day of the requested month. Due dates are explicit and are not require
 the obligation month.
 
 Obligations record only what was owed. They do not reference payment events or store amounts paid
-or paid/partial/unpaid status. Each obligation is created manually; there is no recurring schedule
-or automatic generation.
+or paid/partial/unpaid status. They may be created manually or by the explicit schedule-generation
+command described below; both paths create the same authoritative obligation record.
 
 ```text
 rent_obligations
@@ -394,6 +397,56 @@ rent_obligations
   created_at        UTC ISO timestamp
   unique            (rent_account_id, period)
 ```
+
+## Define recurring rent schedules and generate explicitly
+
+A rent schedule is an effective-dated instruction for creating future obligations. It is not debt
+and does not participate directly in reconciliation or reporting. Create and inspect schedules:
+
+```powershell
+autorentledger rent-schedule add `
+  --account 1 `
+  --amount 1450.00 `
+  --due-day 1 `
+  --active-from 2026-05-01
+
+autorentledger rent-schedules
+autorentledger rent-schedules --account 1
+```
+
+Preview and then explicitly generate one month:
+
+```powershell
+autorentledger obligations generate --period 2026-09 --dry-run
+autorentledger obligations generate --period 2026-09
+```
+
+Dry-run uses the same deterministic plan as generation and performs no writes. Real generation
+holds one SQLite `BEGIN IMMEDIATE` transaction while it replans and inserts every missing row, so
+an unexpected failure rolls back the entire month. Repeating the command is idempotent: an existing
+obligation causes `SKIP`, whether that obligation was generated previously or entered manually.
+The existing amount and due date are never compared, corrected, or overwritten.
+
+Schedule ranges for one account may be adjacent but cannot overlap. Rent changes are represented
+by ending the old range and adding a new effective-dated schedule, preserving the historical
+instruction. Schedule ranges must be contained within any bounds on the rent account. Due days are
+limited to 1–28. A schedule active for any part of the requested month creates the full configured
+obligation; there is no proration. Generation never runs during reporting, reconciliation, review,
+ingestion, processing, or startup.
+
+```text
+rent_schedules
+  id                integer primary key
+  rent_account_id   foreign key -> rent_accounts.id ON DELETE RESTRICT
+  amount_cents      positive integer
+  due_day           1 through 28
+  active_from       ISO date
+  active_to         nullable ISO date, not before active_from
+  created_at        UTC ISO timestamp
+```
+
+No generated-through marker, run history, or generation status is stored. Whether an account/month
+has already been generated is derived solely from the unique obligation `(rent_account_id, period)`.
 
 ## Allocate payments explicitly
 
@@ -554,6 +607,8 @@ src/autorentledger/
     service.py       # unit, account, date, and association validation
   obligations/
     service.py       # period, currency, due-date, and active-range validation
+  schedules/
+    service.py       # effective rent instructions and explicit atomic generation
   allocations/
     service.py       # explicit allocation validation and error translation
   reconciliation/
@@ -591,16 +646,19 @@ Review reuses canonical identity resolution and reconciliation, plus aggregate r
 it adds no workflow or review-state storage.
 Reporting composes canonical reconciliation with one payment-side read query; it stores no totals,
 statuses, or exports in SQLite.
+Schedule generation uses effective-dated instructions to create ordinary obligations explicitly;
+it never modifies an obligation that already exists.
 Normal CLI operations require the current schema; only `db upgrade` changes schema version or
 applies migrations.
 
 ## Intentionally out of scope
 
-- Tenant legal status, formal leases, recurring obligation generation, proration, deposits, late
-  fees, automatic matching, credits/prepayments, tenant balances, overdue/late status, or
-  persisted reconciliation/review state
+- Tenant legal status, formal leases, proration, deposits, late fees, automatic matching,
+  credits/prepayments, tenant balances, overdue/late status, or persisted reconciliation/review
+  state
 - Fuzzy, phonetic, nickname, typo-correcting, or AI-assisted identity matching
 - Gmail writes, label creation, or label changes
-- Web UI, visualization, cloud deployment, or background processing
+- Web UI, visualization, cloud deployment, HTTP/authentication, cron, scheduling, or background
+  processing
 - Review acknowledgement, dismissal, assignment, tickets, notifications, or scheduled jobs
 - External or general-purpose migration frameworks

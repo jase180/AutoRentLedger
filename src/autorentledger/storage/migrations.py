@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-CURRENT_SCHEMA_VERSION = 6
+CURRENT_SCHEMA_VERSION = 7
 
 RAW_EMAILS_SQL = """
     CREATE TABLE IF NOT EXISTS raw_emails (
@@ -134,6 +134,22 @@ PAYMENT_ALLOCATIONS_SQL = """
     )
 """
 
+RENT_SCHEDULES_SQL = """
+    CREATE TABLE IF NOT EXISTS rent_schedules (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        rent_account_id INTEGER NOT NULL,
+        amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+        due_day INTEGER NOT NULL CHECK (due_day BETWEEN 1 AND 28),
+        active_from TEXT NOT NULL,
+        active_to TEXT,
+        created_at TEXT NOT NULL,
+        CHECK (active_to IS NULL OR active_to >= active_from),
+        FOREIGN KEY (rent_account_id)
+            REFERENCES rent_accounts(id)
+            ON DELETE RESTRICT
+    )
+"""
+
 EXPECTED_COLUMNS: dict[str, frozenset[str]] = {
     "raw_emails": frozenset(
         {
@@ -174,6 +190,17 @@ EXPECTED_COLUMNS: dict[str, frozenset[str]] = {
     "payment_allocations": frozenset(
         {"id", "payment_event_id", "rent_obligation_id", "amount_cents", "created_at"}
     ),
+    "rent_schedules": frozenset(
+        {
+            "id",
+            "rent_account_id",
+            "amount_cents",
+            "due_day",
+            "active_from",
+            "active_to",
+            "created_at",
+        }
+    ),
 }
 
 TABLES_BY_VERSION: dict[int, frozenset[str]] = {
@@ -204,7 +231,8 @@ TABLES_BY_VERSION: dict[int, frozenset[str]] = {
             "rent_obligations",
         }
     ),
-    6: frozenset(EXPECTED_COLUMNS),
+    6: frozenset(set(EXPECTED_COLUMNS) - {"rent_schedules"}),
+    7: frozenset(EXPECTED_COLUMNS),
 }
 
 
@@ -286,6 +314,10 @@ def create_allocation_schema(connection: sqlite3.Connection) -> None:
     connection.execute(PAYMENT_ALLOCATIONS_SQL)
 
 
+def create_rent_schedule_schema(connection: sqlite3.Connection) -> None:
+    connection.execute(RENT_SCHEDULES_SQL)
+
+
 MIGRATIONS: dict[int, Migration] = {
     1: create_raw_email_schema,
     2: create_payment_event_schema,
@@ -293,6 +325,7 @@ MIGRATIONS: dict[int, Migration] = {
     4: create_rental_schema,
     5: create_obligation_schema,
     6: create_allocation_schema,
+    7: create_rent_schedule_schema,
 }
 
 
