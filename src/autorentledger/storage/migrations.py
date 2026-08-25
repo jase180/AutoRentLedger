@@ -8,7 +8,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-CURRENT_SCHEMA_VERSION = 7
+from autorentledger.parsing.version import LEGACY_UNVERSIONED_PARSER_VERSION
+
+CURRENT_SCHEMA_VERSION = 8
 
 RAW_EMAILS_SQL = """
     CREATE TABLE IF NOT EXISTS raw_emails (
@@ -23,6 +25,22 @@ RAW_EMAILS_SQL = """
     )
 """
 
+PAYMENT_EVENTS_V2_SQL = """
+    CREATE TABLE IF NOT EXISTS payment_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        raw_email_id INTEGER NOT NULL UNIQUE,
+        provider TEXT NOT NULL,
+        sender_name TEXT NOT NULL,
+        amount_cents INTEGER NOT NULL,
+        occurred_on TEXT,
+        memo TEXT,
+        parsed_at TEXT NOT NULL,
+        FOREIGN KEY (raw_email_id)
+            REFERENCES raw_emails(id)
+            ON DELETE RESTRICT
+    )
+"""
+
 PAYMENT_EVENTS_SQL = """
     CREATE TABLE IF NOT EXISTS payment_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -33,6 +51,7 @@ PAYMENT_EVENTS_SQL = """
         occurred_on TEXT,
         memo TEXT,
         parsed_at TEXT NOT NULL,
+        parser_version TEXT NOT NULL,
         FOREIGN KEY (raw_email_id)
             REFERENCES raw_emails(id)
             ON DELETE RESTRICT
@@ -173,6 +192,7 @@ EXPECTED_COLUMNS: dict[str, frozenset[str]] = {
             "occurred_on",
             "memo",
             "parsed_at",
+            "parser_version",
         }
     ),
     "payers": frozenset({"id", "display_name", "created_at"}),
@@ -233,7 +253,12 @@ TABLES_BY_VERSION: dict[int, frozenset[str]] = {
     ),
     6: frozenset(set(EXPECTED_COLUMNS) - {"rent_schedules"}),
     7: frozenset(EXPECTED_COLUMNS),
+    8: frozenset(EXPECTED_COLUMNS),
 }
+
+PAYMENT_EVENT_COLUMNS_V7 = frozenset(
+    EXPECTED_COLUMNS["payment_events"] - {"parser_version"}
+)
 
 
 class DatabaseSchemaError(RuntimeError):
@@ -295,6 +320,11 @@ def create_payment_event_schema(connection: sqlite3.Connection) -> None:
     connection.execute(PAYMENT_EVENTS_SQL)
 
 
+def create_payment_event_v2_schema(connection: sqlite3.Connection) -> None:
+    """Create the historical pre-provenance payment-event schema."""
+    connection.execute(PAYMENT_EVENTS_V2_SQL)
+
+
 def create_payer_schema(connection: sqlite3.Connection) -> None:
     connection.execute(PAYERS_SQL)
     connection.execute(PAYER_ALIASES_SQL)
@@ -318,14 +348,22 @@ def create_rent_schedule_schema(connection: sqlite3.Connection) -> None:
     connection.execute(RENT_SCHEDULES_SQL)
 
 
+def add_payment_parser_provenance(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        "ALTER TABLE payment_events ADD COLUMN parser_version TEXT NOT NULL DEFAULT "
+        f"'{LEGACY_UNVERSIONED_PARSER_VERSION}'"
+    )
+
+
 MIGRATIONS: dict[int, Migration] = {
     1: create_raw_email_schema,
-    2: create_payment_event_schema,
+    2: create_payment_event_v2_schema,
     3: create_payer_schema,
     4: create_rental_schema,
     5: create_obligation_schema,
     6: create_allocation_schema,
     7: create_rent_schedule_schema,
+    8: add_payment_parser_provenance,
 }
 
 
@@ -368,8 +406,12 @@ def require_current_schema(database_path: Path) -> None:
 def detect_legacy_version(connection: sqlite3.Connection) -> int:
     """Infer an unversioned schema only when it exactly matches a known cumulative state."""
     known_tables = _known_tables(connection)
-    _validate_known_table_columns(connection, known_tables)
-    matches = [version for version, tables in TABLES_BY_VERSION.items() if tables == known_tables]
+    matches = [
+        version
+        for version, tables in TABLES_BY_VERSION.items()
+        if tables == known_tables
+        and _known_table_columns_match(connection, known_tables, version)
+    ]
     if len(matches) != 1:
         names = ", ".join(sorted(known_tables)) or "none"
         raise LegacySchemaDetectionError(
@@ -455,16 +497,35 @@ def _known_tables(connection: sqlite3.Connection) -> frozenset[str]:
 
 
 def _validate_known_table_columns(
-    connection: sqlite3.Connection, tables: frozenset[str]
+    connection: sqlite3.Connection, tables: frozenset[str], version: int
 ) -> None:
     for table in sorted(tables):
         columns = frozenset(
             str(row[1]) for row in connection.execute(f"PRAGMA table_info({table})")
         )
-        if columns != EXPECTED_COLUMNS[table]:
+        if columns != _expected_columns(table, version):
             raise LegacySchemaDetectionError(
                 f"Table {table} does not match the known AutoRentLedger schema signature."
             )
+
+
+def _known_table_columns_match(
+    connection: sqlite3.Connection, tables: frozenset[str], version: int
+) -> bool:
+    return all(
+        frozenset(
+            str(row[1])
+            for row in connection.execute(f"PRAGMA table_info({table})")
+        )
+        == _expected_columns(table, version)
+        for table in tables
+    )
+
+
+def _expected_columns(table: str, version: int) -> frozenset[str]:
+    if table == "payment_events" and version < 8:
+        return PAYMENT_EVENT_COLUMNS_V7
+    return EXPECTED_COLUMNS[table]
 
 
 def _validate_schema_matches_version(
@@ -472,7 +533,7 @@ def _validate_schema_matches_version(
 ) -> None:
     _validate_version(version)
     known_tables = _known_tables(connection)
-    _validate_known_table_columns(connection, known_tables)
+    _validate_known_table_columns(connection, known_tables, version)
     expected = TABLES_BY_VERSION[version]
     if known_tables != expected:
         missing = ", ".join(sorted(expected - known_tables)) or "none"

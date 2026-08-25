@@ -39,6 +39,13 @@ from autorentledger.operations import SyncResult, run_sync
 from autorentledger.overview import OwnerOverview, build_owner_overview
 from autorentledger.parsing import NotificationParseError, parse_payment_notification
 from autorentledger.processing import process_raw_emails
+from autorentledger.rebuilding import (
+    PaymentRebuildInvariantError,
+    PaymentRebuildNotFoundError,
+    PaymentRebuildOutcome,
+    PaymentRebuildResult,
+    rebuild_payments,
+)
 from autorentledger.reconciliation import (
     ReconciliationInvariantError,
     get_reconciliation,
@@ -133,6 +140,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     payments = subparsers.add_parser("payments", help="list persisted payment events")
     payments.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+    payment_commands = payments.add_subparsers(dest="payments_command")
+    payments_rebuild = payment_commands.add_parser(
+        "rebuild", help="re-derive existing payments from immutable raw evidence"
+    )
+    payments_rebuild.add_argument("--dry-run", action="store_true")
+    payments_rebuild.add_argument("--payment", type=int)
+    payments_rebuild.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
 
     payer = subparsers.add_parser("payer", help="manage payer identities")
     payer_commands = payer.add_subparsers(dest="payer_command", required=True)
@@ -462,6 +476,70 @@ def run_payment_listing(database_path: Path) -> int:
             f"{amount:>12}  {event.provider}"
         )
     return 0
+
+
+def run_payment_rebuild(
+    database_path: Path, *, dry_run: bool, payment_event_id: int | None
+) -> int:
+    try:
+        batch = rebuild_payments(
+            SQLitePaymentEventRepository(database_path),
+            dry_run=dry_run,
+            payment_event_id=payment_event_id,
+        )
+    except (
+        PaymentRebuildInvariantError,
+        PaymentRebuildNotFoundError,
+        sqlite3.Error,
+    ) as error:
+        print(error)
+        return 1
+
+    for result in batch.results:
+        _print_payment_rebuild_result(result)
+    print(f"Scanned: {batch.scanned_count}")
+    print(f"Unchanged: {batch.count(PaymentRebuildOutcome.UNCHANGED)}")
+    if dry_run:
+        print(f"Would update: {batch.count(PaymentRebuildOutcome.WOULD_UPDATE)}")
+    else:
+        print(f"Updated: {batch.count(PaymentRebuildOutcome.UPDATED)}")
+    print(f"Parse failed: {batch.count(PaymentRebuildOutcome.PARSE_FAILED)}")
+    print(
+        "Rejected: "
+        f"{batch.count(PaymentRebuildOutcome.REJECTED_ALLOCATION_CONFLICT)}"
+    )
+    return 0
+
+
+def _print_payment_rebuild_result(result: PaymentRebuildResult) -> None:
+    print(f"PAYMENT {result.payment_event_id}")
+    print(f"Current parser version: {result.current_parser_version}")
+    print(f"Target parser version: {result.target_parser_version}")
+    print(result.outcome)
+    if result.outcome is PaymentRebuildOutcome.PARSE_FAILED:
+        print(f"  Reason: {result.parse_failure_reason}")
+    elif result.outcome is PaymentRebuildOutcome.REJECTED_ALLOCATION_CONFLICT:
+        print(
+            "  Candidate amount "
+            f"{_format_currency(result.candidate_amount_cents or 0)} is below "
+            f"allocated {_format_currency(result.allocated_cents)}."
+        )
+    for difference in result.differences:
+        if difference.field == "memo":
+            print("  memo: changed (values hidden)")
+            continue
+        old_value = _format_rebuild_value(difference.field, difference.old_value)
+        new_value = _format_rebuild_value(difference.field, difference.new_value)
+        print(f"  {difference.field}: {old_value} -> {new_value}")
+    print()
+
+
+def _format_rebuild_value(field: str, value: str | int | None) -> str:
+    if field == "amount_cents" and isinstance(value, int):
+        return _format_currency(value)
+    if value is None:
+        return "-"
+    return str(value)
 
 
 def run_payer_add(database_path: Path, display_name: str) -> int:
@@ -1297,6 +1375,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "process":
         return run_processing(args.database)
     if args.command == "payments":
+        if args.payments_command == "rebuild":
+            return run_payment_rebuild(
+                args.database,
+                dry_run=args.dry_run,
+                payment_event_id=args.payment,
+            )
         return run_payment_listing(args.database)
     if args.command == "payer":
         if args.payer_command == "add":

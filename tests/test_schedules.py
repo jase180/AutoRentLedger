@@ -392,7 +392,7 @@ def test_ambiguous_corrupt_schedule_data_fails_before_any_generation(tmp_path):
     assert obligations.count() == 0
 
 
-def test_v6_to_v7_upgrade_preserves_prior_rows_and_adds_only_schedule_state(tmp_path):
+def test_v6_to_current_upgrade_preserves_prior_rows_and_adds_new_schema_state(tmp_path):
     database_path = tmp_path / "v6.sqlite3"
     with sqlite3.connect(database_path) as connection:
         connection.execute("PRAGMA foreign_keys = ON")
@@ -410,8 +410,8 @@ def test_v6_to_v7_upgrade_preserves_prior_rows_and_adds_only_schedule_state(tmp_
 
     after = database_snapshot(database_path)
     assert result.from_version == 6
-    assert result.to_version == CURRENT_SCHEMA_VERSION == 7
-    assert after[0] == 7
+    assert result.to_version == CURRENT_SCHEMA_VERSION == 8
+    assert after[0] == 8
     for table, rows in before[1].items():
         assert after[1][table] == rows
     assert after[1]["rent_schedules"] == []

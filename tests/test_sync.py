@@ -12,6 +12,7 @@ from autorentledger.email import EmailMessageSummary
 from autorentledger.email.gmail import GmailSource
 from autorentledger.identity import normalize_alias
 from autorentledger.operations import SyncReviewSummary, run_sync
+from autorentledger.parsing import LEGACY_UNVERSIONED_PARSER_VERSION
 from autorentledger.review import ReviewKind, collect_review_items
 from autorentledger.schedules import create_rent_schedule
 from autorentledger.storage import (
@@ -175,6 +176,25 @@ def test_sync_ingests_processes_and_is_idempotent(tmp_path):
     assert second.review.unallocated_payments == 2
 
 
+def test_sync_does_not_automatically_rebuild_old_parser_versions(tmp_path):
+    repositories = create_repositories(tmp_path)
+    database_path, _, payments, *_ = repositories
+    source = FakeEmailSource([message(1, synthetic_chase_raw())])
+    execute_sync(source, repositories)
+    payment = payments.list_all()[0]
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            "UPDATE payment_events SET parser_version = ? WHERE id = ?",
+            (LEGACY_UNVERSIONED_PARSER_VERSION, payment.id),
+        )
+
+    result = execute_sync(source, repositories)
+
+    assert result.processing.created == 0
+    assert result.processing.already_processed == 1
+    assert payments.get(payment.id).parser_version == LEGACY_UNVERSIONED_PARSER_VERSION
+
+
 def test_parse_failure_is_safe_durable_and_does_not_abort_other_messages(tmp_path):
     repositories = create_repositories(tmp_path)
     _, raws, payments, *_ = repositories
@@ -303,7 +323,7 @@ def test_sync_write_boundary_excludes_accounting_configuration_and_generation(tm
     assert len(result.actionable_suggestions) == 1
     assert table_snapshot(database_path, protected_tables) == before
     assert schema_snapshot(database_path) == before_schema
-    assert before_schema[0] == CURRENT_SCHEMA_VERSION == 7
+    assert before_schema[0] == CURRENT_SCHEMA_VERSION == 8
     assert obligations.get_for_account_period(account.id, "2026-10") is None
     assert allocations.list_summaries() == []
     assert not any("sync" in table for table in before_schema[1])

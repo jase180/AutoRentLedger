@@ -4,7 +4,7 @@ from datetime import UTC, date, datetime
 import pytest
 
 from autorentledger.email import EmailMessageSummary
-from autorentledger.parsing import PaymentNotification
+from autorentledger.parsing import CURRENT_PAYMENT_PARSER_VERSION, PaymentNotification
 from autorentledger.storage import SQLitePaymentEventRepository, SQLiteRawEmailRepository
 
 
@@ -54,6 +54,7 @@ def test_payment_events_schema_initialization(tmp_path):
         "occurred_on",
         "memo",
         "parsed_at",
+        "parser_version",
     }
     assert any(
         row[2] == "raw_emails" and row[3] == "raw_email_id" and row[4] == "id"
@@ -76,6 +77,7 @@ def test_successful_notification_persists_exact_normalized_values(tmp_path):
     assert event.occurred_on == "2026-01-15"
     assert event.memo == "Synthetic memo"
     assert event.parsed_at
+    assert event.parser_version == CURRENT_PAYMENT_PARSER_VERSION
 
 
 def test_raw_email_foreign_key_is_enforced(tmp_path):

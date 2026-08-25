@@ -8,6 +8,7 @@ from autorentledger.email import EmailMessageSummary
 from autorentledger.identity import normalize_alias
 from autorentledger.parsing import PaymentNotification
 from autorentledger.storage import (
+    SQLiteAllocationRepository,
     SQLiteObligationRepository,
     SQLitePayerRepository,
     SQLitePaymentEventRepository,
@@ -20,6 +21,7 @@ from autorentledger.storage.migrations import (
     MIGRATIONS,
     LegacySchemaDetectionError,
     MigrationError,
+    create_payment_event_v2_schema,
     create_raw_email_schema,
     get_schema_status,
     upgrade_database,
@@ -28,6 +30,8 @@ from autorentledger.storage.migrations import (
 
 def add_payment_era_rows(database_path):
     raws = SQLiteRawEmailRepository(database_path)
+    with sqlite3.connect(database_path) as connection:
+        create_payment_event_v2_schema(connection)
     payments = SQLitePaymentEventRepository(database_path)
     payers = SQLitePayerRepository(database_path)
     raw_bytes = b"PRIVATE_SYNTHETIC_RAW_SENTINEL\x00preserve byte for byte"
@@ -119,11 +123,59 @@ def test_current_upgrade_is_a_no_op_and_does_not_duplicate_data(tmp_path):
     assert payers.get_payer(payer.id) == payer
 
 
+def test_v7_to_v8_adds_legacy_provenance_and_preserves_ledger_rows(tmp_path):
+    database_path = tmp_path / "v7.sqlite3"
+    with sqlite3.connect(database_path) as connection:
+        connection.execute("PRAGMA foreign_keys = ON")
+        for version in range(1, 8):
+            MIGRATIONS[version](connection)
+        connection.execute("PRAGMA user_version = 7")
+
+    raw, payment, payer, alias, raw_bytes = add_payment_era_rows(database_path)
+    rentals = SQLiteRentalRepository(database_path)
+    unit = rentals.create_unit("Unit A")
+    account = rentals.create_rent_account(unit.id, "Synthetic Household", None, None)
+    rentals.add_payer(account.id, payer.id)
+    obligation = SQLiteObligationRepository(database_path).create(
+        account.id, "2026-09", 123456, date(2026, 9, 1)
+    )
+    allocation = SQLiteAllocationRepository(database_path).create_checked(
+        payment.id, obligation.id, 100000
+    )
+    preserved = snapshot_tables(
+        database_path,
+        [
+            "raw_emails",
+            "payers",
+            "payer_aliases",
+            "units",
+            "rent_accounts",
+            "rent_account_payers",
+            "rent_obligations",
+            "payment_allocations",
+            "rent_schedules",
+        ],
+    )
+
+    result = upgrade_database(database_path)
+
+    assert (result.from_version, result.to_version) == (7, 8)
+    assert snapshot_tables(database_path, preserved) == preserved
+    upgraded = SQLitePaymentEventRepository(database_path).get(payment.id)
+    assert upgraded is not None
+    assert upgraded.id == payment.id
+    assert upgraded.raw_email_id == raw.id
+    assert upgraded.parser_version == "legacy-unversioned"
+    assert SQLiteRawEmailRepository(database_path).get(raw.gmail_message_id).raw_mime == raw_bytes
+    assert SQLitePayerRepository(database_path).get_alias(alias.normalized_alias) == alias
+    assert SQLiteAllocationRepository(database_path).get(allocation.id) == allocation
+
+
 def test_unversioned_payment_era_upgrade_preserves_rows_ids_blobs_and_aliases(tmp_path):
     database_path = tmp_path / "legacy-payment.sqlite3"
     raw, payment, payer, alias, raw_bytes = add_payment_era_rows(database_path)
-    tables = ["raw_emails", "payment_events", "payers", "payer_aliases"]
-    before = snapshot_tables(database_path, tables)
+    preserved_tables = ["raw_emails", "payers", "payer_aliases"]
+    before = snapshot_tables(database_path, preserved_tables)
     status = get_schema_status(database_path)
 
     result = upgrade_database(
@@ -136,9 +188,11 @@ def test_unversioned_payment_era_upgrade_preserves_rows_ids_blobs_and_aliases(tm
     assert result.from_version == 3
     assert result.backup_path == tmp_path / "legacy-payment.sqlite3.bak-20260823T220000Z"
     assert result.backup_path.exists()
-    assert snapshot_tables(database_path, tables) == before
+    assert snapshot_tables(database_path, preserved_tables) == before
     assert SQLiteRawEmailRepository(database_path).get(raw.gmail_message_id).raw_mime == raw_bytes
-    assert SQLitePaymentEventRepository(database_path).get_by_raw_email_id(raw.id) == payment
+    upgraded_payment = SQLitePaymentEventRepository(database_path).get_by_raw_email_id(raw.id)
+    assert upgraded_payment == payment
+    assert upgraded_payment.parser_version == "legacy-unversioned"
     payers = SQLitePayerRepository(database_path)
     assert payers.get_payer(payer.id) == payer
     assert payers.get_alias(alias.normalized_alias) == alias

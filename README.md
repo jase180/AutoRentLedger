@@ -1,6 +1,6 @@
 # AutoRentLedger
 
-AutoRentLedger Milestone 16 is a small, read-only Gmail ingestion and deterministic payment-event
+AutoRentLedger Milestone 17 is a small, read-only Gmail ingestion and deterministic payment-event
 pipeline with explicit payer identities, rent accounts, monthly obligations, and manual payment
 allocations. It derives each obligation's current reconciliation state without persisting status.
 It also derives one operational review list from unresolved identities, unallocated money,
@@ -55,6 +55,8 @@ autorentledger sync
 autorentledger parse
 autorentledger process
 autorentledger payments
+autorentledger payments rebuild --dry-run
+autorentledger payments rebuild
 autorentledger payer add "Alex Example"
 autorentledger payer alias-add 1 "ALEX Q EXAMPLE"
 autorentledger payer aliases 1
@@ -102,6 +104,8 @@ autorentledger sync
 autorentledger parse
 autorentledger process
 autorentledger payments
+autorentledger payments rebuild --dry-run
+autorentledger payments rebuild
 autorentledger payer add 'Alex Example'
 autorentledger payer alias-add 1 'ALEX Q EXAMPLE'
 autorentledger payer aliases 1
@@ -139,10 +143,10 @@ autorentledger db status
 autorentledger db upgrade
 ```
 
-AutoRentLedger uses monotonic `PRAGMA user_version` values and seven built-in schema migrations for
+AutoRentLedger uses monotonic `PRAGMA user_version` values and eight built-in schema migrations for
 the existing persisted schema epochs: raw emails, payment events, payer identities, rental
-accounts, obligations, allocations, and rent schedules. This is a small application-specific
-mechanism, not a general migration framework.
+accounts, obligations, allocations, rent schedules, and payment-parser provenance. This is a small
+application-specific mechanism, not a general migration framework.
 
 Legacy databases with `user_version = 0` are inspected conservatively using known table and column
 signatures. Ambiguous or inconsistent schemas are rejected rather than guessed. All required
@@ -309,10 +313,48 @@ payment_events
   occurred_on       nullable ISO date
   memo              nullable text
   parsed_at         UTC ISO timestamp
+  parser_version    deterministic parser-contract identifier
 ```
 
 The unique foreign key enforces at most one payment event per raw email at the database level.
 Payment events represent only observed notification facts, not tenant identity or rent status.
+
+### Rebuild derived payments after parser improvements
+
+Raw email MIME remains immutable source evidence. A payment event is a normalized observation
+derived by the deterministic parser, so parser improvements are applied to existing events only
+through this explicit workflow:
+
+```powershell
+autorentledger payments rebuild --dry-run
+autorentledger payments rebuild
+autorentledger payments rebuild --payment 12 --dry-run
+autorentledger payments rebuild --payment 12
+```
+
+Dry-run reparses the original raw MIME, compares provider, sender, amount, occurrence date, memo,
+and parser provenance, and performs no database writes. Normal output never displays raw MIME or
+memo values. A real rebuild updates the existing row in place, preserving both its payment-event
+ID and raw-email ID, and refreshes `parsed_at` and `parser_version`.
+
+The current deterministic parser contract is identified by a centralized parser version. Rows
+migrated from schema v7 receive the honest marker `legacy-unversioned`; migration does not parse or
+rebuild them. Newly processed events record the current parser version. An otherwise identical
+legacy row is explicitly updated to current provenance when rebuilt, while an identical already-
+current row is left untouched.
+
+Every payment is rebuilt in its own checked transaction. A candidate amount below the money
+already allocated from that payment is rejected without changing either the event or allocations.
+If the current parser can no longer parse the source, the existing event is retained and the safe
+failure reason is reported. One expected rejection or parse regression does not block unrelated
+events in the same batch; structural corruption still fails the command.
+
+Rebuild never changes raw email, aliases, rental configuration, schedules, obligations, or
+allocations. Sender and occurrence-date corrections can naturally change current identity
+resolution, suggestions, review, and occurrence-month reporting because those projections derive
+from payment facts. `sync` continues to process only raw emails without an event and never invokes
+rebuild automatically. No rebuild history, parser-run history, event-version, or audit table is
+stored.
 
 ## Manage payer identities
 
@@ -768,10 +810,13 @@ src/autorentledger/
     sync.py          # evidence refresh orchestration and safe derived summaries
   overview/
     service.py       # consolidated owner-facing monthly read model
+  rebuilding/
+    service.py       # explicit parser comparison and checked per-payment rebuild
   parsing/
     mime.py         # source-neutral MIME text decoding
     models.py       # normalized result and structured parse failure
     parser.py       # provider identification and dispatch
+    version.py      # centralized current and legacy parser provenance identifiers
     chase.py        # Chase-specific deterministic parser
     us_bank.py      # U.S. Bank-specific deterministic parser
     values.py       # shared exact value normalization
@@ -804,6 +849,8 @@ reconciliation without writing or bypassing allocation validation. Sync composes
 processing, review, and suggestions without adding accounting behavior or persisted run state.
 Overview composes reporting, review, suggestions, and schedule planning into one read-only model;
 it does not introduce a second accounting engine.
+Rebuilding reparses immutable raw evidence through the canonical parser and updates only a checked,
+stable payment-event row; it never edits accounting or configuration state.
 Normal CLI operations require the current schema; only `db upgrade` changes schema version or
 applies migrations.
 

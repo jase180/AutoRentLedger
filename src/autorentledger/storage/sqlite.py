@@ -12,6 +12,10 @@ from pathlib import Path
 
 from autorentledger.email.source import EmailMessageSummary
 from autorentledger.parsing.models import PaymentNotification
+from autorentledger.parsing.version import (
+    CURRENT_PAYMENT_PARSER_VERSION,
+    LEGACY_UNVERSIONED_PARSER_VERSION,
+)
 from autorentledger.storage.migrations import (
     create_allocation_schema,
     create_obligation_schema,
@@ -44,6 +48,22 @@ class PaymentEventRecord:
     occurred_on: str | None
     memo: str | None
     parsed_at: str
+    parser_version: str
+
+
+@dataclass(frozen=True)
+class PaymentRebuildSourceRecord:
+    payment_event_id: int
+    raw_email_id: int
+    provider: str
+    sender_name: str
+    amount_cents: int
+    occurred_on: str | None
+    memo: str | None
+    parsed_at: str
+    parser_version: str
+    raw_mime: bytes | None
+    allocated_cents: int
 
 
 @dataclass(frozen=True)
@@ -299,6 +319,23 @@ class MaintenanceScheduleOutsideAccountRangeError(MaintenanceStorageError):
     pass
 
 
+class PaymentRebuildStorageError(Exception):
+    """Base error for checked payment-event rebuild persistence."""
+
+
+class PaymentRebuildNotFoundStorageError(PaymentRebuildStorageError):
+    pass
+
+
+class PaymentRebuildConcurrentChangeError(PaymentRebuildStorageError):
+    pass
+
+
+class PaymentRebuildAllocationConflictStorageError(PaymentRebuildStorageError):
+    def __init__(self, allocated_cents: int) -> None:
+        self.allocated_cents = allocated_cents
+
+
 class AllocationStorageError(Exception):
     """Base error for transactional allocation validation."""
 
@@ -413,6 +450,14 @@ class SQLitePaymentEventRepository:
         connection.execute("PRAGMA foreign_keys = ON")
         return connection
 
+    def _connect_read_only(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(
+            self.database_path.resolve().as_uri() + "?mode=ro", uri=True
+        )
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        return connection
+
     def _initialize_schema(self) -> None:
         with self._connect() as connection:
             create_payment_event_schema(connection)
@@ -429,30 +474,52 @@ class SQLitePaymentEventRepository:
         """Insert a derived event, returning False if the raw email is already represented."""
         parsed_at = datetime.now(UTC).isoformat()
         with self._connect() as connection:
-            cursor = connection.execute(
-                """
-                INSERT OR IGNORE INTO payment_events (
-                    raw_email_id,
-                    provider,
-                    sender_name,
-                    amount_cents,
-                    occurred_on,
-                    memo,
-                    parsed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    raw_email_id,
-                    notification.provider,
-                    notification.sender_name,
-                    notification.amount_cents,
-                    notification.occurred_on.isoformat()
-                    if notification.occurred_on
-                    else None,
-                    notification.memo,
-                    parsed_at,
-                ),
+            occurred_on = (
+                notification.occurred_on.isoformat()
+                if notification.occurred_on
+                else None
             )
+            columns = {
+                str(row[1])
+                for row in connection.execute("PRAGMA table_info(payment_events)")
+            }
+            if "parser_version" in columns:
+                cursor = connection.execute(
+                    """
+                    INSERT OR IGNORE INTO payment_events (
+                        raw_email_id, provider, sender_name, amount_cents,
+                        occurred_on, memo, parsed_at, parser_version
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        raw_email_id,
+                        notification.provider,
+                        notification.sender_name,
+                        notification.amount_cents,
+                        occurred_on,
+                        notification.memo,
+                        parsed_at,
+                        CURRENT_PAYMENT_PARSER_VERSION,
+                    ),
+                )
+            else:
+                cursor = connection.execute(
+                    """
+                    INSERT OR IGNORE INTO payment_events (
+                        raw_email_id, provider, sender_name, amount_cents,
+                        occurred_on, memo, parsed_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        raw_email_id,
+                        notification.provider,
+                        notification.sender_name,
+                        notification.amount_cents,
+                        occurred_on,
+                        notification.memo,
+                        parsed_at,
+                    ),
+                )
         return cursor.rowcount == 1
 
     def get_by_raw_email_id(self, raw_email_id: int) -> PaymentEventRecord | None:
@@ -461,12 +528,19 @@ class SQLitePaymentEventRepository:
                 "SELECT * FROM payment_events WHERE raw_email_id = ?",
                 (raw_email_id,),
             ).fetchone()
-        return PaymentEventRecord(**dict(row)) if row else None
+        return _payment_event_record(row) if row else None
+
+    def get(self, payment_event_id: int) -> PaymentEventRecord | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM payment_events WHERE id = ?", (payment_event_id,)
+            ).fetchone()
+        return _payment_event_record(row) if row else None
 
     def list_all(self) -> list[PaymentEventRecord]:
         with self._connect() as connection:
             rows = connection.execute("SELECT * FROM payment_events ORDER BY id").fetchall()
-        return [PaymentEventRecord(**dict(row)) for row in rows]
+        return [_payment_event_record(row) for row in rows]
 
     def count(self) -> int:
         with self._connect() as connection:
@@ -484,6 +558,114 @@ class SQLitePaymentEventRepository:
                 """
             ).fetchall()
         return [PaymentSenderCount(**dict(row)) for row in rows]
+
+    def list_rebuild_sources(
+        self, payment_event_id: int | None = None
+    ) -> list[PaymentRebuildSourceRecord]:
+        where_clause = ""
+        parameters: tuple[int, ...] = ()
+        if payment_event_id is not None:
+            where_clause = "WHERE payment_events.id = ?"
+            parameters = (payment_event_id,)
+        with self._connect_read_only() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT
+                    payment_events.id AS payment_event_id,
+                    payment_events.raw_email_id,
+                    payment_events.provider,
+                    payment_events.sender_name,
+                    payment_events.amount_cents,
+                    payment_events.occurred_on,
+                    payment_events.memo,
+                    payment_events.parsed_at,
+                    payment_events.parser_version,
+                    raw_emails.raw_mime,
+                    COALESCE(SUM(payment_allocations.amount_cents), 0) AS allocated_cents
+                FROM payment_events
+                LEFT JOIN raw_emails ON raw_emails.id = payment_events.raw_email_id
+                LEFT JOIN payment_allocations
+                    ON payment_allocations.payment_event_id = payment_events.id
+                {where_clause}
+                GROUP BY payment_events.id
+                ORDER BY payment_events.id
+                """,
+                parameters,
+            ).fetchall()
+        return [PaymentRebuildSourceRecord(**dict(row)) for row in rows]
+
+    def update_rebuilt_checked(
+        self,
+        payment_event_id: int,
+        expected_raw_email_id: int,
+        expected_parsed_at: str,
+        notification: PaymentNotification,
+        parser_version: str,
+    ) -> PaymentEventRecord:
+        occurred_on = (
+            notification.occurred_on.isoformat() if notification.occurred_on else None
+        )
+        parsed_at = datetime.now(UTC).isoformat()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            current = connection.execute(
+                "SELECT raw_email_id, parsed_at FROM payment_events WHERE id = ?",
+                (payment_event_id,),
+            ).fetchone()
+            if current is None:
+                raise PaymentRebuildNotFoundStorageError
+            if (
+                int(current["raw_email_id"]) != expected_raw_email_id
+                or str(current["parsed_at"]) != expected_parsed_at
+            ):
+                raise PaymentRebuildConcurrentChangeError
+            allocated_cents = int(
+                connection.execute(
+                    """
+                    SELECT COALESCE(SUM(amount_cents), 0)
+                    FROM payment_allocations
+                    WHERE payment_event_id = ?
+                    """,
+                    (payment_event_id,),
+                ).fetchone()[0]
+            )
+            if notification.amount_cents < allocated_cents:
+                raise PaymentRebuildAllocationConflictStorageError(allocated_cents)
+            connection.execute(
+                """
+                UPDATE payment_events
+                SET provider = ?, sender_name = ?, amount_cents = ?,
+                    occurred_on = ?, memo = ?, parsed_at = ?, parser_version = ?
+                WHERE id = ?
+                """,
+                (
+                    notification.provider,
+                    notification.sender_name,
+                    notification.amount_cents,
+                    occurred_on,
+                    notification.memo,
+                    parsed_at,
+                    parser_version,
+                    payment_event_id,
+                ),
+            )
+        return PaymentEventRecord(
+            payment_event_id,
+            expected_raw_email_id,
+            notification.provider,
+            notification.sender_name,
+            notification.amount_cents,
+            occurred_on,
+            notification.memo,
+            parsed_at,
+            parser_version,
+        )
+
+
+def _payment_event_record(row: sqlite3.Row) -> PaymentEventRecord:
+    values = dict(row)
+    values.setdefault("parser_version", LEGACY_UNVERSIONED_PARSER_VERSION)
+    return PaymentEventRecord(**values)
 
 
 class SQLitePayerRepository:
