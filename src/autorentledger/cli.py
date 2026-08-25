@@ -73,6 +73,13 @@ from autorentledger.storage.sqlite import (
     SQLiteRentScheduleRepository,
     SQLiteReportingRepository,
     SQLiteReviewRepository,
+    SQLiteSuggestionRepository,
+)
+from autorentledger.suggestions import (
+    SuggestionInvariantError,
+    SuggestionPaymentNotFoundError,
+    SuggestionReason,
+    find_allocation_suggestions,
 )
 
 DEFAULT_QUERY = "subject:zelle"
@@ -214,6 +221,12 @@ def build_parser() -> argparse.ArgumentParser:
     allocation_remove = allocation_commands.add_parser("remove", help="remove an allocation")
     allocation_remove.add_argument("allocation_id", type=int)
     allocation_remove.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+    allocation_suggestions = allocation_commands.add_parser(
+        "suggestions", help="derive conservative allocation suggestions"
+    )
+    allocation_suggestions.add_argument("--payment", type=int)
+    allocation_suggestions.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
 
     allocations = subparsers.add_parser("allocations", help="list payment allocations")
     allocations.add_argument("--payment", type=int)
@@ -712,6 +725,79 @@ def run_allocation_remove(database_path: Path, allocation_id: int) -> int:
     return 0
 
 
+def run_allocation_suggestions(
+    database_path: Path, payment_event_id: int | None = None
+) -> int:
+    try:
+        results = find_allocation_suggestions(
+            SQLiteSuggestionRepository(database_path),
+            SQLiteReconciliationRepository(database_path),
+            payment_event_id,
+        )
+    except (
+        ReconciliationInvariantError,
+        SuggestionInvariantError,
+        SuggestionPaymentNotFoundError,
+    ) as error:
+        print(error)
+        return 1
+
+    actionable = [result.suggestion for result in results if result.suggestion is not None]
+    if not actionable:
+        if payment_event_id is not None and results:
+            print(
+                f"No actionable suggestion for payment {payment_event_id}: "
+                f"{results[0].reason}."
+            )
+        else:
+            print("No actionable allocation suggestions.")
+        return 0
+
+    for suggestion in actionable:
+        print(
+            f"PAYMENT {suggestion.payment_event_id}  "
+            f"{_format_currency(suggestion.payment_remaining_cents)} remaining  "
+            f"{suggestion.sender_name}"
+        )
+        print("SUGGEST")
+        print(f"  Obligation {suggestion.rent_obligation_id}")
+        print(f"  {suggestion.unit_label} / {suggestion.account_display_name}")
+        print(f"  Period: {suggestion.period}")
+        print(
+            "  Obligation remaining: "
+            f"{_format_currency(suggestion.obligation_remaining_cents)}"
+        )
+        print(
+            f"  Suggested allocation: "
+            f"{_format_currency(suggestion.suggested_amount_cents)}"
+        )
+        print("WHY")
+        print(
+            f"  sender resolves explicitly to payer {suggestion.payer_id} "
+            f"({suggestion.payer_display_name})"
+        )
+        print(f"  payer has one associated rent account {suggestion.rent_account_id}")
+        print("  account has exactly one outstanding obligation")
+        if suggestion.reason is SuggestionReason.EXACT_AMOUNT:
+            print("  payment remainder exactly matches obligation remainder")
+        else:
+            print("  suggested amount is the smaller current remainder")
+        print("APPLY")
+        print(
+            "  autorentledger allocation add "
+            f"--payment {suggestion.payment_event_id} "
+            f"--obligation {suggestion.rent_obligation_id} "
+            f"--amount {_format_decimal_cents(suggestion.suggested_amount_cents)}"
+        )
+        print()
+    return 0
+
+
+def _format_decimal_cents(amount_cents: int) -> str:
+    dollars, cents = divmod(amount_cents, 100)
+    return f"{dollars}.{cents:02d}"
+
+
 def run_reconciliation(database_path: Path, period: str) -> int:
     repository = _reconciliation_repository(database_path)
     try:
@@ -993,6 +1079,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         if args.allocation_command == "remove":
             return run_allocation_remove(args.database, args.allocation_id)
+        if args.allocation_command == "suggestions":
+            return run_allocation_suggestions(args.database, args.payment)
         raise AssertionError(f"Unhandled allocation command: {args.allocation_command}")
     if args.command == "allocations":
         return run_allocation_listing(args.database, args.payment, args.obligation)

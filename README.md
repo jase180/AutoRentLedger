@@ -73,6 +73,7 @@ autorentledger obligations generate --period 2026-09 --dry-run
 autorentledger obligations generate --period 2026-09
 autorentledger allocation add --payment 1 --obligation 1 --amount 675.00
 autorentledger allocations
+autorentledger allocation suggestions
 autorentledger allocation remove 1
 autorentledger reconcile --period 2026-08
 autorentledger review
@@ -492,6 +493,38 @@ payment_allocations
   unique              (payment_event_id, rent_obligation_id)
 ```
 
+## Review explainable allocation suggestions
+
+Show conservative suggestions for every payment with one clear destination, or inspect one payment:
+
+```powershell
+autorentledger allocation suggestions
+autorentledger allocation suggestions --payment 12
+```
+
+Suggestions are derived, read-only interpretations—not allocations or accounting state. The service
+uses only structured facts already in the ledger: exact payer aliases, payer-to-account
+associations, current payment remainders, and canonical reconciliation of actual obligations. It
+shows an actionable suggestion only when the sender resolves explicitly, that payer has exactly one
+associated rent account, and that account has exactly one outstanding obligation. Multiple accounts
+or multiple outstanding obligations are intentionally ambiguous, even when one amount matches.
+
+Payment occurrence month does not determine obligation period: the only outstanding obligation may
+be past or future. The suggested amount is the smaller of the current payment remainder and current
+obligation remainder. Schedules do not create candidate obligations, and sender memos, raw email,
+fuzzy matching, AI, ranking, oldest-first policy, and amount-based account selection are not used.
+
+Every result explains its structured evidence and prints an ordinary command such as:
+
+```powershell
+autorentledger allocation add --payment 12 --obligation 8 --amount 1450.00
+```
+
+The user must run that command explicitly. It goes through the existing transactional allocation
+validation. Suggestions are recomputed each time and therefore change or disappear only when the
+authoritative ledger facts change. They are never persisted, accepted, or assigned suggestion IDs;
+the existing review workflow remains unchanged until a real allocation is created.
+
 ## Reconcile existing obligations
 
 Derive the state of every existing obligation in one canonical month:
@@ -609,6 +642,8 @@ src/autorentledger/
     service.py       # period, currency, due-date, and active-range validation
   schedules/
     service.py       # effective rent instructions and explicit atomic generation
+  suggestions/
+    service.py       # conservative read-only payment destination explanations
   allocations/
     service.py       # explicit allocation validation and error translation
   reconciliation/
@@ -648,6 +683,8 @@ Reporting composes canonical reconciliation with one payment-side read query; it
 statuses, or exports in SQLite.
 Schedule generation uses effective-dated instructions to create ordinary obligations explicitly;
 it never modifies an obligation that already exists.
+Suggestions combine exact identity, account membership, payment remainder, and canonical
+reconciliation without writing or bypassing allocation validation.
 Normal CLI operations require the current schema; only `db upgrade` changes schema version or
 applies migrations.
 

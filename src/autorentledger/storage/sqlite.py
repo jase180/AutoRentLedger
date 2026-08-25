@@ -60,6 +60,29 @@ class PaymentIntakeSourceRecord:
 
 
 @dataclass(frozen=True)
+class SuggestionPaymentSourceRecord:
+    payment_event_id: int
+    sender_name: str
+    amount_cents: int
+    allocated_cents: int
+
+
+@dataclass(frozen=True)
+class SuggestionAliasSourceRecord:
+    normalized_alias: str
+    payer_id: int
+    payer_display_name: str
+
+
+@dataclass(frozen=True)
+class SuggestionAccountSourceRecord:
+    payer_id: int
+    rent_account_id: int
+    unit_label: str
+    account_display_name: str
+
+
+@dataclass(frozen=True)
 class PayerRecord:
     id: int
     display_name: str
@@ -1376,3 +1399,83 @@ class SQLiteReviewRepository:
                 """
             ).fetchall()
         return [UnparsedEmailSourceRecord(**dict(row)) for row in rows]
+
+
+class SQLiteSuggestionRepository:
+    """Read structured identity and payment facts for allocation suggestions."""
+
+    def __init__(self, database_path: Path) -> None:
+        self.database_path = database_path
+
+    def _connect(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(
+            self.database_path.resolve().as_uri() + "?mode=ro", uri=True
+        )
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        return connection
+
+    def list_payment_sources(
+        self, payment_event_id: int | None = None
+    ) -> list[SuggestionPaymentSourceRecord]:
+        where_clause = ""
+        parameters: tuple[int, ...] = ()
+        if payment_event_id is not None:
+            where_clause = "WHERE payment_events.id = ?"
+            parameters = (payment_event_id,)
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    payment_events.id AS payment_event_id,
+                    payment_events.sender_name,
+                    payment_events.amount_cents,
+                    COALESCE(SUM(payment_allocations.amount_cents), 0) AS allocated_cents
+                FROM payment_events
+                LEFT JOIN payment_allocations
+                    ON payment_allocations.payment_event_id = payment_events.id
+                """
+                + where_clause
+                + """
+                GROUP BY
+                    payment_events.id,
+                    payment_events.sender_name,
+                    payment_events.amount_cents
+                ORDER BY payment_events.id
+                """,
+                parameters,
+            ).fetchall()
+        return [SuggestionPaymentSourceRecord(**dict(row)) for row in rows]
+
+    def list_alias_sources(self) -> list[SuggestionAliasSourceRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    payer_aliases.normalized_alias,
+                    payers.id AS payer_id,
+                    payers.display_name AS payer_display_name
+                FROM payer_aliases
+                JOIN payers ON payers.id = payer_aliases.payer_id
+                ORDER BY payer_aliases.normalized_alias
+                """
+            ).fetchall()
+        return [SuggestionAliasSourceRecord(**dict(row)) for row in rows]
+
+    def list_account_sources(self) -> list[SuggestionAccountSourceRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    rent_account_payers.payer_id,
+                    rent_accounts.id AS rent_account_id,
+                    units.label AS unit_label,
+                    rent_accounts.display_name AS account_display_name
+                FROM rent_account_payers
+                JOIN rent_accounts
+                    ON rent_accounts.id = rent_account_payers.rent_account_id
+                JOIN units ON units.id = rent_accounts.unit_id
+                ORDER BY rent_account_payers.payer_id, rent_accounts.id
+                """
+            ).fetchall()
+        return [SuggestionAccountSourceRecord(**dict(row)) for row in rows]
