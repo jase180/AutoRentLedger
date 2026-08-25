@@ -394,7 +394,7 @@ def test_service_and_cli_are_strictly_read_only_and_private(tmp_path, capsys):
     assert run_overview(database_path, "2026-09") == 0
     assert database_snapshot(database_path) == before
     output = capsys.readouterr().out
-    assert "OWNER OVERVIEW - 2026-09" in output
+    assert "SEPTEMBER 2026" in output
     assert "MONTHLY RENT" in output
     assert "PAYMENT INTAKE" in output
     assert "CURRENT ATTENTION" in output
@@ -454,4 +454,4 @@ def test_overview_does_not_call_gmail_sync_processing_or_generation(
     assert main(
         ["overview", "--period", "2026-09", "--database", str(database_path)]
     ) == 0
-    assert "OWNER OVERVIEW - 2026-09" in capsys.readouterr().out
+    assert "SEPTEMBER 2026" in capsys.readouterr().out

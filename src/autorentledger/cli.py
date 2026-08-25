@@ -43,7 +43,7 @@ from autorentledger.obligations import (
     create_obligation,
 )
 from autorentledger.operations import SyncResult, run_sync
-from autorentledger.overview import OwnerOverview, build_owner_overview
+from autorentledger.overview import build_owner_overview, render_owner_overview_terminal
 from autorentledger.parsing import NotificationParseError, parse_payment_notification
 from autorentledger.processing import process_raw_emails
 from autorentledger.rebuilding import (
@@ -1231,67 +1231,8 @@ def run_overview(database_path: Path, period: str) -> int:
     ) as error:
         print(error)
         return 1
-    _print_overview(overview)
+    print(render_owner_overview_terminal(overview))
     return 0
-
-
-def _print_overview(overview: OwnerOverview) -> None:
-    print(f"OWNER OVERVIEW - {overview.period}")
-    print("MONTHLY RENT")
-    print(f"Owed: {_format_currency(overview.rent.owed_cents)}")
-    print(f"Allocated: {_format_currency(overview.rent.allocated_cents)}")
-    print(f"Remaining: {_format_currency(overview.rent.remaining_cents)}")
-    print("ACCOUNT STATUS")
-    print(f"Paid: {overview.rent.paid_count}")
-    print(f"Partial: {overview.rent.partial_count}")
-    print(f"Unpaid: {overview.rent.unpaid_count}")
-    print(f"Total: {overview.rent.total_obligation_count}")
-    for account in overview.accounts:
-        print(f"{account.unit_label} / {account.account_display_name}")
-        print(f"  Owed: {_format_currency(account.owed_cents)}")
-        print(f"  Allocated: {_format_currency(account.allocated_cents)}")
-        print(f"  Remaining: {_format_currency(account.remaining_cents)}")
-        print(f"  Status: {account.status}")
-
-    print("PAYMENT INTAKE")
-    print(f"Observed: {_format_currency(overview.payment_intake.received_cents)}")
-    print(
-        "Allocated: "
-        f"{_format_currency(overview.payment_intake.allocated_from_in_month_payments_cents)}"
-    )
-    print(
-        "Unallocated: "
-        f"{_format_currency(overview.payment_intake.unallocated_from_in_month_payments_cents)}"
-    )
-    print("CURRENT ATTENTION")
-    print(f"Unresolved payers: {overview.attention.unresolved_payers}")
-    print(f"Unallocated payments: {overview.attention.unallocated_payments}")
-    print(f"Partial obligations: {overview.attention.partial_obligations}")
-    print(f"Unpaid obligations: {overview.attention.unpaid_obligations}")
-    print(f"Unparsed notifications: {overview.attention.unparsed_emails}")
-
-    print("MISSING OBLIGATIONS")
-    print(f"Warnings: {len(overview.missing_obligations)}")
-    for missing in overview.missing_obligations:
-        print(f"{missing.unit_label} / {missing.account_display_name}")
-        print(f"  Expected: {_format_currency(missing.amount_cents)}")
-        print(f"  Due day: {missing.due_day}")
-        print(f"  No {missing.period} obligation exists.")
-    if overview.missing_obligations:
-        print("Run:")
-        print(
-            "  autorentledger obligations generate "
-            f"--period {overview.period}"
-        )
-
-    print("SUGGESTIONS")
-    print(f"Actionable suggestions: {len(overview.actionable_suggestions)}")
-    for suggestion in overview.actionable_suggestions:
-        print(
-            f"Payment {suggestion.payment_event_id} -> {suggestion.unit_label} / "
-            f"{suggestion.account_display_name} / {suggestion.period}"
-        )
-        print(f"Suggested: {_format_currency(suggestion.suggested_amount_cents)}")
 
 
 def run_review(database_path: Path) -> int:

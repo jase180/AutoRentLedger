@@ -796,6 +796,26 @@ monthly report, canonical review, conservative allocation suggestions, and read-
 generation plan. This keeps the owner-facing meaning outside the CLI so a future interface can
 render the same model without duplicating accounting rules.
 
+The terminal presentation is optimized for quick owner scanning while leaving those semantics
+unchanged. It uses a readable month heading, exact collection percentage, fixed-width progress
+bar, compact account table, and stable sections even when there is nothing to show:
+
+```text
+SEPTEMBER 2026
+============================================================
+MONTHLY RENT
+Owed                       $2,950
+Allocated                  $2,125
+Remaining                    $825
+Collected                   72.0%
+Collection          ##############------  72.0%
+
+ACCOUNT STATUS
+Unit    Account                Owed    Paid  Left  Status
+Unit A  Synthetic Household  $1,450  $1,450    $0  PAID
+Unit B  Example Household    $1,500    $675  $825  PARTIAL
+```
+
 Monthly rent totals and account rows include only actual obligations for the requested period and
 reuse canonical `PAID`, `PARTIAL`, and `UNPAID` reconciliation. Payment intake separately uses the
 existing occurrence-month semantics: all allocations originating from payments observed in that
