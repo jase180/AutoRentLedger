@@ -777,6 +777,12 @@ pytest
 ruff check .
 ```
 
+## Continuous integration
+
+Pushes and pull requests run the same full `ruff check .` and `pytest` checks on Python 3.11 in
+GitHub Actions. CI uses only synthetic/local test fixtures and requires no Gmail credentials,
+OAuth token, real email data, or other repository secrets.
+
 ## Structure
 
 ```text
