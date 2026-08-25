@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Callable, Mapping
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -373,7 +374,7 @@ def get_schema_status(database_path: Path) -> SchemaStatus:
         return SchemaStatus(
             database_path, False, 0, None, CURRENT_SCHEMA_VERSION, "not initialized"
         )
-    with _connect_read_only(database_path) as connection:
+    with closing(_connect_read_only(database_path)) as connection:
         reported = _user_version(connection)
         if reported == 0:
             detected = detect_legacy_version(connection)
@@ -493,7 +494,7 @@ def _known_tables(connection: sqlite3.Connection) -> frozenset[str]:
     rows = connection.execute(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
     ).fetchall()
-    return frozenset(str(row[0]) for row in rows if row[0] in EXPECTED_COLUMNS)
+    return frozenset(str(row[0]) for row in rows)
 
 
 def _validate_known_table_columns(
@@ -533,7 +534,6 @@ def _validate_schema_matches_version(
 ) -> None:
     _validate_version(version)
     known_tables = _known_tables(connection)
-    _validate_known_table_columns(connection, known_tables, version)
     expected = TABLES_BY_VERSION[version]
     if known_tables != expected:
         missing = ", ".join(sorted(expected - known_tables)) or "none"
@@ -542,6 +542,7 @@ def _validate_schema_matches_version(
             f"Schema version {version} has inconsistent tables; missing: {missing}; "
             f"unexpected: {unexpected}."
         )
+    _validate_known_table_columns(connection, known_tables, version)
 
 
 def _validate_version(version: int) -> None:
@@ -567,8 +568,8 @@ def _backup_database(database_path: Path, *, now: datetime | None) -> Path:
         backup_path = base.with_name(f"{base.name}-{suffix}")
         suffix += 1
     with (
-        _connect_read_only(database_path) as source,
-        sqlite3.connect(backup_path) as destination,
+        closing(_connect_read_only(database_path)) as source,
+        closing(sqlite3.connect(backup_path)) as destination,
     ):
         source.backup(destination)
     return backup_path

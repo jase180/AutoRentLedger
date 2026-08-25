@@ -14,6 +14,13 @@ from autorentledger.allocations import (
     create_allocation,
     remove_allocation,
 )
+from autorentledger.database import (
+    DatabaseHealthResult,
+    DatabaseOperationError,
+    backup_database,
+    check_database,
+    restore_database,
+)
 from autorentledger.email.gmail import GmailSource
 from autorentledger.email.source import EmailSource
 from autorentledger.identity import normalize_alias, unresolved_senders
@@ -329,6 +336,18 @@ def build_parser() -> argparse.ArgumentParser:
     database_status.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
     database_upgrade = database_commands.add_parser("upgrade", help="upgrade schema explicitly")
     database_upgrade.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+    database_check = database_commands.add_parser("check", help="verify database health")
+    database_check.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+    database_backup = database_commands.add_parser(
+        "backup", help="create a verified SQLite backup"
+    )
+    database_backup.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+    database_backup.add_argument("--output", type=Path, dest="output_path")
+    database_restore = database_commands.add_parser(
+        "restore", help="restore a verified SQLite backup"
+    )
+    database_restore.add_argument("backup_path", type=Path)
+    database_restore.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
     return parser
 
 
@@ -1343,6 +1362,51 @@ def run_database_upgrade(database_path: Path) -> int:
     return 0
 
 
+def run_database_check(database_path: Path) -> int:
+    health = check_database(database_path)
+    _print_database_health(health)
+    return 0 if health.healthy else 1
+
+
+def _print_database_health(health: DatabaseHealthResult) -> None:
+    print("DATABASE HEALTH")
+    print(f"Schema:        {_health_label(health.schema_ok)}")
+    print(f"Integrity:     {_health_label(health.sqlite_integrity_ok)}")
+    print(f"Foreign keys:  {_health_label(health.foreign_keys_ok)}")
+    print(f"Ledger:        {_health_label(health.ledger_ok)}")
+    for issue in health.issues:
+        print(issue.message)
+    print("Database healthy." if health.healthy else "Database unhealthy.")
+
+
+def _health_label(ok: bool) -> str:
+    return "OK" if ok else "FAILED"
+
+
+def run_database_backup(database_path: Path, output_path: Path | None) -> int:
+    try:
+        result = backup_database(database_path, output_path=output_path)
+    except (DatabaseOperationError, OSError, sqlite3.Error) as error:
+        print(f"Database backup failed: {error}")
+        return 1
+    print(f"Backup created: {result.backup_path}")
+    print("Backup verified healthy.")
+    return 0
+
+
+def run_database_restore(candidate_path: Path, database_path: Path) -> int:
+    try:
+        result = restore_database(candidate_path, database_path)
+    except (DatabaseOperationError, OSError, sqlite3.Error) as error:
+        print(f"Database restore failed: {error}")
+        return 1
+    print(f"Database restored from: {result.candidate_path}")
+    if result.pre_restore_backup_path is not None:
+        print(f"Pre-restore backup: {result.pre_restore_backup_path}")
+    print("Restored database verified healthy.")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "db":
@@ -1350,6 +1414,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             return run_database_status(args.database)
         if args.database_command == "upgrade":
             return run_database_upgrade(args.database)
+        if args.database_command == "check":
+            return run_database_check(args.database)
+        if args.database_command == "backup":
+            return run_database_backup(args.database, args.output_path)
+        if args.database_command == "restore":
+            return run_database_restore(args.backup_path, args.database)
         raise AssertionError(f"Unhandled database command: {args.database_command}")
     if args.command != "search":
         try:

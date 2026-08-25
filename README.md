@@ -1,6 +1,6 @@
 # AutoRentLedger
 
-AutoRentLedger Milestone 17 is a small, read-only Gmail ingestion and deterministic payment-event
+AutoRentLedger Milestone 18 is a small, read-only Gmail ingestion and deterministic payment-event
 pipeline with explicit payer identities, rent accounts, monthly obligations, and manual payment
 allocations. It derives each obligation's current reconciliation state without persisting status.
 It also derives one operational review list from unresolved identities, unallocated money,
@@ -49,6 +49,8 @@ python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
 autorentledger db status
 autorentledger db upgrade
+autorentledger db check
+autorentledger db backup
 autorentledger search
 autorentledger ingest
 autorentledger sync
@@ -98,6 +100,8 @@ python -m pip install --upgrade pip
 python -m pip install -e '.[dev]'
 autorentledger db status
 autorentledger db upgrade
+autorentledger db check
+autorentledger db backup
 autorentledger search
 autorentledger ingest
 autorentledger sync
@@ -171,6 +175,47 @@ The historical `payment_events.amount_cents` definition does not yet carry the p
 database check used by obligations and allocations. Adding it requires a carefully validated SQLite
 table rebuild and is intentionally deferred rather than increasing migration risk in this hardening
 milestone.
+
+## Database health, backup, and restore
+
+Verify the current schema, SQLite integrity, foreign keys, and durable allocation limits without
+writing to the database:
+
+```powershell
+autorentledger db check --database data/autorentledger.db
+```
+
+Create a timestamped local recovery point under the ignored `backups/` directory, or choose an
+explicit destination:
+
+```powershell
+autorentledger db backup --database data/autorentledger.db
+autorentledger db backup `
+  --database data/autorentledger.db `
+  --output backups/manual-before-change.db
+```
+
+Backup first requires a current, healthy source; uses Python's SQLite backup API rather than
+copying an active database file; refuses to overwrite; and independently verifies the resulting
+snapshot. This includes committed WAL data. Later changes to the source do not affect the backup.
+
+Restore a verified current-version backup explicitly:
+
+```powershell
+autorentledger db restore backups/manual-before-change.db `
+  --database data/autorentledger.db
+```
+
+Restore treats the candidate as immutable input and validates it before touching the active
+database. It stages and validates a new database beside the active file, creates and verifies a
+timestamped pre-restore safety backup when an active database exists, then uses `os.replace` for
+the final same-filesystem replacement and validates again. If that final validation unexpectedly
+fails, the verified pre-restore database is restored automatically. Missing, corrupt, unhealthy,
+foreign-key-invalid, allocation-invalid, or non-v8 candidates are rejected without migration.
+
+Health checks detect only; there is no automatic repair. Backups remain local and Git-ignored.
+There is no backup registry, cloud upload, encryption framework, retention pruning, or scheduled
+operation in this milestone.
 
 The default Gmail query is `subject:zelle`. Override it when your bank uses different wording:
 
@@ -793,6 +838,9 @@ src/autorentledger/
   storage/
     migrations.py   # schema versions, legacy detection, backup, and atomic upgrade
     sqlite.py       # SQLite schemas and repositories
+  database/
+    health.py       # read-only schema, SQLite, foreign-key, and ledger verification
+    backup.py       # verified SQLite snapshots and staged atomic restore
   identity/
     normalization.py # conservative sender-alias normalization
     service.py       # read-time payer resolution and unresolved inspection
