@@ -1,6 +1,6 @@
 # AutoRentLedger
 
-AutoRentLedger Milestone 14 is a small, read-only Gmail ingestion and deterministic payment-event
+AutoRentLedger Milestone 15 is a small, read-only Gmail ingestion and deterministic payment-event
 pipeline with explicit payer identities, rent accounts, monthly obligations, and manual payment
 allocations. It derives each obligation's current reconciliation state without persisting status.
 It also derives one operational review list from unresolved identities, unallocated money,
@@ -51,6 +51,7 @@ autorentledger db status
 autorentledger db upgrade
 autorentledger search
 autorentledger ingest
+autorentledger sync
 autorentledger parse
 autorentledger process
 autorentledger payments
@@ -96,6 +97,7 @@ autorentledger db status
 autorentledger db upgrade
 autorentledger search
 autorentledger ingest
+autorentledger sync
 autorentledger parse
 autorentledger process
 autorentledger payments
@@ -178,14 +180,49 @@ autorentledger search --credentials C:\secure\gmail-client.json --token C:\secur
 
 ## Raw email ingestion
 
+Refresh normal evidence and immediately summarize current attention with one command:
+
+```powershell
+autorentledger sync
+```
+
+`sync` first requires the current database schema, then uses the existing Gmail ingestion and
+payment-processing services before deriving the canonical review list and conservative actionable
+allocation suggestions. It accepts the same practical options as ingestion:
+
+```powershell
+autorentledger sync `
+  --query "subject:zelle" `
+  --max-results 100 `
+  --database data/autorentledger.db `
+  --credentials credentials.json `
+  --token token.json
+```
+
+The summary reports new and previously stored email counts, newly created payment events, safe
+parse-failure reasons, each current review-kind count, and compact actionable suggestions. A parse
+failure for one notification is a reported domain outcome: other messages continue processing and
+the command succeeds. Authentication, network, database, or ledger-invariant failures return a
+nonzero status.
+
+The stages keep their existing independent durability guarantees. If ingestion succeeds and a
+later stage fails structurally, the raw evidence remains stored; rerunning `sync` skips that raw
+email download and safely resumes processing. A second unchanged run creates neither duplicate raw
+emails nor duplicate payment events, while still showing existing attention and suggestions.
+
+`sync` writes only through the existing `raw_emails` and `payment_events` evidence pipeline. It
+does not generate obligations, create or accept allocations, change payer identity or rental
+configuration, run maintenance commands, persist review/suggestion results, or create sync history.
+Obligation generation and every accounting/configuration decision remain explicit commands.
+
 Run ingestion with the defaults:
 
 ```powershell
 autorentledger ingest
 ```
 
-This searches for `subject:zelle` and creates `data/autorentledger.db` automatically. Output is
-limited to safe counts:
+This searches for `subject:zelle` in the current database initialized by `db upgrade`. It never
+initializes or upgrades the schema implicitly. Output is limited to safe counts:
 
 ```text
 Found: 3
@@ -693,6 +730,8 @@ src/autorentledger/
     service.py       # monthly obligation totals and occurrence-dated payment intake
   review/
     service.py       # derived operational review items
+  operations/
+    sync.py          # evidence refresh orchestration and safe derived summaries
   parsing/
     mime.py         # source-neutral MIME text decoding
     models.py       # normalized result and structured parse failure
@@ -725,7 +764,8 @@ statuses, or exports in SQLite.
 Schedule generation uses effective-dated instructions to create ordinary obligations explicitly;
 it never modifies an obligation that already exists.
 Suggestions combine exact identity, account membership, payment remainder, and canonical
-reconciliation without writing or bypassing allocation validation.
+reconciliation without writing or bypassing allocation validation. Sync composes ingestion,
+processing, review, and suggestions without adding accounting behavior or persisted run state.
 Normal CLI operations require the current schema; only `db upgrade` changes schema version or
 applies migrations.
 

@@ -35,6 +35,7 @@ from autorentledger.obligations import (
     ObligationValidationError,
     create_obligation,
 )
+from autorentledger.operations import SyncResult, run_sync
 from autorentledger.parsing import NotificationParseError, parse_payment_notification
 from autorentledger.processing import process_raw_emails
 from autorentledger.reconciliation import (
@@ -113,6 +114,15 @@ def build_parser() -> argparse.ArgumentParser:
     ingest.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
     ingest.add_argument("--credentials", type=Path, default=Path("credentials.json"))
     ingest.add_argument("--token", type=Path, default=Path("token.json"))
+
+    sync = subparsers.add_parser(
+        "sync", help="refresh Gmail evidence and summarize current attention"
+    )
+    sync.add_argument("--query", default=DEFAULT_QUERY, help="Gmail search query")
+    sync.add_argument("--max-results", type=int, default=100)
+    sync.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+    sync.add_argument("--credentials", type=Path, default=Path("credentials.json"))
+    sync.add_argument("--token", type=Path, default=Path("token.json"))
 
     parse = subparsers.add_parser("parse", help="parse locally stored raw emails")
     parse.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
@@ -328,6 +338,57 @@ def run_ingestion(
     print(f"Inserted: {result.inserted}")
     print(f"Already present: {result.already_present}")
     return 0
+
+
+def run_sync_command(
+    source: EmailSource,
+    database_path: Path,
+    query: str,
+    max_results: int,
+) -> int:
+    try:
+        result = run_sync(
+            source,
+            SQLiteRawEmailRepository(database_path),
+            SQLitePaymentEventRepository(database_path),
+            SQLiteReconciliationRepository(database_path),
+            SQLiteReviewRepository(database_path),
+            SQLiteSuggestionRepository(database_path),
+            query,
+            max_results,
+        )
+    except Exception as error:  # noqa: BLE001 - external sync stage boundary
+        print(f"Sync failed during evidence refresh ({type(error).__name__}).")
+        return 1
+    _print_sync_result(result)
+    return 0
+
+
+def _print_sync_result(result: SyncResult) -> None:
+    print("AutoRentLedger Sync")
+    print("INGEST")
+    print(f"Found: {result.ingestion.found}")
+    print(f"New emails: {result.ingestion.inserted}")
+    print(f"Already present: {result.ingestion.already_present}")
+    print("PROCESS")
+    print(f"New payment events: {result.processing.created}")
+    print(f"Parse failures: {result.processing.parse_failures}")
+    for reason, count in result.processing.failure_reasons:
+        print(f"Failure reason: {reason} ({count})")
+    print("CURRENT ATTENTION")
+    print(f"Unresolved payers: {result.review.unresolved_payers}")
+    print(f"Unallocated payments: {result.review.unallocated_payments}")
+    print(f"Partial obligations: {result.review.partial_obligations}")
+    print(f"Unpaid obligations: {result.review.unpaid_obligations}")
+    print(f"Unparsed emails: {result.review.unparsed_emails}")
+    print("ALLOCATION SUGGESTIONS")
+    print(f"Actionable suggestions: {len(result.actionable_suggestions)}")
+    for suggestion in result.actionable_suggestions:
+        print(
+            f"Payment {suggestion.payment_event_id} -> {suggestion.unit_label} / "
+            f"{suggestion.account_display_name} / {suggestion.period}: "
+            f"{_format_currency(suggestion.suggested_amount_cents)}"
+        )
 
 
 def run_parsing(database_path: Path) -> int:
@@ -1134,6 +1195,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "ingest":
         source = GmailSource.authenticate(args.credentials, args.token)
         return run_ingestion(source, args.database, args.query, args.max_results)
+    if args.command == "sync":
+        try:
+            source = GmailSource.authenticate(args.credentials, args.token)
+        except Exception as error:  # noqa: BLE001 - external OAuth boundary
+            print(f"Sync failed during Gmail authentication ({type(error).__name__}).")
+            return 1
+        return run_sync_command(source, args.database, args.query, args.max_results)
     if args.command == "parse":
         return run_parsing(args.database)
     if args.command == "process":
