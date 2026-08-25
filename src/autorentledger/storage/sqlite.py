@@ -257,6 +257,48 @@ class RentScheduleOverlapStorageError(Exception):
     """The schedule overlaps another schedule for the same account."""
 
 
+class MaintenanceStorageError(Exception):
+    """Base error for transactional maintenance validation."""
+
+
+class MaintenancePayerNotFoundError(MaintenanceStorageError):
+    pass
+
+
+class MaintenanceAliasNotFoundError(MaintenanceStorageError):
+    pass
+
+
+class MaintenanceAliasOwnerError(MaintenanceStorageError):
+    def __init__(self, owner_id: int) -> None:
+        self.owner_id = owner_id
+
+
+class MaintenanceRentAccountNotFoundError(MaintenanceStorageError):
+    pass
+
+
+class MaintenanceAssociationNotFoundError(MaintenanceStorageError):
+    pass
+
+
+class MaintenanceScheduleNotFoundError(MaintenanceStorageError):
+    pass
+
+
+class MaintenanceDateRangeError(MaintenanceStorageError):
+    pass
+
+
+class MaintenanceScheduleConflictError(MaintenanceStorageError):
+    def __init__(self, schedule_id: int) -> None:
+        self.schedule_id = schedule_id
+
+
+class MaintenanceScheduleOutsideAccountRangeError(MaintenanceStorageError):
+    pass
+
+
 class AllocationStorageError(Exception):
     """Base error for transactional allocation validation."""
 
@@ -522,6 +564,45 @@ class SQLitePayerRepository:
             ).fetchall()
         return {str(row["normalized_alias"]) for row in rows}
 
+    def rename_checked(
+        self, payer_id: int, display_name: str
+    ) -> tuple[PayerRecord, PayerRecord]:
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT * FROM payers WHERE id = ?", (payer_id,)
+            ).fetchone()
+            if row is None:
+                raise MaintenancePayerNotFoundError
+            previous = PayerRecord(**dict(row))
+            connection.execute(
+                "UPDATE payers SET display_name = ? WHERE id = ?",
+                (display_name, payer_id),
+            )
+        return previous, PayerRecord(payer_id, display_name, previous.created_at)
+
+    def remove_alias_checked(
+        self, payer_id: int, normalized_alias: str
+    ) -> PayerAliasRecord:
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            payer = connection.execute(
+                "SELECT 1 FROM payers WHERE id = ?", (payer_id,)
+            ).fetchone()
+            if payer is None:
+                raise MaintenancePayerNotFoundError
+            row = connection.execute(
+                "SELECT * FROM payer_aliases WHERE normalized_alias = ?",
+                (normalized_alias,),
+            ).fetchone()
+            if row is None:
+                raise MaintenanceAliasNotFoundError
+            alias = PayerAliasRecord(**dict(row))
+            if alias.payer_id != payer_id:
+                raise MaintenanceAliasOwnerError(alias.payer_id)
+            connection.execute("DELETE FROM payer_aliases WHERE id = ?", (alias.id,))
+        return alias
+
 
 class SQLiteRentalRepository:
     """Persist units, rent accounts, and explicit payer associations."""
@@ -695,6 +776,103 @@ class SQLiteRentalRepository:
                 (payer_id,),
             ).fetchall()
         return [RentAccountSummary(**dict(row)) for row in rows]
+
+    def rename_rent_account_checked(
+        self, account_id: int, display_name: str
+    ) -> tuple[RentAccountRecord, RentAccountRecord]:
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT * FROM rent_accounts WHERE id = ?", (account_id,)
+            ).fetchone()
+            if row is None:
+                raise MaintenanceRentAccountNotFoundError
+            previous = RentAccountRecord(**dict(row))
+            connection.execute(
+                "UPDATE rent_accounts SET display_name = ? WHERE id = ?",
+                (display_name, account_id),
+            )
+        return previous, RentAccountRecord(
+            previous.id,
+            previous.unit_id,
+            display_name,
+            previous.active_from,
+            previous.active_to,
+            previous.created_at,
+        )
+
+    def remove_payer_checked(
+        self, account_id: int, payer_id: int
+    ) -> RentAccountPayerRecord:
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if connection.execute(
+                "SELECT 1 FROM rent_accounts WHERE id = ?", (account_id,)
+            ).fetchone() is None:
+                raise MaintenanceRentAccountNotFoundError
+            if connection.execute(
+                "SELECT 1 FROM payers WHERE id = ?", (payer_id,)
+            ).fetchone() is None:
+                raise MaintenancePayerNotFoundError
+            row = connection.execute(
+                """
+                SELECT rent_account_id, payer_id, created_at
+                FROM rent_account_payers
+                WHERE rent_account_id = ? AND payer_id = ?
+                """,
+                (account_id, payer_id),
+            ).fetchone()
+            if row is None:
+                raise MaintenanceAssociationNotFoundError
+            association = RentAccountPayerRecord(**dict(row))
+            connection.execute(
+                """
+                DELETE FROM rent_account_payers
+                WHERE rent_account_id = ? AND payer_id = ?
+                """,
+                (account_id, payer_id),
+            )
+        return association
+
+    def end_rent_account_checked(
+        self, account_id: int, active_to: date
+    ) -> tuple[RentAccountRecord, RentAccountRecord]:
+        active_to_text = active_to.isoformat()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT * FROM rent_accounts WHERE id = ?", (account_id,)
+            ).fetchone()
+            if row is None:
+                raise MaintenanceRentAccountNotFoundError
+            previous = RentAccountRecord(**dict(row))
+            if previous.active_from is not None and active_to_text < previous.active_from:
+                raise MaintenanceDateRangeError
+            conflict = connection.execute(
+                """
+                SELECT id
+                FROM rent_schedules
+                WHERE rent_account_id = ?
+                    AND (active_to IS NULL OR active_to > ?)
+                ORDER BY id
+                LIMIT 1
+                """,
+                (account_id, active_to_text),
+            ).fetchone()
+            if conflict is not None:
+                raise MaintenanceScheduleConflictError(int(conflict["id"]))
+            connection.execute(
+                "UPDATE rent_accounts SET active_to = ? WHERE id = ?",
+                (active_to_text, account_id),
+            )
+        return previous, RentAccountRecord(
+            previous.id,
+            previous.unit_id,
+            previous.display_name,
+            previous.active_from,
+            active_to_text,
+            previous.created_at,
+        )
 
 
 class SQLiteObligationRepository:
@@ -969,6 +1147,70 @@ class SQLiteRentScheduleRepository:
                 parameters,
             ).fetchall()
         return [RentScheduleSummary(**dict(row)) for row in rows]
+
+    def end_checked(
+        self, schedule_id: int, active_to: date
+    ) -> tuple[RentScheduleRecord, RentScheduleRecord]:
+        active_to_text = active_to.isoformat()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT * FROM rent_schedules WHERE id = ?", (schedule_id,)
+            ).fetchone()
+            if row is None:
+                raise MaintenanceScheduleNotFoundError
+            previous = RentScheduleRecord(**dict(row))
+            if active_to_text < previous.active_from:
+                raise MaintenanceDateRangeError
+
+            account = connection.execute(
+                "SELECT active_from, active_to FROM rent_accounts WHERE id = ?",
+                (previous.rent_account_id,),
+            ).fetchone()
+            if account is None:
+                raise MaintenanceRentAccountNotFoundError
+            if (
+                account["active_from"] is not None
+                and previous.active_from < account["active_from"]
+            ) or (
+                account["active_to"] is not None and active_to_text > account["active_to"]
+            ):
+                raise MaintenanceScheduleOutsideAccountRangeError
+
+            overlap = connection.execute(
+                """
+                SELECT id
+                FROM rent_schedules
+                WHERE rent_account_id = ?
+                    AND id <> ?
+                    AND active_from <= ?
+                    AND (active_to IS NULL OR active_to >= ?)
+                ORDER BY id
+                LIMIT 1
+                """,
+                (
+                    previous.rent_account_id,
+                    schedule_id,
+                    active_to_text,
+                    previous.active_from,
+                ),
+            ).fetchone()
+            if overlap is not None:
+                raise MaintenanceScheduleConflictError(int(overlap["id"]))
+
+            connection.execute(
+                "UPDATE rent_schedules SET active_to = ? WHERE id = ?",
+                (active_to_text, schedule_id),
+            )
+        return previous, RentScheduleRecord(
+            previous.id,
+            previous.rent_account_id,
+            previous.amount_cents,
+            previous.due_day,
+            previous.active_from,
+            active_to_text,
+            previous.created_at,
+        )
 
     def list_generation_sources(
         self, period: str, month_start: str, month_end: str

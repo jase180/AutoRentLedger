@@ -18,6 +18,17 @@ from autorentledger.email.gmail import GmailSource
 from autorentledger.email.source import EmailSource
 from autorentledger.identity import normalize_alias, unresolved_senders
 from autorentledger.ingestion import ingest_raw_emails
+from autorentledger.maintenance import (
+    MaintenanceConflictError,
+    MaintenanceNotFoundError,
+    MaintenanceValidationError,
+    end_rent_account,
+    end_rent_schedule,
+    remove_payer_alias,
+    remove_rent_account_payer,
+    rename_payer,
+    rename_rent_account,
+)
 from autorentledger.obligations import (
     DuplicateObligationError,
     ObligationAccountNotFoundError,
@@ -128,6 +139,18 @@ def build_parser() -> argparse.ArgumentParser:
     aliases.add_argument("payer_id", type=int)
     aliases.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
 
+    payer_rename = payer_commands.add_parser("rename", help="rename a payer")
+    payer_rename.add_argument("payer_id", type=int)
+    payer_rename.add_argument("display_name")
+    payer_rename.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+    alias_remove = payer_commands.add_parser(
+        "alias-remove", help="remove one exact alias from a payer"
+    )
+    alias_remove.add_argument("payer_id", type=int)
+    alias_remove.add_argument("alias")
+    alias_remove.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
     payers = subparsers.add_parser("payers", help="list payer identities")
     payers.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
 
@@ -162,6 +185,23 @@ def build_parser() -> argparse.ArgumentParser:
     account_add_payer.add_argument("--account", type=int, required=True)
     account_add_payer.add_argument("--payer", type=int, required=True)
     account_add_payer.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+    account_rename = rent_account_commands.add_parser("rename", help="rename a rent account")
+    account_rename.add_argument("account_id", type=int)
+    account_rename.add_argument("display_name")
+    account_rename.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+    account_remove_payer = rent_account_commands.add_parser(
+        "remove-payer", help="remove one payer association from a rent account"
+    )
+    account_remove_payer.add_argument("--account", type=int, required=True)
+    account_remove_payer.add_argument("--payer", type=int, required=True)
+    account_remove_payer.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+    account_end = rent_account_commands.add_parser("end", help="end a rent account")
+    account_end.add_argument("account_id", type=int)
+    account_end.add_argument("--active-to", required=True)
+    account_end.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
 
     account_show = rent_account_commands.add_parser("show", help="inspect a rent account")
     account_show.add_argument("account_id", type=int)
@@ -205,6 +245,11 @@ def build_parser() -> argparse.ArgumentParser:
     schedule_add.add_argument("--active-from", required=True)
     schedule_add.add_argument("--active-to")
     schedule_add.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+    schedule_end = rent_schedule_commands.add_parser("end", help="end a rent schedule")
+    schedule_end.add_argument("schedule_id", type=int)
+    schedule_end.add_argument("--active-to", required=True)
+    schedule_end.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
 
     rent_schedules = subparsers.add_parser("rent-schedules", help="list rent schedules")
     rent_schedules.add_argument("--account", type=int)
@@ -412,6 +457,32 @@ def run_alias_listing(database_path: Path, payer_id: int) -> int:
     return 0
 
 
+def run_payer_rename(database_path: Path, payer_id: int, display_name: str) -> int:
+    try:
+        previous, updated = rename_payer(
+            SQLitePayerRepository(database_path), payer_id, display_name
+        )
+    except (MaintenanceNotFoundError, MaintenanceValidationError) as error:
+        print(error)
+        return 1
+    print(f'Renamed payer {payer_id}: "{previous.display_name}" -> "{updated.display_name}"')
+    return 0
+
+
+def run_alias_remove(database_path: Path, payer_id: int, alias: str) -> int:
+    try:
+        removed = remove_payer_alias(SQLitePayerRepository(database_path), payer_id, alias)
+    except (
+        MaintenanceConflictError,
+        MaintenanceNotFoundError,
+        MaintenanceValidationError,
+    ) as error:
+        print(error)
+        return 1
+    print(f'Removed alias "{removed.alias}" from payer {payer_id}.')
+    return 0
+
+
 def run_unresolved_payers(database_path: Path) -> int:
     payments = SQLitePaymentEventRepository(database_path)
     payers = SQLitePayerRepository(database_path)
@@ -504,6 +575,54 @@ def run_rent_account_show(database_path: Path, account_id: int) -> int:
     print("Payers:")
     for payer in repository.list_account_payers(account_id):
         print(f"- {payer.display_name}")
+    return 0
+
+
+def run_rent_account_rename(
+    database_path: Path, account_id: int, display_name: str
+) -> int:
+    try:
+        previous, updated = rename_rent_account(
+            SQLiteRentalRepository(database_path), account_id, display_name
+        )
+    except (MaintenanceNotFoundError, MaintenanceValidationError) as error:
+        print(error)
+        return 1
+    print(
+        f'Renamed rent account {account_id}: "{previous.display_name}" '
+        f'-> "{updated.display_name}"'
+    )
+    return 0
+
+
+def run_rent_account_remove_payer(
+    database_path: Path, account_id: int, payer_id: int
+) -> int:
+    try:
+        remove_rent_account_payer(
+            SQLiteRentalRepository(database_path), account_id, payer_id
+        )
+    except MaintenanceNotFoundError as error:
+        print(error)
+        return 1
+    print(f"Removed payer {payer_id} from rent account {account_id}.")
+    return 0
+
+
+def run_rent_account_end(database_path: Path, account_id: int, active_to: str) -> int:
+    try:
+        previous, updated = end_rent_account(
+            SQLiteRentalRepository(database_path), account_id, active_to
+        )
+    except (
+        MaintenanceConflictError,
+        MaintenanceNotFoundError,
+        MaintenanceValidationError,
+    ) as error:
+        print(error)
+        return 1
+    print(f"Ended rent account {account_id}:")
+    print(f"active_to: {previous.active_to or 'NULL'} -> {updated.active_to}")
     return 0
 
 
@@ -623,6 +742,23 @@ def run_rent_schedule_listing(
             f"{schedule.due_day:>7} {schedule.active_from:<12} "
             f"{schedule.active_to or '-'}"
         )
+    return 0
+
+
+def run_rent_schedule_end(database_path: Path, schedule_id: int, active_to: str) -> int:
+    try:
+        previous, updated = end_rent_schedule(
+            SQLiteRentScheduleRepository(database_path), schedule_id, active_to
+        )
+    except (
+        MaintenanceConflictError,
+        MaintenanceNotFoundError,
+        MaintenanceValidationError,
+    ) as error:
+        print(error)
+        return 1
+    print(f"Ended rent schedule {schedule_id}:")
+    print(f"active_to: {previous.active_to or 'NULL'} -> {updated.active_to}")
     return 0
 
 
@@ -1011,6 +1147,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             return run_alias_add(args.database, args.payer_id, args.alias)
         if args.payer_command == "aliases":
             return run_alias_listing(args.database, args.payer_id)
+        if args.payer_command == "rename":
+            return run_payer_rename(args.database, args.payer_id, args.display_name)
+        if args.payer_command == "alias-remove":
+            return run_alias_remove(args.database, args.payer_id, args.alias)
         raise AssertionError(f"Unhandled payer command: {args.payer_command}")
     if args.command == "payers":
         return run_payer_listing(args.database)
@@ -1033,6 +1173,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         if args.rent_account_command == "add-payer":
             return run_rent_account_add_payer(args.database, args.account, args.payer)
+        if args.rent_account_command == "rename":
+            return run_rent_account_rename(
+                args.database, args.account_id, args.display_name
+            )
+        if args.rent_account_command == "remove-payer":
+            return run_rent_account_remove_payer(
+                args.database, args.account, args.payer
+            )
+        if args.rent_account_command == "end":
+            return run_rent_account_end(args.database, args.account_id, args.active_to)
         if args.rent_account_command == "show":
             return run_rent_account_show(args.database, args.account_id)
         raise AssertionError(f"Unhandled rent-account command: {args.rent_account_command}")
@@ -1066,6 +1216,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.active_from,
                 args.active_to,
             )
+        if args.rent_schedule_command == "end":
+            return run_rent_schedule_end(args.database, args.schedule_id, args.active_to)
         raise AssertionError(f"Unhandled rent-schedule command: {args.rent_schedule_command}")
     if args.command == "rent-schedules":
         return run_rent_schedule_listing(args.database, args.account)

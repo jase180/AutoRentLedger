@@ -1,6 +1,6 @@
 # AutoRentLedger
 
-AutoRentLedger Milestone 10.5 is a small, read-only Gmail ingestion and deterministic payment-event
+AutoRentLedger Milestone 14 is a small, read-only Gmail ingestion and deterministic payment-event
 pipeline with explicit payer identities, rent accounts, monthly obligations, and manual payment
 allocations. It derives each obligation's current reconciliation state without persisting status.
 It also derives one operational review list from unresolved identities, unallocated money,
@@ -57,6 +57,8 @@ autorentledger payments
 autorentledger payer add "Alex Example"
 autorentledger payer alias-add 1 "ALEX Q EXAMPLE"
 autorentledger payer aliases 1
+autorentledger payer rename 1 "Morgan Example"
+autorentledger payer alias-remove 1 "ALEX Q EXAMPLE"
 autorentledger payers
 autorentledger unresolved-payers
 autorentledger unit add "Unit A"
@@ -65,6 +67,10 @@ autorentledger rent-account add --unit 1 --name "Synthetic Household"
 autorentledger rent-account add-payer --account 1 --payer 1
 autorentledger rent-accounts
 autorentledger rent-account show 1
+autorentledger rent-account rename 1 "Example Household"
+autorentledger rent-account remove-payer --account 1 --payer 1
+autorentledger rent-schedule end 1 --active-to 2026-08-31
+autorentledger rent-account end 1 --active-to 2026-08-31
 autorentledger obligation add --account 1 --period 2026-08 --amount 1234.56 --due-date 2026-08-01
 autorentledger obligations
 autorentledger obligation show 1
@@ -96,6 +102,8 @@ autorentledger payments
 autorentledger payer add 'Alex Example'
 autorentledger payer alias-add 1 'ALEX Q EXAMPLE'
 autorentledger payer aliases 1
+autorentledger payer rename 1 'Morgan Example'
+autorentledger payer alias-remove 1 'ALEX Q EXAMPLE'
 autorentledger payers
 autorentledger unresolved-payers
 autorentledger unit add 'Unit A'
@@ -104,6 +112,10 @@ autorentledger rent-account add --unit 1 --name 'Synthetic Household'
 autorentledger rent-account add-payer --account 1 --payer 1
 autorentledger rent-accounts
 autorentledger rent-account show 1
+autorentledger rent-account rename 1 'Example Household'
+autorentledger rent-account remove-payer --account 1 --payer 1
+autorentledger rent-schedule end 1 --active-to 2026-08-31
+autorentledger rent-account end 1 --active-to 2026-08-31
 autorentledger obligation add --account 1 --period 2026-08 --amount 1234.56 --due-date 2026-08-01
 autorentledger obligations
 autorentledger obligation show 1
@@ -123,10 +135,10 @@ autorentledger db status
 autorentledger db upgrade
 ```
 
-AutoRentLedger uses monotonic `PRAGMA user_version` values and six built-in schema migrations for
+AutoRentLedger uses monotonic `PRAGMA user_version` values and seven built-in schema migrations for
 the existing persisted schema epochs: raw emails, payment events, payer identities, rental
-accounts, obligations, and allocations. This is a small application-specific mechanism, not a
-general migration framework.
+accounts, obligations, allocations, and rent schedules. This is a small application-specific
+mechanism, not a general migration framework.
 
 Legacy databases with `user_version = 0` are inspected conservatively using known table and column
 signatures. Ambiguous or inconsistent schemas are rejected rather than guessed. All required
@@ -448,6 +460,35 @@ rent_schedules
 
 No generated-through marker, run history, or generation status is stored. Whether an account/month
 has already been generated is derived solely from the unique obligation `(rent_account_id, period)`.
+
+## Apply targeted corrections
+
+Interpretation and configuration can be corrected with six narrow maintenance commands:
+
+```powershell
+autorentledger payer rename 1 "Morgan Example"
+autorentledger payer alias-remove 1 "ALEX Q EXAMPLE"
+autorentledger rent-account rename 3 "Example Household"
+autorentledger rent-account remove-payer --account 3 --payer 7
+autorentledger rent-schedule end 4 --active-to 2026-08-31
+autorentledger rent-account end 3 --active-to 2027-04-30
+```
+
+Renaming preserves stable IDs and all relationships. Alias removal uses the same exact normalized
+lookup as identity resolution and removes only the alias owned by the named payer. Removing a
+payer/account association changes only that current interpretation. These changes naturally affect
+derived review items, reports, reconciliation displays, and allocation suggestions without
+rewriting a payment event or creating an allocation.
+
+Ending a schedule or rent account changes only its `active_to` date. Existing obligations and
+allocations remain historical facts. An account cannot be ended while one of its schedules is
+open-ended or ends after the requested account date; end each affected schedule explicitly first.
+Schedule ending also enforces account containment and non-overlap without changing adjacent
+schedules.
+
+There are deliberately no generic edit or delete commands. Payment evidence and obligation facts
+are not manually editable. Allocation corrections continue to use `allocation remove` followed by
+`allocation add`. No audit-log framework or maintenance-history table is introduced.
 
 ## Allocate payments explicitly
 
