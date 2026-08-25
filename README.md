@@ -1,6 +1,6 @@
 # AutoRentLedger
 
-AutoRentLedger Milestone 15 is a small, read-only Gmail ingestion and deterministic payment-event
+AutoRentLedger Milestone 16 is a small, read-only Gmail ingestion and deterministic payment-event
 pipeline with explicit payer identities, rent accounts, monthly obligations, and manual payment
 allocations. It derives each obligation's current reconciliation state without persisting status.
 It also derives one operational review list from unresolved identities, unallocated money,
@@ -84,6 +84,7 @@ autorentledger allocation suggestions
 autorentledger allocation remove 1
 autorentledger reconcile --period 2026-08
 autorentledger review
+autorentledger overview --period 2026-09
 ```
 
 macOS or Linux:
@@ -126,6 +127,7 @@ autorentledger allocations
 autorentledger allocation remove 1
 autorentledger reconcile --period 2026-08
 autorentledger review
+autorentledger overview --period 2026-09
 ```
 
 ## Database schema lifecycle
@@ -694,6 +696,38 @@ allocation need not equal one another. Report generation opens read adapters in 
 mode, stores no result, changes no schema or ledger row, and treats the CSV as a projection rather
 than a source of truth.
 
+## Consolidated owner overview
+
+Open one canonical, local monthly snapshot:
+
+```powershell
+autorentledger overview --period 2026-09
+```
+
+The overview is a structured Python read model with a terminal formatter. It composes the existing
+monthly report, canonical review, conservative allocation suggestions, and read-only obligation
+generation plan. This keeps the owner-facing meaning outside the CLI so a future interface can
+render the same model without duplicating accounting rules.
+
+Monthly rent totals and account rows include only actual obligations for the requested period and
+reuse canonical `PAID`, `PARTIAL`, and `UNPAID` reconciliation. Payment intake separately uses the
+existing occurrence-month semantics: all allocations originating from payments observed in that
+month count there, even when their destination obligation belongs to another month. These two
+sections answer different questions and are not forced to match.
+
+Current attention is the complete operational review state and is not restricted to the requested
+month. Actionable suggestions reuse the existing one-account/one-outstanding-obligation policy and
+remain advisory only.
+
+Applicable schedules without an actual account/period obligation appear as missing-obligation
+warnings. They never create an obligation, and their scheduled amounts are not included in rent
+owed. Any existing manual or generated obligation suppresses the warning without comparing its
+amount or due date to the schedule. The explicit generation command is shown as the remedy.
+
+Overview is strictly read-only. It does not access Gmail, run sync, ingest or process email,
+generate obligations, create allocations, modify configuration, export files, or persist overview,
+warning, cache, or dashboard state.
+
 ## Development checks
 
 ```powershell
@@ -732,6 +766,8 @@ src/autorentledger/
     service.py       # derived operational review items
   operations/
     sync.py          # evidence refresh orchestration and safe derived summaries
+  overview/
+    service.py       # consolidated owner-facing monthly read model
   parsing/
     mime.py         # source-neutral MIME text decoding
     models.py       # normalized result and structured parse failure
@@ -766,6 +802,8 @@ it never modifies an obligation that already exists.
 Suggestions combine exact identity, account membership, payment remainder, and canonical
 reconciliation without writing or bypassing allocation validation. Sync composes ingestion,
 processing, review, and suggestions without adding accounting behavior or persisted run state.
+Overview composes reporting, review, suggestions, and schedule planning into one read-only model;
+it does not introduce a second accounting engine.
 Normal CLI operations require the current schema; only `db upgrade` changes schema version or
 applies migrations.
 
