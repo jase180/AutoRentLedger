@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+
+{% block title %}{{ overview.period|month_heading }} | AutoRentLedger{% endblock %}
+
+{% block content %}
+  {% set collected = collection_percentage(overview.rent.allocated_cents, overview.rent.owed_cents) %}
+  <section class="page-heading">
+    <div>
+      <p class="eyebrow">Owner overview</p>
+      <h1>{{ overview.period|month_heading }}</h1>
+    </div>
+    <form class="period-form" method="get" action="{{ url_for('web.overview') }}">
+      <label for="period">Month</label>
+      <input id="period" type="month" name="period" value="{{ overview.period }}" required>
+      <button type="submit">View</button>
+    </form>
+  </section>
+
+  <section aria-labelledby="monthly-rent-heading">
+    <h2 id="monthly-rent-heading">Monthly rent</h2>
+    <div class="summary-grid">
+      <article class="summary-card"><span>Owed</span><strong>{{ overview.rent.owed_cents|money }}</strong></article>
+      <article class="summary-card"><span>Allocated</span><strong>{{ overview.rent.allocated_cents|money }}</strong></article>
+      <article class="summary-card"><span>Remaining</span><strong>{{ overview.rent.remaining_cents|money }}</strong></article>
+      <article class="summary-card">
+        <span>Collected</span>
+        <strong>{% if collected is none %}N/A{% else %}{{ "%.1f"|format(collected) }}%{% endif %}</strong>
+      </article>
+    </div>
+    <div class="collection-progress">
+      <div class="progress-label">
+        <span>Collection progress</span>
+        <span>{% if collected is none %}No obligations{% else %}{{ "%.1f"|format(collected) }}%{% endif %}</span>
+      </div>
+      <progress value="{{ bounded_percentage(collected) }}" max="100">
+        {% if collected is none %}0{% else %}{{ "%.1f"|format(collected) }}{% endif %}%
+      </progress>
+    </div>
+    <dl class="count-strip">
+      <div><dt>Accounts</dt><dd>{{ overview.rent.total_obligation_count }}</dd></div>
+      <div><dt>Paid</dt><dd>{{ overview.rent.paid_count }}</dd></div>
+      <div><dt>Partial</dt><dd>{{ overview.rent.partial_count }}</dd></div>
+      <div><dt>Unpaid</dt><dd>{{ overview.rent.unpaid_count }}</dd></div>
+    </dl>
+  </section>
+
+  <section aria-labelledby="account-status-heading">
+    <h2 id="account-status-heading">Account status</h2>
+    {% if overview.accounts %}
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Unit</th><th>Account</th><th class="money">Owed</th><th class="money">Paid</th><th class="money">Left</th><th>Status</th></tr></thead>
+          <tbody>
+            {% for account in overview.accounts %}
+              <tr>
+                <td>{{ account.unit_label }}</td>
+                <td>{{ account.account_display_name }}</td>
+                <td class="money">{{ account.owed_cents|money }}</td>
+                <td class="money">{{ account.allocated_cents|money }}</td>
+                <td class="money">{{ account.remaining_cents|money }}</td>
+                <td><span class="status status-{{ account.status.value|lower }}">{{ account.status.value }}</span></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="empty-state">None.</p>
+    {% endif %}
+  </section>
+
+  <section aria-labelledby="payment-intake-heading">
+    <h2 id="payment-intake-heading">Payment intake</h2>
+    <div class="summary-grid three-up">
+      <article class="summary-card"><span>Observed</span><strong>{{ overview.payment_intake.received_cents|money }}</strong></article>
+      <article class="summary-card"><span>Allocated</span><strong>{{ overview.payment_intake.allocated_from_in_month_payments_cents|money }}</strong></article>
+      <article class="summary-card"><span>Unallocated</span><strong>{{ overview.payment_intake.unallocated_from_in_month_payments_cents|money }}</strong></article>
+    </div>
+    <p class="section-note">Payment intake follows payment occurrence month and is independent from obligation-period totals.</p>
+  </section>
+
+  <section aria-labelledby="attention-heading">
+    <h2 id="attention-heading">Current attention</h2>
+    <p class="section-note">Current ledger-wide exceptions; not limited to {{ overview.period }}.</p>
+    <dl class="attention-grid">
+      <div><dt>Unresolved payer</dt><dd>{{ overview.attention.unresolved_payers }}</dd></div>
+      <div><dt>Unallocated payment</dt><dd>{{ overview.attention.unallocated_payments }}</dd></div>
+      <div><dt>Partial obligation</dt><dd>{{ overview.attention.partial_obligations }}</dd></div>
+      <div><dt>Unpaid obligation</dt><dd>{{ overview.attention.unpaid_obligations }}</dd></div>
+      <div><dt>Unparsed email</dt><dd>{{ overview.attention.unparsed_emails }}</dd></div>
+    </dl>
+  </section>
+
+  <section aria-labelledby="missing-heading">
+    <h2 id="missing-heading">Missing obligations</h2>
+    {% if overview.missing_obligations %}
+      <div class="panel-list">
+        {% for missing in overview.missing_obligations %}
+          <article class="warning-panel">
+            <h3>{{ missing.unit_label }} / {{ missing.account_display_name }}</h3>
+            <p>Expected {{ missing.amount_cents|money }} · due day {{ missing.due_day }} · {{ missing.period }}</p>
+          </article>
+        {% endfor %}
+      </div>
+      <p>Run:</p>
+      <code>autorentledger obligations generate --period {{ overview.period }}</code>
+    {% else %}
+      <p class="empty-state">None.</p>
+    {% endif %}
+  </section>
+
+  <section aria-labelledby="suggestions-heading">
+    <h2 id="suggestions-heading">Suggestions</h2>
+    {% if overview.actionable_suggestions %}
+      <div class="panel-list">
+        {% for suggestion in overview.actionable_suggestions %}
+          <article class="suggestion-panel">
+            <h3>Payment {{ suggestion.payment_event_id }}</h3>
+            <p>{{ suggestion.unit_label }} / {{ suggestion.account_display_name }} / {{ suggestion.period }}</p>
+            <dl>
+              <div><dt>Suggested amount</dt><dd>{{ suggestion.suggested_amount_cents|money }}</dd></div>
+              <div><dt>Reason</dt><dd>{{ suggestion.reason.value }}</dd></div>
+            </dl>
+          </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="empty-state">None.</p>
+    {% endif %}
+  </section>
+{% endblock %}

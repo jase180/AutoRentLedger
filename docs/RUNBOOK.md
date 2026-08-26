@@ -10,6 +10,7 @@ database-backed command when using a non-default database.
 
 - [Before risky work](#before-risky-work)
 - [Routine sync](#routine-sync)
+- [Local read-only web view](#local-read-only-web-view)
 - [Monthly setup](#monthly-setup)
 - [Add a new payer](#add-a-new-payer)
 - [Add a unit, rent account, association, and schedule](#add-a-unit-rent-account-association-and-schedule)
@@ -87,6 +88,29 @@ autorentledger sync `
 Running sync repeatedly is safe: existing Gmail messages and payment events are not duplicated.
 “Nothing new” does not mean there is nothing requiring attention; the review and suggestion
 summaries still reflect current ledger state.
+
+## Local read-only web view
+
+Start the local server:
+
+```powershell
+autorentledger web `
+  --database data/autorentledger.db `
+  --host 127.0.0.1 `
+  --port 8000
+```
+
+Open `http://127.0.0.1:8000/`. The root redirects to the current local month; use the month picker
+or navigate directly to `http://127.0.0.1:8000/overview?period=2026-09`.
+
+The page renders the canonical `OwnerOverview`: monthly rent, actual obligation rows, payment
+intake, global current attention, missing-obligation warnings, and actionable suggestions. It has
+no POST/write routes, JavaScript actions, sessions, or authentication. It cannot sync Gmail,
+generate obligations, or allocate payments.
+
+Because M19A is unauthenticated, the CLI permits only `127.0.0.1`, `localhost`, and `::1`. Never use
+a reverse proxy, port forwarding, or another mechanism to expose this local server to a LAN or the
+public internet.
 
 ## Monthly setup
 

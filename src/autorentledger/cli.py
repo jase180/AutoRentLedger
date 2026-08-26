@@ -108,9 +108,15 @@ from autorentledger.suggestions import (
     SuggestionReason,
     find_allocation_suggestions,
 )
+from autorentledger.web import create_app
 
 DEFAULT_QUERY = "subject:zelle"
 DEFAULT_DATABASE = Path("data/autorentledger.db")
+DEFAULT_WEB_HOST = "127.0.0.1"
+DEFAULT_WEB_PORT = 8000
+WEB_LOOPBACK_ERROR = (
+    "AutoRentLedger web UI is unauthenticated and may only bind to a loopback address."
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -326,6 +332,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     overview.add_argument("--period", required=True)
     overview.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+    web = subparsers.add_parser("web", help="serve the read-only owner overview locally")
+    web.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+    web.add_argument("--host", default=DEFAULT_WEB_HOST)
+    web.add_argument("--port", type=int, default=DEFAULT_WEB_PORT)
 
     review = subparsers.add_parser("review", help="show ledger items needing attention")
     review.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
@@ -1235,6 +1246,19 @@ def run_overview(database_path: Path, period: str) -> int:
     return 0
 
 
+def run_web(database_path: Path, host: str, port: int) -> int:
+    if not _is_loopback_host(host):
+        print(WEB_LOOPBACK_ERROR)
+        return 1
+    app = create_app(database_path)
+    app.run(host=host, port=port, debug=False, use_reloader=False)
+    return 0
+
+
+def _is_loopback_host(host: str) -> bool:
+    return host.casefold() in {"127.0.0.1", "localhost", "::1"}
+
+
 def run_review(database_path: Path) -> int:
     try:
         items = collect_review_items(
@@ -1362,6 +1386,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.database_command == "restore":
             return run_database_restore(args.backup_path, args.database)
         raise AssertionError(f"Unhandled database command: {args.database_command}")
+    if args.command == "web" and not _is_loopback_host(args.host):
+        print(WEB_LOOPBACK_ERROR)
+        return 1
     if args.command != "search":
         try:
             require_current_schema(args.database)
@@ -1495,6 +1522,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_report(args.database, args.period, args.csv_path)
     if args.command == "overview":
         return run_overview(args.database, args.period)
+    if args.command == "web":
+        return run_web(args.database, args.host, args.port)
     if args.command == "review":
         return run_review(args.database)
     raise AssertionError(f"Unhandled command: {args.command}")
