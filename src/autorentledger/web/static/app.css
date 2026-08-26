@@ -17,6 +17,9 @@ body { margin: 0; color: var(--ink); background: var(--canvas); font: 16px/1.5 s
 .site-header { border-bottom: 1px solid var(--line); background: var(--surface); }
 .header-inner { min-height: 64px; display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .brand { color: var(--ink); font-size: 1.1rem; font-weight: 750; text-decoration: none; }
+.site-nav { display: flex; align-items: center; gap: .65rem; }
+.site-nav a { color: var(--muted); font-weight: 700; text-decoration: none; }
+.site-nav a[aria-current="page"] { color: var(--ink); text-decoration: underline; text-underline-offset: .35rem; }
 .local-label, .eyebrow, .section-note { color: var(--muted); }
 .local-label { font-size: .875rem; }
 main { padding-block: 2rem 4rem; }
@@ -66,12 +69,23 @@ tbody tr:last-child td { border-bottom: 0; }
 code { display: block; width: fit-content; max-width: 100%; margin: .35rem 0; padding: .5rem .65rem; overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; background: #eef1f4; color: var(--ink); }
 .empty-state { margin: 0; padding: 1rem; border: 1px dashed var(--line); border-radius: 8px; color: var(--muted); background: var(--surface); }
 .error-panel { max-width: 680px; margin: 3rem auto; padding: 1.5rem; }
+.attention-heading { margin-bottom: 1rem; }
+.attention-heading .section-note { margin: .75rem 0 0; }
+.attention-summary { margin-bottom: 1rem; }
+.clean-state { padding: 1rem; border: 1px solid #a9cec4; border-radius: 10px; background: var(--accent-soft); font-weight: 700; }
+.review-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
+.review-card { min-width: 0; padding: 1rem; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.review-card p { margin: .35rem 0 0; color: var(--muted); }
+.review-values { display: flex; gap: 2rem; margin: .75rem 0 0; }
 
 @media (max-width: 760px) {
   .page-heading { align-items: stretch; flex-direction: column; }
+  .header-inner { flex-wrap: wrap; padding-block: .65rem; }
+  .local-label { flex-basis: 100%; }
   .period-form { align-items: stretch; flex-direction: column; }
   .summary-grid, .summary-grid.three-up { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .attention-grid { grid-template-columns: repeat(2, 1fr); }
+  .review-list { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 440px) {

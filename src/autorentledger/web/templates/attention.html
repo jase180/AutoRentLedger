@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+
+{% block title %}Current Attention | AutoRentLedger{% endblock %}
+
+{% block content %}
+  <section class="page-heading attention-heading">
+    <div>
+      <p class="eyebrow">Derived review queue</p>
+      <h1>Current attention</h1>
+      <p class="section-note">Ledger-wide items from the canonical review service; not month-scoped.</p>
+    </div>
+  </section>
+
+  <dl class="attention-grid attention-summary">
+    <div><dt>Unresolved</dt><dd>{{ attention.unresolved_payers|length }}</dd></div>
+    <div><dt>Unallocated</dt><dd>{{ attention.unallocated_payments|length }}</dd></div>
+    <div><dt>Partial</dt><dd>{{ attention.partial_obligations|length }}</dd></div>
+    <div><dt>Unpaid</dt><dd>{{ attention.unpaid_obligations|length }}</dd></div>
+    <div><dt>Unparsed</dt><dd>{{ attention.unparsed_emails|length }}</dd></div>
+  </dl>
+
+  {% if attention.total_count == 0 %}
+    <p class="clean-state">No items currently need attention.</p>
+  {% endif %}
+
+  <section aria-labelledby="unresolved-heading">
+    <h2 id="unresolved-heading">Unresolved payers</h2>
+    {% if attention.unresolved_payers %}
+      <div class="review-list">
+        {% for item in attention.unresolved_payers %}
+          <article class="review-card">
+            <h3>{{ item.summary }}</h3>
+            <p>{{ item.count }} unresolved payment{% if item.count != 1 %}s{% endif %}</p>
+          </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="empty-state">None.</p>
+    {% endif %}
+  </section>
+
+  <section aria-labelledby="unallocated-heading">
+    <h2 id="unallocated-heading">Unallocated payments</h2>
+    {% if attention.unallocated_payments %}
+      <div class="review-list">
+        {% for item in attention.unallocated_payments %}
+          <article class="review-card">
+            <h3>Payment {{ item.reference_id }}</h3>
+            <dl class="review-values">
+              <div><dt>Remaining unallocated</dt><dd>{{ item.amount_cents|money }}</dd></div>
+            </dl>
+          </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="empty-state">None.</p>
+    {% endif %}
+  </section>
+
+  <section aria-labelledby="partial-heading">
+    <h2 id="partial-heading">Partial obligations</h2>
+    {% if attention.partial_obligations %}
+      <div class="review-list">
+        {% for item in attention.partial_obligations %}
+          <article class="review-card">
+            <h3>{{ item.unit_label }} / {{ item.account_display_name }}</h3>
+            <p>{{ item.period }} · Obligation {{ item.reference_id }}</p>
+            <dl class="review-values">
+              <div><dt>Remaining</dt><dd>{{ item.amount_cents|money }}</dd></div>
+            </dl>
+          </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="empty-state">None.</p>
+    {% endif %}
+  </section>
+
+  <section aria-labelledby="unpaid-heading">
+    <h2 id="unpaid-heading">Unpaid obligations</h2>
+    {% if attention.unpaid_obligations %}
+      <div class="review-list">
+        {% for item in attention.unpaid_obligations %}
+          <article class="review-card">
+            <h3>{{ item.unit_label }} / {{ item.account_display_name }}</h3>
+            <p>{{ item.period }} · Obligation {{ item.reference_id }}</p>
+            <dl class="review-values">
+              <div><dt>Remaining</dt><dd>{{ item.amount_cents|money }}</dd></div>
+            </dl>
+          </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="empty-state">None.</p>
+    {% endif %}
+  </section>
+
+  <section aria-labelledby="unparsed-heading">
+    <h2 id="unparsed-heading">Unparsed emails</h2>
+    {% if attention.unparsed_emails %}
+      <div class="review-list">
+        {% for item in attention.unparsed_emails %}
+          <article class="review-card">
+            <h3>Raw email {{ item.reference_id }}</h3>
+            <p>{{ item.summary }}</p>
+          </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="empty-state">None.</p>
+    {% endif %}
+  </section>
+{% endblock %}

@@ -10,6 +10,11 @@
     <header class="site-header">
       <div class="page-shell header-inner">
         <a class="brand" href="{{ url_for('web.root') }}">AutoRentLedger</a>
+        <nav class="site-nav" aria-label="Primary navigation">
+          <a href="{{ url_for('web.root') }}"{% if active_page == "overview" %} aria-current="page"{% endif %}>Overview</a>
+          <span aria-hidden="true">|</span>
+          <a href="{{ url_for('web.attention') }}"{% if active_page == "attention" %} aria-current="page"{% endif %}>Attention</a>
+        </nav>
         <span class="local-label">Local read-only view</span>
       </div>
     </header>

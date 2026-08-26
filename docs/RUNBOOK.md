@@ -103,6 +103,10 @@ autorentledger web `
 Open `http://127.0.0.1:8000/`. The root redirects to the current local month; use the month picker
 or navigate directly to `http://127.0.0.1:8000/overview?period=2026-09`.
 
+Use `http://127.0.0.1:8000/attention` for the browser equivalent of the derived review queue. It is
+global/current rather than month-scoped, so older unresolved payments, open obligations, and
+unparsed notifications remain visible.
+
 The page renders the canonical `OwnerOverview`: monthly rent, actual obligation rows, payment
 intake, global current attention, missing-obligation warnings, and actionable suggestions. It has
 no POST/write routes, JavaScript actions, sessions, or authentication. It cannot sync Gmail,

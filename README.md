@@ -152,10 +152,12 @@ Serve the same canonical owner overview in a local browser:
 autorentledger web --database data/autorentledger.db --host 127.0.0.1 --port 8000
 ```
 
-Then open `http://127.0.0.1:8000/`. The web adapter is read-only and uses the existing
-`OwnerOverview`; it does not query Gmail, sync, generate obligations, create allocations, or expose
-write routes. M19A has no authentication, so the CLI accepts only `127.0.0.1`, `localhost`, or
-`::1` and rejects LAN/public binding. Do not proxy or otherwise expose it remotely.
+Then open `http://127.0.0.1:8000/`. The local browser includes **Overview** and **Attention**. The
+Attention page at `http://127.0.0.1:8000/attention` is the global/current derived review queue.
+Both screens are read-only; they do not query Gmail, sync, generate obligations, create
+allocations, or expose write routes. The UI has no authentication, so the CLI accepts only
+`127.0.0.1`, `localhost`, or `::1` and rejects LAN/public binding. Do not proxy or otherwise expose
+it remotely.
 
 ## Common commands
 
