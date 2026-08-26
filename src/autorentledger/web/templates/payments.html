@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block title %}Payments | AutoRentLedger{% endblock %}
+
+{% block content %}
+  <section class="page-heading payments-heading">
+    <div>
+      <p class="eyebrow">Normalized payment history</p>
+      <h1>Payments</h1>
+      <p class="section-note">Current exact-alias payer interpretation and payment-centric allocation totals.</p>
+    </div>
+  </section>
+
+  <nav class="filter-nav" aria-label="Payment filters">
+    <a href="{{ url_for('web.payments') }}"{% if not payments.has_filters %} aria-current="page"{% endif %}>All</a>
+    <a href="{{ url_for('web.payments', unallocated=1) }}"{% if payments.unallocated_only and not payments.unresolved_only %} aria-current="page"{% endif %}>Unallocated</a>
+    <a href="{{ url_for('web.payments', unresolved=1) }}"{% if payments.unresolved_only and not payments.unallocated_only %} aria-current="page"{% endif %}>Unresolved</a>
+    <a href="{{ url_for('web.payments', unallocated=1, unresolved=1) }}"{% if payments.unallocated_only and payments.unresolved_only %} aria-current="page"{% endif %}>Both</a>
+  </nav>
+
+  <div class="summary-grid payments-summary">
+    <article class="summary-card"><span>Payments</span><strong>{{ payments.records|length }}</strong></article>
+    <article class="summary-card"><span>Observed</span><strong>{{ payments.observed_cents|money }}</strong></article>
+    <article class="summary-card"><span>Allocated</span><strong>{{ payments.allocated_cents|money }}</strong></article>
+    <article class="summary-card"><span>Unallocated</span><strong>{{ payments.unallocated_cents|money }}</strong></article>
+  </div>
+
+  <section aria-labelledby="payment-history-heading">
+    <h2 id="payment-history-heading">Payment history</h2>
+    {% if payments.records %}
+      <div class="table-wrap">
+        <table class="payments-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Date</th>
+              <th>Sender</th>
+              <th>Provider</th>
+              <th class="money">Amount</th>
+              <th>Payer</th>
+              <th class="money">Allocated</th>
+              <th class="money">Unallocated</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for payment in payments.records %}
+              <tr>
+                <td>{{ payment.payment_event_id }}</td>
+                <td>{{ payment.occurred_on if payment.occurred_on else "Unknown" }}</td>
+                <td>{{ payment.sender_name }}</td>
+                <td>{{ payment.provider }}</td>
+                <td class="money">{{ payment.amount_cents|money }}</td>
+                <td>{% if payment.payer_id is none %}<span class="unresolved">Unresolved</span>{% else %}{{ payment.payer_display_name }}{% endif %}</td>
+                <td class="money">{{ payment.allocated_cents|money }}</td>
+                <td class="money">{{ payment.unallocated_cents|money }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% elif payments.has_filters %}
+      <p class="empty-state">No payments match the current filters.</p>
+    {% else %}
+      <p class="empty-state">No payments found.</p>
+    {% endif %}
+  </section>
+{% endblock %}

@@ -80,6 +80,23 @@ class PaymentIntakeSourceRecord:
 
 
 @dataclass(frozen=True)
+class PaymentListingSourceRecord:
+    payment_event_id: int
+    occurred_on: str | None
+    provider: str
+    sender_name: str
+    amount_cents: int
+    allocated_cents: int
+
+
+@dataclass(frozen=True)
+class PaymentListingAliasRecord:
+    normalized_alias: str
+    payer_id: int
+    payer_display_name: str
+
+
+@dataclass(frozen=True)
 class SuggestionPaymentSourceRecord:
     payment_event_id: int
     sender_name: str
@@ -1756,6 +1773,85 @@ class SQLiteReportingRepository:
                 (start_on, end_before),
             ).fetchall()
         return [PaymentIntakeSourceRecord(**dict(row)) for row in rows]
+
+
+class SQLitePaymentListingRepository:
+    """Read payment, allocation, and alias facts for canonical payment listings."""
+
+    def __init__(self, database_path: Path) -> None:
+        self.database_path = database_path
+
+    def _connect(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(
+            self.database_path.resolve().as_uri() + "?mode=ro", uri=True
+        )
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        return connection
+
+    def list_payment_sources(self) -> list[PaymentListingSourceRecord]:
+        with self._connect() as connection:
+            if connection.execute(
+                """
+                SELECT 1 FROM sqlite_master
+                WHERE type = 'table' AND name = 'payment_allocations'
+                """
+            ).fetchone() is None:
+                rows = connection.execute(
+                    """
+                    SELECT
+                        payment_events.id AS payment_event_id,
+                        payment_events.occurred_on,
+                        payment_events.provider,
+                        payment_events.sender_name,
+                        payment_events.amount_cents,
+                        0 AS allocated_cents
+                    FROM payment_events
+                    ORDER BY payment_events.id
+                    """
+                ).fetchall()
+                return [PaymentListingSourceRecord(**dict(row)) for row in rows]
+            rows = connection.execute(
+                """
+                SELECT
+                    payment_events.id AS payment_event_id,
+                    payment_events.occurred_on,
+                    payment_events.provider,
+                    payment_events.sender_name,
+                    payment_events.amount_cents,
+                    COALESCE(SUM(payment_allocations.amount_cents), 0) AS allocated_cents
+                FROM payment_events
+                LEFT JOIN payment_allocations
+                    ON payment_allocations.payment_event_id = payment_events.id
+                GROUP BY
+                    payment_events.id,
+                    payment_events.occurred_on,
+                    payment_events.provider,
+                    payment_events.sender_name,
+                    payment_events.amount_cents
+                ORDER BY payment_events.id
+                """
+            ).fetchall()
+        return [PaymentListingSourceRecord(**dict(row)) for row in rows]
+
+    def list_aliases(self) -> list[PaymentListingAliasRecord]:
+        with self._connect() as connection:
+            if connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'payer_aliases'"
+            ).fetchone() is None:
+                return []
+            rows = connection.execute(
+                """
+                SELECT
+                    payer_aliases.normalized_alias,
+                    payers.id AS payer_id,
+                    payers.display_name AS payer_display_name
+                FROM payer_aliases
+                JOIN payers ON payers.id = payer_aliases.payer_id
+                ORDER BY payer_aliases.normalized_alias
+                """
+            ).fetchall()
+        return [PaymentListingAliasRecord(**dict(row)) for row in rows]
 
 
 class SQLiteReviewRepository:

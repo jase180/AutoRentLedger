@@ -14,6 +14,8 @@
           <a href="{{ url_for('web.root') }}"{% if active_page == "overview" %} aria-current="page"{% endif %}>Overview</a>
           <span aria-hidden="true">|</span>
           <a href="{{ url_for('web.attention') }}"{% if active_page == "attention" %} aria-current="page"{% endif %}>Attention</a>
+          <span aria-hidden="true">|</span>
+          <a href="{{ url_for('web.payments') }}"{% if active_page == "payments" %} aria-current="page"{% endif %}>Payments</a>
         </nav>
         <span class="local-label">Local read-only view</span>
       </div>

@@ -107,6 +107,11 @@ Use `http://127.0.0.1:8000/attention` for the browser equivalent of the derived 
 global/current rather than month-scoped, so older unresolved payments, open obligations, and
 unparsed notifications remain visible.
 
+Use `http://127.0.0.1:8000/payments` to inspect normalized payments, their current exact-alias payer
+interpretation, and allocated/unallocated totals. The optional read-only views
+`/payments?unallocated=1` and `/payments?unresolved=1` filter current results; combine both query
+parameters to require both conditions.
+
 The page renders the canonical `OwnerOverview`: monthly rent, actual obligation rows, payment
 intake, global current attention, missing-obligation warnings, and actionable suggestions. It has
 no POST/write routes, JavaScript actions, sessions, or authentication. It cannot sync Gmail,

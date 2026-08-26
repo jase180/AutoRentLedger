@@ -80,7 +80,17 @@ def add_account(rentals, label, name):
     return rentals.create_rent_account(unit.id, name, None, None)
 
 
-def add_payment(raws, payments, number, amount_cents, occurred_on, sender_name):
+def add_payment(
+    raws,
+    payments,
+    number,
+    amount_cents,
+    occurred_on,
+    sender_name,
+    *,
+    provider="synthetic_provider",
+    memo="PRIVATE_SYNTHETIC_MEMO_SENTINEL",
+):
     message_id = f"PRIVATE_SYNTHETIC_GMAIL_ID_SENTINEL_{number}"
     raws.insert(
         EmailMessageSummary(
@@ -95,11 +105,11 @@ def add_payment(raws, payments, number, amount_cents, occurred_on, sender_name):
     payments.insert(
         raw.id,
         PaymentNotification(
-            "synthetic_provider",
+            provider,
             sender_name,
             amount_cents,
             occurred_on,
-            "PRIVATE_SYNTHETIC_MEMO_SENTINEL",
+            memo,
         ),
     )
     return payments.get_by_raw_email_id(raw.id)
@@ -199,6 +209,65 @@ def populate_dashboard(database_path, raws, payments, payers, rentals, obligatio
     }
 
 
+def populate_payments_page(raws, payments, payers, rentals, obligations, allocations):
+    account = add_account(rentals, "Payment Unit", "Payment Household")
+    september = obligations.create(account.id, "2026-09", 160000, date(2026, 9, 1))
+    october = obligations.create(account.id, "2026-10", 15000, date(2026, 10, 1))
+    resolved = add_payment(
+        raws,
+        payments,
+        11,
+        150000,
+        date(2026, 9, 3),
+        "SENDER <script>alert(3)</script>",
+        provider="Provider & <b>Example</b>",
+    )
+    unresolved = add_payment(
+        raws,
+        payments,
+        12,
+        90000,
+        date(2026, 9, 8),
+        "UNRESOLVED SENDER",
+    )
+    unknown_date = add_payment(
+        raws,
+        payments,
+        13,
+        5000,
+        None,
+        "NULL DATE SENDER",
+    )
+    resolved_payer = add_alias(
+        payers,
+        "Payer & <b>Example</b>",
+        "SENDER <script>alert(3)</script>",
+    )
+    null_date_payer = add_alias(payers, "Null Date Payer", "NULL DATE SENDER")
+    first_allocation = allocations.create_checked(resolved.id, september.id, 135000)
+    allocations.create_checked(resolved.id, october.id, 15000)
+    partial_allocation = allocations.create_checked(
+        unresolved.id, september.id, 25000
+    )
+    return {
+        "resolved": resolved,
+        "unresolved": unresolved,
+        "unknown_date": unknown_date,
+        "resolved_payer": resolved_payer,
+        "null_date_payer": null_date_payer,
+        "first_allocation": first_allocation,
+        "partial_allocation": partial_allocation,
+        "account": account,
+    }
+
+
+def html_row_containing(output, text):
+    position = output.index(text)
+    start = output.rfind("<tr", 0, position)
+    end = output.index("</tr>", position) + len("</tr>")
+    return output[start:end]
+
+
 def test_app_factory_is_side_effect_free_and_registers_get_only_routes(tmp_path):
     database_path = create_fixture(tmp_path)[0]
     before = database_snapshot(database_path)
@@ -213,6 +282,7 @@ def test_app_factory_is_side_effect_free_and_registers_get_only_routes(tmp_path)
         "/",
         "/attention",
         "/overview",
+        "/payments",
         "/static/<path:filename>",
     }
     for rule in app.url_map.iter_rules():
@@ -453,6 +523,7 @@ def test_static_assets_are_local_and_post_routes_do_not_exist(tmp_path):
     assert client.post("/").status_code == 405
     assert client.post("/overview?period=2026-09").status_code == 405
     assert client.post("/attention").status_code == 405
+    assert client.post("/payments").status_code == 405
 
 
 def test_attention_renders_canonical_global_queue_privately_and_read_only(tmp_path):
@@ -644,6 +715,265 @@ def test_attention_missing_and_outdated_databases_are_safe(tmp_path):
         connection.execute("PRAGMA user_version = 7")
     before = database_snapshot(outdated)
     outdated_response = create_app(outdated).test_client().get("/attention")
+    assert outdated_response.status_code == 503
+    assert "autorentledger db status" in outdated_response.get_data(as_text=True)
+    assert database_snapshot(outdated) == before
+
+
+def test_payments_page_composes_identity_allocations_privately_and_read_only(tmp_path):
+    database_path, raws, payments, payers, rentals, obligations, allocations = (
+        create_fixture(tmp_path)
+    )
+    facts = populate_payments_page(
+        raws, payments, payers, rentals, obligations, allocations
+    )
+    before = database_snapshot(database_path)
+
+    response = create_app(database_path).test_client().get("/payments")
+    output = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert 'aria-current="page">Payments</a>' in output
+    assert ">Overview</a>" in output
+    assert ">Attention</a>" in output
+    assert "Normalized payment history" in output
+    for heading in (
+        "ID",
+        "Date",
+        "Sender",
+        "Provider",
+        "Amount",
+        "Payer",
+        "Allocated",
+        "Unallocated",
+    ):
+        assert f">{heading}<" in output
+
+    resolved_row = html_row_containing(output, "SENDER &lt;script&gt;alert(3)&lt;/script&gt;")
+    assert str(facts["resolved"].id) in resolved_row
+    assert "2026-09-03" in resolved_row
+    assert "Provider &amp; &lt;b&gt;Example&lt;/b&gt;" in resolved_row
+    assert "$1,500.00" in resolved_row
+    assert "Payer &amp; &lt;b&gt;Example&lt;/b&gt;" in resolved_row
+    assert resolved_row.count("$1,500.00") == 2
+    assert "$0.00" in resolved_row
+
+    unresolved_row = html_row_containing(output, "UNRESOLVED SENDER")
+    assert "2026-09-08" in unresolved_row
+    assert "$900.00" in unresolved_row
+    assert "Unresolved" in unresolved_row
+    assert "$250.00" in unresolved_row
+    assert "$650.00" in unresolved_row
+
+    unknown_date_row = html_row_containing(output, "NULL DATE SENDER")
+    assert "Unknown" in unknown_date_row
+    assert "Null Date Payer" in unknown_date_row
+    assert "$50.00" in unknown_date_row
+    assert "$0.00" in unknown_date_row
+
+    assert output.index("SENDER &lt;script") < output.index("UNRESOLVED SENDER")
+    assert output.index("UNRESOLVED SENDER") < output.index("NULL DATE SENDER")
+    summary = output[output.index("payments-summary") : output.index("Payment history")]
+    assert "<strong>3</strong>" in summary
+    assert "$2,450.00" in summary
+    assert "$1,750.00" in summary
+    assert "$700.00" in summary
+
+    assert "<script>alert(3)</script>" not in output
+    assert "<b>Example</b>" not in output
+    for sentinel in (
+        "PRIVATE_SYNTHETIC_RAW_SENTINEL",
+        "PRIVATE_SYNTHETIC_MEMO_SENTINEL",
+        "PRIVATE_SYNTHETIC_GMAIL_ID_SENTINEL",
+        "PRIVATE_SYNTHETIC_OAUTH_CREDENTIAL_SENTINEL",
+        "PRIVATE_SYNTHETIC_OAUTH_TOKEN_SENTINEL",
+    ):
+        assert sentinel not in output
+    assert database_snapshot(database_path) == before
+    assert before[0] == CURRENT_SCHEMA_VERSION == 8
+
+
+def test_payment_filters_and_visible_summary_totals(tmp_path):
+    database_path, raws, payments, payers, rentals, obligations, allocations = (
+        create_fixture(tmp_path)
+    )
+    populate_payments_page(raws, payments, payers, rentals, obligations, allocations)
+    client = create_app(database_path).test_client()
+
+    unallocated = client.get("/payments?unallocated=1").get_data(as_text=True)
+    assert "SENDER &lt;script" not in unallocated
+    assert "UNRESOLVED SENDER" in unallocated
+    assert "NULL DATE SENDER" in unallocated
+    unallocated_summary = unallocated[
+        unallocated.index("payments-summary") : unallocated.index("Payment history")
+    ]
+    assert "<strong>2</strong>" in unallocated_summary
+    assert "$950.00" in unallocated_summary
+    assert "$250.00" in unallocated_summary
+    assert "$700.00" in unallocated_summary
+
+    unresolved = client.get("/payments?unresolved=1").get_data(as_text=True)
+    assert "UNRESOLVED SENDER" in unresolved
+    assert "NULL DATE SENDER" not in unresolved
+    unresolved_summary = unresolved[
+        unresolved.index("payments-summary") : unresolved.index("Payment history")
+    ]
+    assert "<strong>1</strong>" in unresolved_summary
+    assert "$900.00" in unresolved_summary
+    assert "$250.00" in unresolved_summary
+    assert "$650.00" in unresolved_summary
+
+    combined = client.get(
+        "/payments?unallocated=1&unresolved=1"
+    ).get_data(as_text=True)
+    assert "UNRESOLVED SENDER" in combined
+    assert "NULL DATE SENDER" not in combined
+    assert 'href="/payments?unallocated=1&amp;unresolved=1" aria-current="page"' in combined
+
+
+@pytest.mark.parametrize(
+    "query",
+    (
+        "unallocated=banana",
+        "unallocated=yes",
+        "unallocated=2",
+        "unallocated=0",
+        "unresolved=banana",
+        "unresolved=1&unresolved=1",
+        "provider=1",
+    ),
+)
+def test_invalid_payment_filters_return_safe_400(tmp_path, query):
+    database_path = create_fixture(tmp_path)[0]
+    response = create_app(database_path).test_client().get(f"/payments?{query}")
+    assert response.status_code == 400
+    assert "Invalid payment filter." in response.get_data(as_text=True)
+
+
+def test_payments_distinguishes_empty_ledger_from_filtered_no_match(tmp_path):
+    empty_database = create_fixture(tmp_path, "empty-payments.sqlite3")[0]
+    empty_client = create_app(empty_database).test_client()
+    assert "No payments found." in empty_client.get("/payments").get_data(as_text=True)
+    assert "No payments match the current filters." in empty_client.get(
+        "/payments?unallocated=1"
+    ).get_data(as_text=True)
+
+    database_path, raws, payments, payers, rentals, obligations, allocations = (
+        create_fixture(tmp_path, "filtered-payments.sqlite3")
+    )
+    facts = populate_payments_page(
+        raws, payments, payers, rentals, obligations, allocations
+    )
+    add_alias(payers, "Resolved Later", "UNRESOLVED SENDER")
+    remainder = obligations.create(
+        facts["account"].id, "2026-11", 70000, date(2026, 11, 1)
+    )
+    allocations.create_checked(facts["unresolved"].id, remainder.id, 65000)
+    final = obligations.create(
+        facts["account"].id, "2026-12", 5000, date(2026, 12, 1)
+    )
+    allocations.create_checked(facts["unknown_date"].id, final.id, 5000)
+    output = create_app(database_path).test_client().get(
+        "/payments?unallocated=1"
+    ).get_data(as_text=True)
+    assert "No payments match the current filters." in output
+
+
+def test_payments_reflects_alias_and_allocation_changes_without_payment_mutation(tmp_path):
+    database_path, raws, payments, payers, rentals, obligations, allocations = (
+        create_fixture(tmp_path)
+    )
+    facts = populate_payments_page(
+        raws, payments, payers, rentals, obligations, allocations
+    )
+    unresolved_payment = facts["unresolved"]
+    unknown_date_payment = facts["unknown_date"]
+    original_unresolved = payments.get(unresolved_payment.id)
+    original_unknown_date = payments.get(unknown_date_payment.id)
+    client = create_app(database_path).test_client()
+
+    before = client.get("/payments").get_data(as_text=True)
+    assert "Unresolved" in html_row_containing(before, "UNRESOLVED SENDER")
+    payer = add_alias(payers, "Resolved Later", "UNRESOLVED SENDER")
+    after_alias = client.get("/payments").get_data(as_text=True)
+    assert "Resolved Later" in html_row_containing(after_alias, "UNRESOLVED SENDER")
+    payers.remove_alias_checked(payer.id, normalize_alias("UNRESOLVED SENDER"))
+    after_removal = client.get("/payments").get_data(as_text=True)
+    assert "Unresolved" in html_row_containing(after_removal, "UNRESOLVED SENDER")
+    assert payments.get(unresolved_payment.id) == original_unresolved
+
+    obligation = obligations.create(
+        facts["account"].id, "2026-11", 5000, date(2026, 11, 1)
+    )
+    allocation = allocations.create_checked(
+        unknown_date_payment.id, obligation.id, 5000
+    )
+    after_allocation = client.get("/payments").get_data(as_text=True)
+    allocated_row = html_row_containing(after_allocation, "NULL DATE SENDER")
+    assert allocated_row.count("$50.00") == 2
+    assert "$0.00" in allocated_row
+    allocations.remove(allocation.id)
+    after_removal = client.get("/payments").get_data(as_text=True)
+    removed_row = html_row_containing(after_removal, "NULL DATE SENDER")
+    assert removed_row.count("$50.00") == 2
+    assert "$0.00" in removed_row
+    assert payments.get(unknown_date_payment.id) == original_unknown_date
+
+
+def test_payments_uses_canonical_composition_and_safe_errors(tmp_path, monkeypatch):
+    database_path = create_fixture(tmp_path)[0]
+    original_builder = web_composition.build_web_payments
+    captured = []
+
+    def recording_builder(path, **filters):
+        captured.append((path, filters))
+        return original_builder(path, **filters)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("payments attempted Gmail access")
+
+    monkeypatch.setattr(web_composition, "build_web_payments", recording_builder)
+    monkeypatch.setattr(GmailSource, "authenticate", staticmethod(forbidden))
+    response = create_app(database_path).test_client().get(
+        "/payments?unallocated=1"
+    )
+    assert response.status_code == 200
+    assert captured == [
+        (
+            database_path,
+            {"unallocated_only": True, "unresolved_only": False},
+        )
+    ]
+    assert "SELECT " not in inspect.getsource(web_routes)
+    assert "SELECT " not in inspect.getsource(web_composition)
+
+    def fail_builder(path, **filters):
+        raise RuntimeError("PRIVATE_PAYMENTS_FAILURE_SENTINEL")
+
+    monkeypatch.setattr(web_composition, "build_web_payments", fail_builder)
+    failed = create_app(database_path).test_client().get("/payments")
+    failed_output = failed.get_data(as_text=True)
+    assert failed.status_code == 500
+    assert "Unable to build payments view." in failed_output
+    assert "autorentledger db check" in failed_output
+    assert "PRIVATE_PAYMENTS_FAILURE_SENTINEL" not in failed_output
+    assert "Traceback" not in failed_output
+
+
+def test_payments_missing_and_outdated_databases_are_safe(tmp_path):
+    missing = tmp_path / "missing-payments.sqlite3"
+    missing_response = create_app(missing).test_client().get("/payments")
+    assert missing_response.status_code == 503
+    assert not missing.exists()
+    assert "autorentledger db upgrade" in missing_response.get_data(as_text=True)
+
+    outdated = tmp_path / "outdated-payments.sqlite3"
+    with sqlite3.connect(outdated) as connection:
+        for version in range(1, 8):
+            MIGRATIONS[version](connection)
+        connection.execute("PRAGMA user_version = 7")
+    before = database_snapshot(outdated)
+    outdated_response = create_app(outdated).test_client().get("/payments")
     assert outdated_response.status_code == 503
     assert "autorentledger db status" in outdated_response.get_data(as_text=True)
     assert database_snapshot(outdated) == before

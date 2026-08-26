@@ -6,8 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from autorentledger.overview import OwnerOverview, build_owner_overview
+from autorentledger.payment_listing import PaymentListRecord, list_payment_records
 from autorentledger.review import ReviewItem, ReviewKind, collect_review_items
 from autorentledger.storage import (
+    SQLitePaymentListingRepository,
     SQLiteReconciliationRepository,
     SQLiteRentScheduleRepository,
     SQLiteReportingRepository,
@@ -40,6 +42,22 @@ class AttentionPage:
         )
 
 
+@dataclass(frozen=True)
+class PaymentsPage:
+    """Visible payment records and exact totals for the active read-only filters."""
+
+    records: tuple[PaymentListRecord, ...]
+    unallocated_only: bool
+    unresolved_only: bool
+    observed_cents: int
+    allocated_cents: int
+    unallocated_cents: int
+
+    @property
+    def has_filters(self) -> bool:
+        return self.unallocated_only or self.unresolved_only
+
+
 def build_web_owner_overview(database_path: Path, period: str) -> OwnerOverview:
     """Wire existing repositories into the canonical owner overview service."""
     return build_owner_overview(
@@ -64,6 +82,30 @@ def build_web_attention(database_path: Path) -> AttentionPage:
         partial_obligations=_items_of_kind(items, ReviewKind.PARTIAL_OBLIGATION),
         unpaid_obligations=_items_of_kind(items, ReviewKind.UNPAID_OBLIGATION),
         unparsed_emails=_items_of_kind(items, ReviewKind.UNPARSED_EMAIL),
+    )
+
+
+def build_web_payments(
+    database_path: Path,
+    *,
+    unallocated_only: bool = False,
+    unresolved_only: bool = False,
+) -> PaymentsPage:
+    """Filter canonical payment records and total only the visible result set."""
+    records = list_payment_records(SQLitePaymentListingRepository(database_path))
+    visible = tuple(
+        record
+        for record in records
+        if (not unallocated_only or record.unallocated_cents > 0)
+        and (not unresolved_only or record.payer_id is None)
+    )
+    return PaymentsPage(
+        records=visible,
+        unallocated_only=unallocated_only,
+        unresolved_only=unresolved_only,
+        observed_cents=sum(record.amount_cents for record in visible),
+        allocated_cents=sum(record.allocated_cents for record in visible),
+        unallocated_cents=sum(record.unallocated_cents for record in visible),
     )
 
 

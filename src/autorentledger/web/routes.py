@@ -99,3 +99,73 @@ def attention():
     return render_template(
         "attention.html", attention=attention_page, active_page="attention"
     )
+
+
+@web_blueprint.get("/payments")
+def payments():
+    try:
+        unallocated_only, unresolved_only = _payment_filters()
+    except ValueError:
+        return (
+            render_template(
+                "error.html",
+                title="Invalid payment filter",
+                message=(
+                    "Invalid payment filter. Use unallocated=1 and/or unresolved=1."
+                ),
+                commands=(),
+                active_page="payments",
+            ),
+            400,
+        )
+
+    database_path = Path(current_app.config["AUTORENTLEDGER_DATABASE"])
+    try:
+        require_current_schema(database_path)
+        payments_page = composition.build_web_payments(
+            database_path,
+            unallocated_only=unallocated_only,
+            unresolved_only=unresolved_only,
+        )
+    except DatabaseSchemaError:
+        return (
+            render_template(
+                "error.html",
+                title="Database not ready",
+                message="The AutoRentLedger database is missing, outdated, or invalid.",
+                commands=("autorentledger db status", "autorentledger db upgrade"),
+                active_page="payments",
+            ),
+            503,
+        )
+    except Exception:  # Safe browser boundary for domain/storage failures.
+        current_app.logger.exception("Unable to build payments view")
+        return (
+            render_template(
+                "error.html",
+                title="Payments unavailable",
+                message="Unable to build payments view.",
+                commands=("autorentledger db check",),
+                active_page="payments",
+            ),
+            500,
+        )
+
+    return render_template(
+        "payments.html", payments=payments_page, active_page="payments"
+    )
+
+
+def _payment_filters() -> tuple[bool, bool]:
+    if set(request.args) - {"unallocated", "unresolved"}:
+        raise ValueError
+
+    def enabled(name: str) -> bool:
+        values = request.args.getlist(name)
+        if not values:
+            return False
+        if values != ["1"]:
+            raise ValueError
+        return True
+
+    return enabled("unallocated"), enabled("unresolved")

@@ -77,6 +77,13 @@ code { display: block; width: fit-content; max-width: 100%; margin: .35rem 0; pa
 .review-card { min-width: 0; padding: 1rem; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
 .review-card p { margin: .35rem 0 0; color: var(--muted); }
 .review-values { display: flex; gap: 2rem; margin: .75rem 0 0; }
+.payments-heading { margin-bottom: 1rem; }
+.payments-heading .section-note { margin: .75rem 0 0; }
+.filter-nav { display: flex; flex-wrap: wrap; gap: .55rem; margin-bottom: 1rem; }
+.filter-nav a { padding: .4rem .75rem; border: 1px solid var(--line); border-radius: 999px; color: var(--ink); background: var(--surface); font-size: .875rem; font-weight: 700; text-decoration: none; }
+.filter-nav a[aria-current="page"] { border-color: var(--accent); background: var(--accent-soft); text-decoration: underline; text-underline-offset: .2rem; }
+.payments-table td:nth-child(3), .payments-table td:nth-child(6) { white-space: normal; min-width: 10rem; }
+.unresolved { font-weight: 750; }
 
 @media (max-width: 760px) {
   .page-heading { align-items: stretch; flex-direction: column; }

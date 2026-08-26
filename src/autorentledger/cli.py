@@ -45,6 +45,10 @@ from autorentledger.obligations import (
 from autorentledger.operations import SyncResult, run_sync
 from autorentledger.overview import build_owner_overview, render_owner_overview_terminal
 from autorentledger.parsing import NotificationParseError, parse_payment_notification
+from autorentledger.payment_listing import (
+    PaymentListingInvariantError,
+    list_payment_records,
+)
 from autorentledger.processing import process_raw_emails
 from autorentledger.rebuilding import (
     PaymentRebuildInvariantError,
@@ -94,6 +98,7 @@ from autorentledger.storage.sqlite import (
     SQLiteObligationRepository,
     SQLitePayerRepository,
     SQLitePaymentEventRepository,
+    SQLitePaymentListingRepository,
     SQLiteRawEmailRepository,
     SQLiteReconciliationRepository,
     SQLiteRentalRepository,
@@ -495,14 +500,17 @@ def run_processing(database_path: Path) -> int:
 
 
 def run_payment_listing(database_path: Path) -> int:
-    repository = SQLitePaymentEventRepository(database_path)
-    events = repository.list_all()
+    try:
+        events = list_payment_records(SQLitePaymentListingRepository(database_path))
+    except PaymentListingInvariantError as error:
+        print(error)
+        return 1
     print(f"{'ID':<4} {'DATE':<10} {'SENDER':<24} {'AMOUNT':>12}  PROVIDER")
     for event in events:
-        occurred_on = event.occurred_on or "-"
+        occurred_on = event.occurred_on.isoformat() if event.occurred_on else "-"
         amount = _format_currency(event.amount_cents)
         print(
-            f"{event.id:<4} {occurred_on:<10} {event.sender_name:<24} "
+            f"{event.payment_event_id:<4} {occurred_on:<10} {event.sender_name:<24} "
             f"{amount:>12}  {event.provider}"
         )
     return 0
