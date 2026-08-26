@@ -112,6 +112,11 @@ interpretation, and allocated/unallocated totals. The optional read-only views
 `/payments?unallocated=1` and `/payments?unresolved=1` filter current results; combine both query
 parameters to require both conditions.
 
+Use `http://127.0.0.1:8000/obligations?period=2026-09` to inspect actual obligations and their
+canonical PAID, PARTIAL, or UNPAID reconciliation for one month. This view is read-only and does
+not treat schedules as debt: missing scheduled obligations remain warnings on Overview and never
+increase obligation totals until an actual obligation exists.
+
 The page renders the canonical `OwnerOverview`: monthly rent, actual obligation rows, payment
 intake, global current attention, missing-obligation warnings, and actionable suggestions. It has
 no POST/write routes, JavaScript actions, sessions, or authentication. It cannot sync Gmail,

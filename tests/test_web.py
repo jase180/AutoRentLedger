@@ -281,6 +281,7 @@ def test_app_factory_is_side_effect_free_and_registers_get_only_routes(tmp_path)
     assert {rule.rule for rule in app.url_map.iter_rules()} == {
         "/",
         "/attention",
+        "/obligations",
         "/overview",
         "/payments",
         "/static/<path:filename>",
@@ -524,6 +525,7 @@ def test_static_assets_are_local_and_post_routes_do_not_exist(tmp_path):
     assert client.post("/overview?period=2026-09").status_code == 405
     assert client.post("/attention").status_code == 405
     assert client.post("/payments").status_code == 405
+    assert client.post("/obligations").status_code == 405
 
 
 def test_attention_renders_canonical_global_queue_privately_and_read_only(tmp_path):
@@ -977,6 +979,218 @@ def test_payments_missing_and_outdated_databases_are_safe(tmp_path):
     assert outdated_response.status_code == 503
     assert "autorentledger db status" in outdated_response.get_data(as_text=True)
     assert database_snapshot(outdated) == before
+
+
+def test_obligations_redirects_to_injected_month_and_validates_period_read_only(
+    tmp_path,
+):
+    database_path = create_fixture(tmp_path)[0]
+    before = database_snapshot(database_path)
+    app = create_app(database_path)
+    app.config["AUTORENTLEDGER_TODAY"] = lambda: date(2026, 9, 18)
+    client = app.test_client()
+
+    redirected = client.get("/obligations")
+    assert redirected.status_code == 302
+    assert redirected.headers["Location"].endswith("/obligations?period=2026-09")
+    assert client.get("/obligations?period=2026-09").status_code == 200
+    for invalid in ("banana", "2026-13", "2026-9", ""):
+        response = client.get("/obligations", query_string={"period": invalid})
+        assert response.status_code == 400
+        assert "Invalid period. Expected YYYY-MM." in response.get_data(as_text=True)
+    assert database_snapshot(database_path) == before
+
+
+def test_obligations_renders_canonical_reconciliation_privately_and_read_only(
+    tmp_path,
+):
+    database_path, raws, payments, _, rentals, obligations, allocations = create_fixture(
+        tmp_path
+    )
+    paid_account = add_account(rentals, "Unit A", "Paid Household")
+    partial_account = add_account(rentals, "Unit B", "Partial Household")
+    unpaid_account = add_account(
+        rentals, "<script>alert(4)</script>", "Household & <b>Example</b>"
+    )
+    paid = obligations.create(paid_account.id, "2026-09", 145000, date(2026, 9, 1))
+    partial = obligations.create(
+        partial_account.id, "2026-09", 150000, date(2026, 9, 5)
+    )
+    obligations.create(unpaid_account.id, "2026-09", 120000, date(2026, 9, 8))
+    obligations.create(paid_account.id, "2026-10", 99900, date(2026, 10, 1))
+    august_payment = add_payment(
+        raws,
+        payments,
+        21,
+        212500,
+        date(2026, 8, 28),
+        "PRIVATE_SYNTHETIC_PAYMENT_SENDER_SENTINEL",
+    )
+    allocations.create_checked(august_payment.id, paid.id, 145000)
+    allocations.create_checked(august_payment.id, partial.id, 67500)
+    before = database_snapshot(database_path)
+
+    response = create_app(database_path).test_client().get(
+        "/obligations?period=2026-09"
+    )
+    output = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert 'aria-current="page">Obligations</a>' in output
+    for link in ("Overview", "Attention", "Payments", "Obligations"):
+        assert f">{link}</a>" in output
+    assert "SEPTEMBER 2026" in output
+    assert 'value="2026-09"' in output
+    summary = output[output.index("obligations-summary") : output.index("obligation-counts")]
+    for value in ("$4,150.00", "$2,125.00", "$2,025.00", "<strong>3</strong>"):
+        assert value in summary
+    counts = output[output.index("obligation-counts") : output.index("Obligation status")]
+    assert "<dt>Paid</dt><dd>1</dd>" in counts
+    assert "<dt>Partial</dt><dd>1</dd>" in counts
+    assert "<dt>Unpaid</dt><dd>1</dd>" in counts
+
+    paid_row = html_row_containing(output, "Paid Household")
+    assert "2026-09-01" in paid_row
+    assert paid_row.count("$1,450.00") == 2
+    assert "$0.00" in paid_row
+    assert "PAID" in paid_row
+    partial_row = html_row_containing(output, "Partial Household")
+    assert "2026-09-05" in partial_row
+    assert "$1,500.00" in partial_row
+    assert "$675.00" in partial_row
+    assert "$825.00" in partial_row
+    assert "PARTIAL" in partial_row
+    unpaid_row = html_row_containing(output, "Household &amp; &lt;b&gt;Example&lt;/b&gt;")
+    assert "2026-09-08" in unpaid_row
+    assert "$1,200.00" in unpaid_row
+    assert unpaid_row.count("$0.00") == 1
+    assert "UNPAID" in unpaid_row
+    assert output.index("Paid Household") < output.index("Partial Household")
+    assert output.index("Partial Household") < output.index("Household &amp;")
+    assert "$999.00" not in output
+    assert "LATE" not in output
+    assert "OVERDUE" not in output
+    assert "<script>alert(4)</script>" not in output
+    assert "&lt;script&gt;alert(4)&lt;/script&gt;" in output
+    for sentinel in (
+        "PRIVATE_SYNTHETIC_PAYMENT_SENDER_SENTINEL",
+        "PRIVATE_SYNTHETIC_RAW_SENTINEL",
+        "PRIVATE_SYNTHETIC_MEMO_SENTINEL",
+        "PRIVATE_SYNTHETIC_GMAIL_ID_SENTINEL",
+        "PRIVATE_SYNTHETIC_OAUTH_CREDENTIAL_SENTINEL",
+        "PRIVATE_SYNTHETIC_OAUTH_TOKEN_SENTINEL",
+    ):
+        assert sentinel not in output
+    assert database_snapshot(database_path) == before
+    assert before[0] == CURRENT_SCHEMA_VERSION == 8
+
+
+def test_obligations_excludes_schedules_and_actual_obligation_is_authoritative(
+    tmp_path,
+):
+    database_path, _, _, _, rentals, obligations, _ = create_fixture(tmp_path)
+    account = add_account(rentals, "Scheduled Unit", "Scheduled Household")
+    create_rent_schedule(
+        SQLiteRentScheduleRepository(database_path),
+        account.id,
+        "1450.00",
+        1,
+        "2026-09-15",
+    )
+    client = create_app(database_path).test_client()
+
+    empty = client.get("/obligations?period=2026-09").get_data(as_text=True)
+    assert "No obligations exist for this month." in empty
+    assert "Check Overview for missing scheduled-obligation warnings." in empty
+    assert "$0.00" in empty
+    assert "$1,450.00" not in empty
+    overview_missing = client.get("/overview?period=2026-09").get_data(as_text=True)
+    assert "Expected $1,450.00" in overview_missing
+
+    obligations.create(account.id, "2026-09", 150000, date(2026, 9, 5))
+    actual = client.get("/obligations?period=2026-09").get_data(as_text=True)
+    actual_row = html_row_containing(actual, "Scheduled Household")
+    assert "$1,500.00" in actual_row
+    assert "2026-09-05" in actual_row
+    assert "$1,450.00" not in actual
+    overview_actual = client.get("/overview?period=2026-09").get_data(as_text=True)
+    assert "Expected $1,450.00" not in overview_actual
+
+
+def test_obligations_uses_canonical_composition_and_safe_errors(tmp_path, monkeypatch):
+    database_path = create_fixture(tmp_path)[0]
+    original_builder = web_composition.build_web_obligations
+    captured = []
+
+    def recording_builder(path, period):
+        captured.append((path, period))
+        return original_builder(path, period)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("obligations attempted Gmail access")
+
+    monkeypatch.setattr(web_composition, "build_web_obligations", recording_builder)
+    monkeypatch.setattr(GmailSource, "authenticate", staticmethod(forbidden))
+    response = create_app(database_path).test_client().get(
+        "/obligations?period=2026-09"
+    )
+    assert response.status_code == 200
+    assert captured == [(database_path, "2026-09")]
+    assert "SELECT " not in inspect.getsource(web_routes)
+    assert "SELECT " not in inspect.getsource(web_composition)
+
+    def fail_builder(path, period):
+        raise RuntimeError("PRIVATE_OBLIGATIONS_FAILURE_SENTINEL")
+
+    monkeypatch.setattr(web_composition, "build_web_obligations", fail_builder)
+    failed = create_app(database_path).test_client().get(
+        "/obligations?period=2026-09"
+    )
+    failed_output = failed.get_data(as_text=True)
+    assert failed.status_code == 500
+    assert "Unable to build obligations view." in failed_output
+    assert "autorentledger db check" in failed_output
+    assert "PRIVATE_OBLIGATIONS_FAILURE_SENTINEL" not in failed_output
+    assert "Traceback" not in failed_output
+
+
+def test_obligations_missing_and_outdated_databases_are_safe(tmp_path):
+    missing = tmp_path / "missing-obligations.sqlite3"
+    missing_response = create_app(missing).test_client().get(
+        "/obligations?period=2026-09"
+    )
+    assert missing_response.status_code == 503
+    assert not missing.exists()
+    assert "autorentledger db upgrade" in missing_response.get_data(as_text=True)
+
+    outdated = tmp_path / "outdated-obligations.sqlite3"
+    with sqlite3.connect(outdated) as connection:
+        for version in range(1, 8):
+            MIGRATIONS[version](connection)
+        connection.execute("PRAGMA user_version = 7")
+    before = database_snapshot(outdated)
+    outdated_response = create_app(outdated).test_client().get(
+        "/obligations?period=2026-09"
+    )
+    assert outdated_response.status_code == 503
+    assert "autorentledger db status" in outdated_response.get_data(as_text=True)
+    assert database_snapshot(outdated) == before
+
+
+def test_all_web_pages_share_final_navigation(tmp_path):
+    database_path = create_fixture(tmp_path)[0]
+    client = create_app(database_path).test_client()
+    paths = {
+        "/overview?period=2026-09": "Overview",
+        "/attention": "Attention",
+        "/payments": "Payments",
+        "/obligations?period=2026-09": "Obligations",
+    }
+    for path, active in paths.items():
+        output = client.get(path).get_data(as_text=True)
+        for link in paths.values():
+            assert f">{link}</a>" in output
+        assert f'aria-current="page">{active}</a>' in output
 
 
 def test_web_cli_defaults_loopback_allowlist_and_safe_server_options(

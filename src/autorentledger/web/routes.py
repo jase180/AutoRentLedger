@@ -156,6 +156,61 @@ def payments():
     )
 
 
+@web_blueprint.get("/obligations")
+def obligations():
+    if "period" not in request.args:
+        today = current_app.config["AUTORENTLEDGER_TODAY"]()
+        period = f"{today.year:04d}-{today.month:02d}"
+        return redirect(url_for("web.obligations", period=period))
+
+    supplied_period = request.args.get("period", "")
+    try:
+        period = parse_monthly_period(supplied_period).value
+    except ObligationValidationError:
+        return (
+            render_template(
+                "error.html",
+                title="Invalid period",
+                message="Invalid period. Expected YYYY-MM.",
+                commands=(),
+                active_page="obligations",
+            ),
+            400,
+        )
+
+    database_path = Path(current_app.config["AUTORENTLEDGER_DATABASE"])
+    try:
+        require_current_schema(database_path)
+        obligations_page = composition.build_web_obligations(database_path, period)
+    except DatabaseSchemaError:
+        return (
+            render_template(
+                "error.html",
+                title="Database not ready",
+                message="The AutoRentLedger database is missing, outdated, or invalid.",
+                commands=("autorentledger db status", "autorentledger db upgrade"),
+                active_page="obligations",
+            ),
+            503,
+        )
+    except Exception:  # Safe browser boundary for domain/storage failures.
+        current_app.logger.exception("Unable to build obligations view")
+        return (
+            render_template(
+                "error.html",
+                title="Obligations unavailable",
+                message="Unable to build obligations view.",
+                commands=("autorentledger db check",),
+                active_page="obligations",
+            ),
+            500,
+        )
+
+    return render_template(
+        "obligations.html", obligations=obligations_page, active_page="obligations"
+    )
+
+
 def _payment_filters() -> tuple[bool, bool]:
     if set(request.args) - {"unallocated", "unresolved"}:
         raise ValueError

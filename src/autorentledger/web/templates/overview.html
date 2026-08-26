@@ -45,7 +45,10 @@
   </section>
 
   <section aria-labelledby="account-status-heading">
-    <h2 id="account-status-heading">Account status</h2>
+    <div class="section-heading-row">
+      <h2 id="account-status-heading">Account status</h2>
+      <a href="{{ url_for('web.obligations', period=overview.period) }}">View obligations</a>
+    </div>
     {% if overview.accounts %}
       <div class="table-wrap">
         <table>

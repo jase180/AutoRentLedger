@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}{{ obligations.period|month_heading }} Obligations | AutoRentLedger{% endblock %}
+
+{% block content %}
+  <section class="page-heading obligations-heading">
+    <div>
+      <p class="eyebrow">Actual rent obligations</p>
+      <h1>Obligations</h1>
+      <p class="section-note">{{ obligations.period|month_heading }} · canonical reconciliation of actual obligations only.</p>
+    </div>
+    <form class="period-form" method="get" action="{{ url_for('web.obligations') }}">
+      <label for="period">Month</label>
+      <input id="period" type="month" name="period" value="{{ obligations.period }}" required>
+      <button type="submit">View</button>
+    </form>
+  </section>
+
+  <div class="summary-grid obligations-summary">
+    <article class="summary-card"><span>Owed</span><strong>{{ obligations.owed_cents|money }}</strong></article>
+    <article class="summary-card"><span>Allocated</span><strong>{{ obligations.allocated_cents|money }}</strong></article>
+    <article class="summary-card"><span>Remaining</span><strong>{{ obligations.remaining_cents|money }}</strong></article>
+    <article class="summary-card"><span>Obligations</span><strong>{{ obligations.records|length }}</strong></article>
+  </div>
+
+  <dl class="count-strip obligation-counts">
+    <div><dt>Paid</dt><dd>{{ obligations.paid_count }}</dd></div>
+    <div><dt>Partial</dt><dd>{{ obligations.partial_count }}</dd></div>
+    <div><dt>Unpaid</dt><dd>{{ obligations.unpaid_count }}</dd></div>
+  </dl>
+
+  <section aria-labelledby="obligation-list-heading">
+    <div class="section-heading-row">
+      <h2 id="obligation-list-heading">Obligation status</h2>
+      <a href="{{ url_for('web.overview', period=obligations.period) }}">Back to overview</a>
+    </div>
+    {% if obligations.records %}
+      <div class="table-wrap">
+        <table class="obligations-table">
+          <thead>
+            <tr><th>Unit</th><th>Account</th><th>Due</th><th class="money">Owed</th><th class="money">Paid</th><th class="money">Left</th><th>Status</th></tr>
+          </thead>
+          <tbody>
+            {% for obligation in obligations.records %}
+              <tr>
+                <td>{{ obligation.unit_label }}</td>
+                <td>{{ obligation.account_display_name }}</td>
+                <td>{{ obligation.due_date }}</td>
+                <td class="money">{{ obligation.owed_cents|money }}</td>
+                <td class="money">{{ obligation.allocated_cents|money }}</td>
+                <td class="money">{{ obligation.remaining_cents|money }}</td>
+                <td><span class="status status-{{ obligation.status.value|lower }}">{{ obligation.status.value }}</span></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="empty-state">No obligations exist for this month. <a href="{{ url_for('web.overview', period=obligations.period) }}">Check Overview for missing scheduled-obligation warnings.</a></p>
+    {% endif %}
+  </section>
+{% endblock %}

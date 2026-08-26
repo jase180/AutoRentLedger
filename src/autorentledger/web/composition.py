@@ -7,6 +7,11 @@ from pathlib import Path
 
 from autorentledger.overview import OwnerOverview, build_owner_overview
 from autorentledger.payment_listing import PaymentListRecord, list_payment_records
+from autorentledger.reconciliation import (
+    ReconciliationRecord,
+    ReconciliationStatus,
+    reconcile_period,
+)
 from autorentledger.review import ReviewItem, ReviewKind, collect_review_items
 from autorentledger.storage import (
     SQLitePaymentListingRepository,
@@ -58,6 +63,20 @@ class PaymentsPage:
         return self.unallocated_only or self.unresolved_only
 
 
+@dataclass(frozen=True)
+class ObligationsPage:
+    """Selected-period canonical reconciliation records and their exact totals."""
+
+    period: str
+    records: tuple[ReconciliationRecord, ...]
+    owed_cents: int
+    allocated_cents: int
+    remaining_cents: int
+    paid_count: int
+    partial_count: int
+    unpaid_count: int
+
+
 def build_web_owner_overview(database_path: Path, period: str) -> OwnerOverview:
     """Wire existing repositories into the canonical owner overview service."""
     return build_owner_overview(
@@ -106,6 +125,27 @@ def build_web_payments(
         observed_cents=sum(record.amount_cents for record in visible),
         allocated_cents=sum(record.allocated_cents for record in visible),
         unallocated_cents=sum(record.unallocated_cents for record in visible),
+    )
+
+
+def build_web_obligations(database_path: Path, period: str) -> ObligationsPage:
+    """Total actual obligations returned by canonical period reconciliation."""
+    records = tuple(
+        reconcile_period(SQLiteReconciliationRepository(database_path), period)
+    )
+    return ObligationsPage(
+        period=period,
+        records=records,
+        owed_cents=sum(record.owed_cents for record in records),
+        allocated_cents=sum(record.allocated_cents for record in records),
+        remaining_cents=sum(record.remaining_cents for record in records),
+        paid_count=sum(record.status is ReconciliationStatus.PAID for record in records),
+        partial_count=sum(
+            record.status is ReconciliationStatus.PARTIAL for record in records
+        ),
+        unpaid_count=sum(
+            record.status is ReconciliationStatus.UNPAID for record in records
+        ),
     )
 
 
