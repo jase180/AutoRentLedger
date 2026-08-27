@@ -91,6 +91,17 @@ summaries still reflect current ledger state.
 
 ## Local read-only web view
 
+Configure single-owner authentication in the PowerShell session that will start the server. These
+commands prompt without echoing the password and generate a random Flask signing key:
+
+```powershell
+$env:AUTORENTLEDGER_WEB_PASSWORD_HASH = python -c "from getpass import getpass; from werkzeug.security import generate_password_hash; print(generate_password_hash(getpass('AutoRentLedger password: ')))"
+$env:AUTORENTLEDGER_WEB_SECRET_KEY = python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+Keep both values private and outside the repository. AutoRentLedger stores neither value in
+SQLite and refuses to start the web server when either is absent.
+
 Start the local server:
 
 ```powershell
@@ -117,14 +128,21 @@ canonical PAID, PARTIAL, or UNPAID reconciliation for one month. This view is re
 not treat schedules as debt: missing scheduled obligations remain warnings on Overview and never
 increase obligation totals until an actual obligation exists.
 
-The page renders the canonical `OwnerOverview`: monthly rent, actual obligation rows, payment
-intake, global current attention, missing-obligation warnings, and actionable suggestions. It has
-no POST/write routes, JavaScript actions, sessions, or authentication. It cannot sync Gmail,
-generate obligations, or allocate payments.
+The pages require the single owner password and otherwise retain their existing read-only
+semantics. Authentication uses a signed Flask session cookie; it does not create users, roles,
+login history, or database-backed sessions. The only POST routes are login and logout. The web UI
+cannot sync Gmail, generate obligations, allocate payments, or otherwise mutate the ledger.
 
-Because M19A is unauthenticated, the CLI permits only `127.0.0.1`, `localhost`, and `::1`. Never use
-a reverse proxy, port forwarding, or another mechanism to expose this local server to a LAN or the
-public internet.
+The CLI permits only `127.0.0.1`, `localhost`, and `::1`. It still rejects LAN addresses,
+Tailscale IPs, `0.0.0.0`, and public addresses.
+
+For private phone/laptop access, keep AutoRentLedger on `127.0.0.1:8000` and configure
+[Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve) on the same machine to proxy
+that loopback service into your tailnet. For current Tailscale versions, `tailscale serve 8000`
+proxies `http://127.0.0.1:8000`; verify the displayed target before using its private HTTPS URL.
+Tailscale remains external to AutoRentLedger—there is no Python dependency or API integration.
+
+Do not use router port forwarding, Tailscale Funnel, or direct `0.0.0.0` binding for this app.
 
 ## Monthly setup
 

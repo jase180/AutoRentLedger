@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+
+{% block title %}Sign in | AutoRentLedger{% endblock %}
+
+{% block content %}
+  <section class="login-panel" aria-labelledby="login-title">
+    <p class="eyebrow">Single-owner access</p>
+    <h1 id="login-title">Sign in</h1>
+    {% if invalid_password %}
+      <p class="login-error" role="alert">Invalid password.</p>
+    {% endif %}
+    <form class="login-form" method="post" action="{{ url_for('auth.login') }}">
+      <input type="hidden" name="next" value="{{ next_path }}">
+      <label for="password">Password</label>
+      <input id="password" type="password" name="password" required autofocus autocomplete="current-password">
+      <button type="submit">Sign in</button>
+    </form>
+  </section>
+{% endblock %}

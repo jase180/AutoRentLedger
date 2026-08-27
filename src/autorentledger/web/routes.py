@@ -9,17 +9,20 @@ from flask import Blueprint, current_app, redirect, render_template, request, ur
 from autorentledger.obligations import ObligationValidationError, parse_monthly_period
 from autorentledger.storage.migrations import DatabaseSchemaError, require_current_schema
 from autorentledger.web import composition
+from autorentledger.web.auth import login_required
 
 web_blueprint = Blueprint("web", __name__)
 
 
 @web_blueprint.get("/")
+@login_required
 def root():
     today = current_app.config["AUTORENTLEDGER_TODAY"]()
     return redirect(url_for("web.overview", period=f"{today.year:04d}-{today.month:02d}"))
 
 
 @web_blueprint.get("/overview")
+@login_required
 def overview():
     supplied_period = request.args.get("period", "")
     try:
@@ -67,6 +70,7 @@ def overview():
 
 
 @web_blueprint.get("/attention")
+@login_required
 def attention():
     database_path = Path(current_app.config["AUTORENTLEDGER_DATABASE"])
     try:
@@ -102,6 +106,7 @@ def attention():
 
 
 @web_blueprint.get("/payments")
+@login_required
 def payments():
     try:
         unallocated_only, unresolved_only = _payment_filters()
@@ -157,6 +162,7 @@ def payments():
 
 
 @web_blueprint.get("/obligations")
+@login_required
 def obligations():
     if "period" not in request.args:
         today = current_app.config["AUTORENTLEDGER_TODAY"]()

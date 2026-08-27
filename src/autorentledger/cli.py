@@ -113,14 +113,18 @@ from autorentledger.suggestions import (
     SuggestionReason,
     find_allocation_suggestions,
 )
-from autorentledger.web import create_app
+from autorentledger.web import (
+    WebAuthConfigurationError,
+    create_app,
+    load_web_auth_config,
+)
 
 DEFAULT_QUERY = "subject:zelle"
 DEFAULT_DATABASE = Path("data/autorentledger.db")
 DEFAULT_WEB_HOST = "127.0.0.1"
 DEFAULT_WEB_PORT = 8000
 WEB_LOOPBACK_ERROR = (
-    "AutoRentLedger web UI is unauthenticated and may only bind to a loopback address."
+    "AutoRentLedger web UI may only bind to a loopback address."
 )
 
 
@@ -1258,7 +1262,17 @@ def run_web(database_path: Path, host: str, port: int) -> int:
     if not _is_loopback_host(host):
         print(WEB_LOOPBACK_ERROR)
         return 1
-    app = create_app(database_path)
+    try:
+        auth_config = load_web_auth_config()
+    except WebAuthConfigurationError as error:
+        print(error)
+        return 1
+    try:
+        require_current_schema(database_path)
+    except DatabaseSchemaError as error:
+        print(error)
+        return 1
+    app = create_app(database_path, auth_config)
     app.run(host=host, port=port, debug=False, use_reloader=False)
     return 0
 
@@ -1397,7 +1411,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "web" and not _is_loopback_host(args.host):
         print(WEB_LOOPBACK_ERROR)
         return 1
-    if args.command != "search":
+    if args.command not in {"search", "web"}:
         try:
             require_current_schema(args.database)
         except DatabaseSchemaError as error:

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from flask import Flask
 
+from autorentledger.web.auth import WebAuthConfig, auth_blueprint
 from autorentledger.web.routes import web_blueprint
 
 _MONTH_NAMES = (
@@ -25,17 +26,23 @@ _MONTH_NAMES = (
 )
 
 
-def create_app(database_path: Path) -> Flask:
+def create_app(database_path: Path, auth_config: WebAuthConfig) -> Flask:
     """Create the local web adapter without opening or changing the ledger."""
     app = Flask(__name__)
     app.config.update(
         AUTORENTLEDGER_DATABASE=Path(database_path),
         AUTORENTLEDGER_TODAY=date.today,
+        AUTORENTLEDGER_WEB_PASSWORD_HASH=auth_config.password_hash,
+        SECRET_KEY=auth_config.secret_key,
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE="Lax",
+        SESSION_COOKIE_SECURE=False,
     )
     app.jinja_env.filters["money"] = _format_money
     app.jinja_env.filters["month_heading"] = _format_month_heading
     app.jinja_env.globals["collection_percentage"] = _collection_percentage
     app.jinja_env.globals["bounded_percentage"] = _bounded_percentage
+    app.register_blueprint(auth_blueprint)
     app.register_blueprint(web_blueprint)
     return app
 

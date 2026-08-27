@@ -10,16 +10,22 @@
     <header class="site-header">
       <div class="page-shell header-inner">
         <a class="brand" href="{{ url_for('web.root') }}">AutoRentLedger</a>
-        <nav class="site-nav" aria-label="Primary navigation">
-          <a href="{{ url_for('web.root') }}"{% if active_page == "overview" %} aria-current="page"{% endif %}>Overview</a>
-          <span aria-hidden="true">|</span>
-          <a href="{{ url_for('web.attention') }}"{% if active_page == "attention" %} aria-current="page"{% endif %}>Attention</a>
-          <span aria-hidden="true">|</span>
-          <a href="{{ url_for('web.payments') }}"{% if active_page == "payments" %} aria-current="page"{% endif %}>Payments</a>
-          <span aria-hidden="true">|</span>
-          <a href="{{ url_for('web.obligations') }}"{% if active_page == "obligations" %} aria-current="page"{% endif %}>Obligations</a>
-        </nav>
-        <span class="local-label">Local read-only view</span>
+        {% if session.get("authenticated") is sameas true %}
+          <nav class="site-nav" aria-label="Primary navigation">
+            <a href="{{ url_for('web.root') }}"{% if active_page == "overview" %} aria-current="page"{% endif %}>Overview</a>
+            <span aria-hidden="true">|</span>
+            <a href="{{ url_for('web.attention') }}"{% if active_page == "attention" %} aria-current="page"{% endif %}>Attention</a>
+            <span aria-hidden="true">|</span>
+            <a href="{{ url_for('web.payments') }}"{% if active_page == "payments" %} aria-current="page"{% endif %}>Payments</a>
+            <span aria-hidden="true">|</span>
+            <a href="{{ url_for('web.obligations') }}"{% if active_page == "obligations" %} aria-current="page"{% endif %}>Obligations</a>
+          </nav>
+          <form class="logout-form" method="post" action="{{ url_for('auth.logout') }}">
+            <button class="link-button" type="submit">Sign out</button>
+          </form>
+        {% else %}
+          <span class="local-label">Single-owner sign in</span>
+        {% endif %}
       </div>
     </header>
     <main class="page-shell">

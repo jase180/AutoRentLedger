@@ -1,8 +1,11 @@
 import inspect
 import sqlite3
 from datetime import UTC, date, datetime
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
+from flask import session
+from werkzeug.security import generate_password_hash
 
 from autorentledger.cli import (
     DEFAULT_WEB_HOST,
@@ -32,9 +35,34 @@ from autorentledger.storage.migrations import (
     MIGRATIONS,
     upgrade_database,
 )
+from autorentledger.web import (
+    PASSWORD_HASH_ENV,
+    SECRET_KEY_ENV,
+    WebAuthConfig,
+)
 from autorentledger.web import composition as web_composition
-from autorentledger.web import create_app
+from autorentledger.web import (
+    create_app as create_web_app,
+)
 from autorentledger.web import routes as web_routes
+
+TEST_PASSWORD = "synthetic-owner-password"
+TEST_SECRET_KEY = "synthetic-session-secret-key"
+TEST_AUTH_CONFIG = WebAuthConfig(
+    password_hash=generate_password_hash(TEST_PASSWORD),
+    secret_key=TEST_SECRET_KEY,
+)
+
+
+def create_app(database_path):
+    """Create an authenticated-by-test-callback app for existing screen regressions."""
+    app = create_web_app(database_path, TEST_AUTH_CONFIG)
+
+    @app.before_request
+    def authenticate_existing_screen_test():
+        session["authenticated"] = True
+
+    return app
 
 
 def create_fixture(tmp_path, name="web.sqlite3"):
@@ -268,31 +296,235 @@ def html_row_containing(output, text):
     return output[start:end]
 
 
-def test_app_factory_is_side_effect_free_and_registers_get_only_routes(tmp_path):
+def test_app_factory_is_side_effect_free_and_registers_auth_and_ledger_routes(tmp_path):
     database_path = create_fixture(tmp_path)[0]
     before = database_snapshot(database_path)
 
-    app = create_app(database_path)
+    app = create_web_app(database_path, TEST_AUTH_CONFIG)
 
     assert app.config["AUTORENTLEDGER_DATABASE"] == database_path
-    assert app.secret_key is None
+    assert app.secret_key == TEST_SECRET_KEY
+    assert app.config["AUTORENTLEDGER_WEB_PASSWORD_HASH"] == TEST_AUTH_CONFIG.password_hash
+    assert app.config["SESSION_COOKIE_HTTPONLY"] is True
+    assert app.config["SESSION_COOKIE_SAMESITE"] == "Lax"
+    assert app.config["SESSION_COOKIE_SECURE"] is False
     assert database_snapshot(database_path) == before
     assert before[0] == CURRENT_SCHEMA_VERSION == 8
     assert {rule.rule for rule in app.url_map.iter_rules()} == {
         "/",
         "/attention",
+        "/login",
+        "/logout",
         "/obligations",
         "/overview",
         "/payments",
         "/static/<path:filename>",
     }
-    for rule in app.url_map.iter_rules():
-        if rule.rule != "/static/<path:filename>":
-            assert rule.methods <= {"GET", "HEAD", "OPTIONS"}
+    rules = {rule.rule: rule.methods for rule in app.url_map.iter_rules()}
+    assert rules["/login"] <= {"GET", "HEAD", "POST", "OPTIONS"}
+    assert rules["/logout"] <= {"POST", "OPTIONS"}
+    for path in ("/", "/overview", "/attention", "/payments", "/obligations"):
+        assert rules[path] <= {"GET", "HEAD", "OPTIONS"}
 
     missing_path = tmp_path / "not-created.sqlite3"
-    create_app(missing_path)
+    create_web_app(missing_path, TEST_AUTH_CONFIG)
     assert not missing_path.exists()
+
+
+def test_login_is_public_and_protected_routes_preserve_safe_next(tmp_path, monkeypatch):
+    database_path = create_fixture(tmp_path)[0]
+    app = create_web_app(database_path, TEST_AUTH_CONFIG)
+    client = app.test_client()
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("authentication attempted Gmail access")
+
+    monkeypatch.setattr(GmailSource, "authenticate", staticmethod(forbidden))
+    login_response = client.get("/login")
+    login_output = login_response.get_data(as_text=True)
+    assert login_response.status_code == 200
+    assert 'type="password"' in login_output
+    assert "Sign in" in login_output
+    for ledger_link in ("Overview", "Attention", "Payments", "Obligations", "Sign out"):
+        assert f">{ledger_link}<" not in login_output
+    assert TEST_PASSWORD not in login_output
+    assert TEST_AUTH_CONFIG.password_hash not in login_output
+
+    protected_paths = (
+        "/",
+        "/overview?period=2026-09",
+        "/attention",
+        "/payments?unallocated=1",
+        "/obligations?period=2026-09",
+    )
+    for path in protected_paths:
+        response = client.get(path)
+        assert response.status_code == 302
+        location = urlsplit(response.headers["Location"])
+        assert location.path == "/login"
+        assert parse_qs(location.query)["next"] == [path]
+
+
+def test_login_success_failure_safe_next_and_logout(tmp_path):
+    database_path = create_fixture(tmp_path)[0]
+    client = create_web_app(database_path, TEST_AUTH_CONFIG).test_client()
+
+    failed = client.post(
+        "/login",
+        data={"password": "wrong-synthetic-password", "next": "/payments"},
+    )
+    failed_output = failed.get_data(as_text=True)
+    assert failed.status_code == 200
+    assert "Invalid password." in failed_output
+    assert "wrong-synthetic-password" not in failed_output
+    assert TEST_AUTH_CONFIG.password_hash not in failed_output
+    with client.session_transaction() as login_session:
+        assert dict(login_session) == {}
+
+    succeeded = client.post(
+        "/login",
+        data={
+            "password": TEST_PASSWORD,
+            "next": "/payments?unallocated=1",
+        },
+    )
+    assert succeeded.status_code == 302
+    assert succeeded.headers["Location"] == "/payments?unallocated=1"
+    assert TEST_PASSWORD not in succeeded.get_data(as_text=True)
+    assert TEST_AUTH_CONFIG.password_hash not in succeeded.get_data(as_text=True)
+    cookie = succeeded.headers["Set-Cookie"]
+    assert "HttpOnly" in cookie
+    assert "SameSite=Lax" in cookie
+    assert "Secure" not in cookie
+    with client.session_transaction() as authenticated_session:
+        assert dict(authenticated_session) == {"authenticated": True}
+
+    assert client.get("/login").headers["Location"] == "/"
+    authenticated_page = client.get("/payments")
+    authenticated_output = authenticated_page.get_data(as_text=True)
+    assert authenticated_page.status_code == 200
+    assert ">Overview</a>" in authenticated_output
+    assert ">Attention</a>" in authenticated_output
+    assert ">Payments</a>" in authenticated_output
+    assert ">Obligations</a>" in authenticated_output
+    assert ">Sign out</button>" in authenticated_output
+
+    logout = client.post("/logout")
+    assert logout.status_code == 302
+    assert logout.headers["Location"] == "/login"
+    with client.session_transaction() as logged_out_session:
+        assert dict(logged_out_session) == {}
+    assert client.get("/payments").headers["Location"].startswith("/login?next=")
+    assert client.get("/logout").status_code == 405
+
+
+@pytest.mark.parametrize(
+    "unsafe_next",
+    (
+        "https://evil.example/steal",
+        "//evil.example/steal",
+        "/\\evil.example/steal",
+        "/%5Cevil.example/steal",
+        "/%2F%2Fevil.example/steal",
+        "//[",
+        "relative/path",
+    ),
+)
+def test_login_rejects_external_or_ambiguous_next(tmp_path, unsafe_next):
+    database_path = create_fixture(tmp_path)[0]
+    client = create_web_app(database_path, TEST_AUTH_CONFIG).test_client()
+    response = client.post(
+        "/login",
+        data={"password": TEST_PASSWORD, "next": unsafe_next},
+    )
+    assert response.status_code == 302
+    assert response.headers["Location"] == "/"
+    assert "evil.example" not in response.headers["Location"]
+
+
+def test_authentication_and_all_authenticated_views_never_mutate_database(tmp_path):
+    database_path, raws, payments, payers, rentals, obligations, allocations = (
+        create_fixture(tmp_path)
+    )
+    populate_dashboard(
+        database_path, raws, payments, payers, rentals, obligations, allocations
+    )
+    before = database_snapshot(database_path)
+    client = create_web_app(database_path, TEST_AUTH_CONFIG).test_client()
+
+    assert client.get("/login").status_code == 200
+    assert client.post("/login", data={"password": "wrong"}).status_code == 200
+    assert client.post(
+        "/login", data={"password": TEST_PASSWORD, "next": "/"}
+    ).status_code == 302
+    for path in (
+        "/",
+        "/overview?period=2026-09",
+        "/attention",
+        "/payments",
+        "/obligations?period=2026-09",
+    ):
+        assert client.get(path).status_code in {200, 302}
+    assert client.post("/logout").status_code == 302
+
+    assert database_snapshot(database_path) == before
+    assert before[0] == CURRENT_SCHEMA_VERSION == 8
+
+
+def test_authentication_precedes_database_and_domain_access(tmp_path, monkeypatch):
+    missing_database = tmp_path / "missing-auth-boundary.sqlite3"
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("unauthenticated request reached ledger composition")
+
+    monkeypatch.setattr(web_composition, "build_web_owner_overview", forbidden)
+    client = create_web_app(missing_database, TEST_AUTH_CONFIG).test_client()
+    response = client.get("/overview?period=2026-09")
+    assert response.status_code == 302
+    assert response.headers["Location"].startswith("/login?next=")
+    assert not missing_database.exists()
+
+
+@pytest.mark.parametrize(
+    "configured",
+    (
+        {PASSWORD_HASH_ENV: "synthetic-configured-hash"},
+        {SECRET_KEY_ENV: "synthetic-configured-secret"},
+        {},
+    ),
+)
+def test_web_startup_refuses_incomplete_auth_without_printing_values(
+    tmp_path, monkeypatch, capsys, configured
+):
+    database_path = create_fixture(tmp_path)[0]
+    monkeypatch.delenv(PASSWORD_HASH_ENV, raising=False)
+    monkeypatch.delenv(SECRET_KEY_ENV, raising=False)
+    for name, value in configured.items():
+        monkeypatch.setenv(name, value)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("web app started without complete authentication")
+
+    monkeypatch.setattr("autorentledger.cli.create_app", forbidden)
+    assert main(["web", "--database", str(database_path)]) == 1
+    output = capsys.readouterr().out
+    assert "Web authentication is not configured." in output
+    assert PASSWORD_HASH_ENV in output
+    assert SECRET_KEY_ENV in output
+    for value in configured.values():
+        assert value not in output
+
+
+def test_web_startup_checks_auth_before_missing_database(tmp_path, monkeypatch, capsys):
+    missing_database = tmp_path / "missing-web-startup.sqlite3"
+    monkeypatch.delenv(PASSWORD_HASH_ENV, raising=False)
+    monkeypatch.delenv(SECRET_KEY_ENV, raising=False)
+
+    assert main(["web", "--database", str(missing_database)]) == 1
+    output = capsys.readouterr().out
+    assert "Web authentication is not configured." in output
+    assert "database" not in output.casefold()
+    assert not missing_database.exists()
 
 
 def test_root_redirect_uses_injected_local_month_and_is_read_only(tmp_path):
@@ -1206,7 +1438,13 @@ def test_web_cli_defaults_loopback_allowlist_and_safe_server_options(
         def run(self, **kwargs):
             calls.append(kwargs)
 
-    monkeypatch.setattr("autorentledger.cli.create_app", lambda database_path: FakeApp())
+    monkeypatch.setattr(
+        "autorentledger.cli.load_web_auth_config", lambda: TEST_AUTH_CONFIG
+    )
+    monkeypatch.setattr(
+        "autorentledger.cli.create_app",
+        lambda database_path, auth_config: FakeApp(),
+    )
     database_path = create_fixture(tmp_path)[0]
     for host in ("127.0.0.1", "localhost", "::1"):
         assert run_web(database_path, host, 8123) == 0
@@ -1233,6 +1471,12 @@ def test_web_cli_defaults_loopback_allowlist_and_safe_server_options(
         "use_reloader": False,
     }
 
-    for host in ("0.0.0.0", "192.168.1.50", "203.0.113.10", "example.test"):
+    for host in (
+        "0.0.0.0",
+        "192.168.1.50",
+        "100.64.0.10",
+        "203.0.113.10",
+        "example.test",
+    ):
         assert main(["web", "--host", host]) == 1
         assert WEB_LOOPBACK_ERROR in capsys.readouterr().out

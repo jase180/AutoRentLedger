@@ -158,9 +158,10 @@ shows normalized payments with current exact-alias payer interpretation and paym
 allocated/unallocated amounts. Obligations shows month-scoped canonical reconciliation for actual
 obligations only; schedules and missing-obligation warnings remain separate on Overview. Every
 screen is read-only; none query Gmail, sync, generate obligations, create
-allocations, or expose write routes. The UI has no authentication, so the CLI accepts only
-`127.0.0.1`, `localhost`, or `::1` and rejects LAN/public binding. Do not proxy or otherwise expose
-it remotely.
+allocations, or expose ledger write routes. The UI requires one owner password configured through
+`AUTORENTLEDGER_WEB_PASSWORD_HASH` and `AUTORENTLEDGER_WEB_SECRET_KEY`; neither value belongs in
+Git or SQLite. Flask still accepts only `127.0.0.1`, `localhost`, or `::1` and rejects direct
+LAN, Tailscale-IP, and public binding. See the runbook for private Tailscale Serve access.
 
 ## Common commands
 

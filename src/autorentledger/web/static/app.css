@@ -91,6 +91,13 @@ code { display: block; width: fit-content; max-width: 100%; margin: .35rem 0; pa
 .obligations-heading .section-note { margin: .75rem 0 0; }
 .obligation-counts { grid-template-columns: repeat(3, 1fr); }
 .obligations-table td:nth-child(1), .obligations-table td:nth-child(2) { white-space: normal; min-width: 8rem; }
+.logout-form { margin: 0; }
+.link-button { min-height: auto; padding: 0; border: 0; border-radius: 0; color: var(--muted); background: transparent; text-decoration: underline; text-underline-offset: .25rem; }
+.login-panel { max-width: 440px; margin: 4rem auto; padding: 1.5rem; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.login-form { display: grid; gap: .75rem; margin-top: 1.25rem; }
+.login-form label { color: var(--muted); font-size: .8rem; font-weight: 700; }
+.login-form input { width: 100%; }
+.login-error { padding: .65rem .75rem; border: 1px solid #d8a2a2; border-radius: 7px; color: #8d2d2d; background: #fbe9e9; }
 
 @media (max-width: 760px) {
   .page-heading { align-items: stretch; flex-direction: column; }
