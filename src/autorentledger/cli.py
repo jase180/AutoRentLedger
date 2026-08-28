@@ -14,6 +14,13 @@ from autorentledger.allocations import (
     create_allocation,
     remove_allocation,
 )
+from autorentledger.daily import (
+    DailyBackupError,
+    DailyOperationResult,
+    DailySyncError,
+    daily_needs_attention,
+    run_daily_operation,
+)
 from autorentledger.database import (
     DatabaseHealthResult,
     DatabaseOperationError,
@@ -153,6 +160,16 @@ def build_parser() -> argparse.ArgumentParser:
     sync.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
     sync.add_argument("--credentials", type=Path, default=Path("credentials.json"))
     sync.add_argument("--token", type=Path, default=Path("token.json"))
+
+    daily = subparsers.add_parser(
+        "daily", help="create a verified backup, sync Gmail, and summarize attention"
+    )
+    daily.add_argument("--query", default=DEFAULT_QUERY, help="Gmail search query")
+    daily.add_argument("--max-results", type=int, default=100)
+    daily.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+    daily.add_argument("--credentials", type=Path, default=Path("credentials.json"))
+    daily.add_argument("--token", type=Path, default=Path("token.json"))
+    daily.add_argument("--backup-dir", type=Path, default=Path("backups"))
 
     parse = subparsers.add_parser("parse", help="parse locally stored raw emails")
     parse.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
@@ -407,21 +424,83 @@ def run_sync_command(
     max_results: int,
 ) -> int:
     try:
-        result = run_sync(
-            source,
-            SQLiteRawEmailRepository(database_path),
-            SQLitePaymentEventRepository(database_path),
-            SQLiteReconciliationRepository(database_path),
-            SQLiteReviewRepository(database_path),
-            SQLiteSuggestionRepository(database_path),
-            query,
-            max_results,
-        )
+        result = _run_sync(source, database_path, query, max_results)
     except Exception as error:  # noqa: BLE001 - external sync stage boundary
         print(f"Sync failed during evidence refresh ({type(error).__name__}).")
         return 1
     _print_sync_result(result)
     return 0
+
+
+def _run_sync(
+    source: EmailSource,
+    database_path: Path,
+    query: str,
+    max_results: int,
+) -> SyncResult:
+    return run_sync(
+        source,
+        SQLiteRawEmailRepository(database_path),
+        SQLitePaymentEventRepository(database_path),
+        SQLiteReconciliationRepository(database_path),
+        SQLiteReviewRepository(database_path),
+        SQLiteSuggestionRepository(database_path),
+        query,
+        max_results,
+    )
+
+
+def run_daily_command(
+    database_path: Path,
+    backup_directory: Path,
+    credentials_path: Path,
+    token_path: Path,
+    query: str,
+    max_results: int,
+) -> int:
+    def sync_operation() -> SyncResult:
+        source = GmailSource.authenticate(credentials_path, token_path)
+        return _run_sync(source, database_path, query, max_results)
+
+    try:
+        result = run_daily_operation(database_path, backup_directory, sync_operation)
+    except DatabaseSchemaError as error:
+        print(error)
+        return 1
+    except DailyBackupError:
+        print("Daily failed during backup.")
+        print("Sync was not attempted.")
+        return 1
+    except DailySyncError as error:
+        print("Daily failed during sync.")
+        print(f"Backup was created successfully: {error.backup_path}")
+        return 1
+
+    _print_daily_result(result)
+    return 0
+
+
+def _print_daily_result(result: DailyOperationResult) -> None:
+    sync = result.sync_result
+    print("AutoRentLedger Daily")
+    print("BACKUP")
+    print(f"Created: {result.backup_path}")
+    print("Status: OK")
+    print("SYNC")
+    print(f"Found: {sync.ingestion.found}")
+    print(f"New emails: {sync.ingestion.inserted}")
+    print(f"New payments: {sync.processing.created}")
+    print(f"Parse failures: {sync.processing.parse_failures}")
+    print("ATTENTION")
+    print(f"Unresolved payers: {sync.review.unresolved_payers}")
+    print(f"Unallocated payments: {sync.review.unallocated_payments}")
+    print(f"Partial obligations: {sync.review.partial_obligations}")
+    print(f"Unpaid obligations: {sync.review.unpaid_obligations}")
+    print(f"Unparsed emails: {sync.review.unparsed_emails}")
+    print("SUGGESTIONS")
+    print(f"Actionable: {len(sync.actionable_suggestions)}")
+    print("STATUS")
+    print("Needs attention" if daily_needs_attention(sync) else "Clear")
 
 
 def _print_sync_result(result: SyncResult) -> None:
@@ -1411,6 +1490,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "web" and not _is_loopback_host(args.host):
         print(WEB_LOOPBACK_ERROR)
         return 1
+    if args.command == "daily":
+        return run_daily_command(
+            args.database,
+            args.backup_dir,
+            args.credentials,
+            args.token,
+            args.query,
+            args.max_results,
+        )
     if args.command not in {"search", "web"}:
         try:
             require_current_schema(args.database)

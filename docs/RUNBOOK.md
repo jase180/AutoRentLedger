@@ -10,6 +10,7 @@ database-backed command when using a non-default database.
 
 - [Before risky work](#before-risky-work)
 - [Routine sync](#routine-sync)
+- [Scheduled daily operation](#scheduled-daily-operation)
 - [Local read-only web view](#local-read-only-web-view)
 - [Monthly setup](#monthly-setup)
 - [Add a new payer](#add-a-new-payer)
@@ -52,7 +53,8 @@ If newer code is already installed and reports the database as outdated, `db che
 `db backup` will reject it because both require the current schema. Run `autorentledger db upgrade`;
 the schema lifecycle creates a timestamped sibling backup before changing an existing database.
 
-This is a manual policy. AutoRentLedger does not schedule, upload, prune, or catalog backups.
+AutoRentLedger does not upload, prune, or catalog backups. Its `daily` command can create a
+verified backup before sync, but an external scheduler still decides when that command runs.
 
 ## Routine sync
 
@@ -88,6 +90,56 @@ autorentledger sync `
 Running sync repeatedly is safe: existing Gmail messages and payment events are not duplicated.
 “Nothing new” does not mean there is nothing requiring attention; the review and suggestion
 summaries still reflect current ledger state.
+
+## Scheduled daily operation
+
+Run one automation-safe operation:
+
+```powershell
+autorentledger daily
+```
+
+The command requires the current schema, creates and verifies a timestamped backup under
+`backups/`, and only then authenticates to Gmail and runs the existing sync pipeline. It prints
+sync, current-attention, and actionable-suggestion counts. An attention item or suggestion makes
+the final `STATUS` section say `Needs attention` but still exits `0`; only an operational failure
+exits `1`.
+
+Useful options mirror `sync`, with one backup-directory option:
+
+```powershell
+autorentledger daily `
+  --database data/autorentledger.db `
+  --backup-dir backups `
+  --query "subject:zelle" `
+  --max-results 100 `
+  --credentials credentials.json `
+  --token token.json
+```
+
+If backup creation fails, Gmail authentication and sync are not attempted. If sync fails, the
+verified pre-run backup remains available. Repeated runs are safe because existing Gmail evidence
+and payment events are idempotent; each successful run may create its own backup.
+
+`daily` does not create allocations or aliases, generate obligations, rebuild payments, or change
+payers, rent accounts, or schedules. It does not install or configure a schedule.
+
+### Windows Task Scheduler example
+
+In Windows Task Scheduler, create a basic daily task (for example, at 6:00 AM) and configure the
+action using paths appropriate for the local checkout:
+
+```text
+Program/script: C:\path\to\AutoRentLedger\.venv\Scripts\autorentledger.exe
+Arguments:      daily --database data\autorentledger.db --credentials credentials.json --token token.json
+Start in:       C:\path\to\AutoRentLedger
+```
+
+Enable **Run task as soon as possible after a scheduled start is missed** if that behavior is
+useful. The time is only an example: Task Scheduler owns the schedule, while `autorentledger daily`
+always performs exactly one run. Keep the task's working directory and OAuth files private. On
+cron or another scheduler, invoke the same command from the project directory with equivalent
+local paths.
 
 ## Local read-only web view
 

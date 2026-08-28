@@ -133,6 +133,15 @@ autorentledger sync
 autorentledger overview --period 2026-09
 ```
 
+For one externally scheduled run with a verified pre-sync backup:
+
+```powershell
+autorentledger daily
+```
+
+`daily` performs one run only. Windows Task Scheduler, cron, or another external scheduler decides
+when it runs; AutoRentLedger contains no scheduler or daemon.
+
 At the beginning of a month, preview and explicitly create scheduled obligations first:
 
 ```powershell
@@ -168,6 +177,7 @@ LAN, Tailscale-IP, and public binding. See the runbook for private Tailscale Ser
 | Task | Command |
 | --- | --- |
 | Refresh evidence and current attention | `autorentledger sync` |
+| Create a verified backup, sync, and summarize attention | `autorentledger daily` |
 | Open the local read-only browser view | `autorentledger web` |
 | Inspect the owner dashboard | `autorentledger overview --period YYYY-MM` |
 | Inspect focused exceptions | `autorentledger review` |
@@ -263,5 +273,5 @@ services do not depend on Google SDK objects.
 
 AutoRentLedger is not a lease manager, tenant balance system, general ledger, or full
 property-management platform. It does not model security deposits, late fees, credits, expenses,
-NOI, double-entry bookkeeping, or AI/fuzzy payment matching. It has no web UI, background jobs,
-scheduled operation, cloud backup, or automatic accounting policy.
+NOI, double-entry bookkeeping, or AI/fuzzy payment matching. It has no public/write-capable web UI,
+internal scheduler, background jobs, cloud backup, or automatic accounting policy.
