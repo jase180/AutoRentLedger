@@ -386,7 +386,8 @@ def test_sync_cli_defaults_output_and_source_failure_are_private(tmp_path, capsy
         FailingEmailSource(), database_path, "subject:synthetic", 50
     ) == 1
     failure_output = capsys.readouterr().out
-    assert "Sync failed during evidence refresh" in failure_output
+    assert "Gmail access failed." in failure_output
+    assert "Check credentials/token configuration" in failure_output
     assert "SYNTHETIC_OAUTH_SECRET_SENTINEL" not in failure_output
 
 
@@ -425,7 +426,8 @@ def test_sync_authentication_failure_returns_nonzero_without_secret(tmp_path, mo
     monkeypatch.setattr(GmailSource, "authenticate", staticmethod(fail_authentication))
     assert main(["sync", "--database", str(database_path)]) == 1
     output = capsys.readouterr().out
-    assert "Sync failed during Gmail authentication" in output
+    assert "Gmail access failed." in output
+    assert "Check credentials/token configuration" in output
     assert "SYNTHETIC_OAUTH_SECRET_SENTINEL" not in output
 
 
@@ -443,5 +445,6 @@ def test_sync_database_failure_returns_nonzero_without_internal_detail(
         FakeEmailSource([]), database_path, "subject:synthetic", 100
     ) == 1
     output = capsys.readouterr().out
-    assert "Sync failed during evidence refresh (DatabaseError)" in output
+    assert "Sync failed during evidence refresh." in output
+    assert "autorentledger db check" in output
     assert "PRIVATE_SYNTHETIC_DATABASE_SENTINEL" not in output

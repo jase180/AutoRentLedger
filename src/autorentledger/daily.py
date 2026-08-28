@@ -9,11 +9,17 @@ from pathlib import Path
 
 from autorentledger.database import DatabaseBackupResult, backup_database
 from autorentledger.operations import SyncResult
+from autorentledger.retention import (
+    BackupRetentionResult,
+    daily_backup_destination,
+    prune_daily_backups,
+)
 from autorentledger.storage.migrations import require_current_schema
 
 SchemaChecker = Callable[[Path], None]
 BackupOperation = Callable[..., DatabaseBackupResult]
 SyncOperation = Callable[[], SyncResult]
+RetentionOperation = Callable[[Path, int, Path], BackupRetentionResult]
 
 
 class DailyOperationError(RuntimeError):
@@ -24,6 +30,10 @@ class DailyBackupError(DailyOperationError):
     """The verified pre-sync backup could not be created."""
 
 
+class GmailAccessError(RuntimeError):
+    """Gmail authentication or message access failed at an operational boundary."""
+
+
 class DailySyncError(DailyOperationError):
     """Sync failed after a verified backup was created."""
 
@@ -32,10 +42,23 @@ class DailySyncError(DailyOperationError):
         self.backup_path = backup_path
 
 
+class DailyGmailAccessError(DailySyncError):
+    """Gmail authentication or message access failed after backup."""
+
+
+class DailyRetentionError(DailyOperationError):
+    """Retention failed after backup and sync both completed."""
+
+    def __init__(self, backup_path: Path) -> None:
+        super().__init__("Daily retention failed after backup and sync completed.")
+        self.backup_path = backup_path
+
+
 @dataclass(frozen=True)
 class DailyOperationResult:
     backup_path: Path
     sync_result: SyncResult
+    retention: BackupRetentionResult
 
 
 def run_daily_operation(
@@ -43,27 +66,42 @@ def run_daily_operation(
     backup_directory: Path,
     sync_operation: SyncOperation,
     *,
+    keep_backups: int = 30,
     now: datetime | None = None,
     schema_checker: SchemaChecker = require_current_schema,
     backup_operation: BackupOperation = backup_database,
+    retention_operation: RetentionOperation = prune_daily_backups,
 ) -> DailyOperationResult:
-    """Verify readiness, create a verified backup, then run the existing sync."""
+    """Verify, back up, sync, and only then prune eligible daily backups."""
+    if keep_backups <= 0:
+        raise ValueError("Backup retention count must be a positive integer.")
     schema_checker(database_path)
+    backup_path = daily_backup_destination(backup_directory, now=now)
     try:
         backup = backup_operation(
             database_path,
-            now=now,
-            default_directory=backup_directory,
+            output_path=backup_path,
         )
     except Exception as error:
         raise DailyBackupError("Daily backup failed.") from error
 
     try:
         sync_result = sync_operation()
+    except GmailAccessError as error:
+        raise DailyGmailAccessError(backup.backup_path) from error
     except Exception as error:
         raise DailySyncError(backup.backup_path) from error
 
-    return DailyOperationResult(backup.backup_path, sync_result)
+    try:
+        retention = retention_operation(
+            backup_directory,
+            keep_backups,
+            backup.backup_path,
+        )
+    except Exception as error:
+        raise DailyRetentionError(backup.backup_path) from error
+
+    return DailyOperationResult(backup.backup_path, sync_result, retention)
 
 
 def daily_needs_attention(result: SyncResult) -> bool:

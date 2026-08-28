@@ -27,6 +27,7 @@ database-backed command when using a non-default database.
 - [Parser improved](#parser-improved)
 - [Parser now fails on an old email](#parser-now-fails-on-an-old-email)
 - [Database health](#database-health)
+- [If the database is unhealthy](#if-the-database-is-unhealthy)
 - [Backup](#backup)
 - [Restore](#restore)
 - [Gmail OAuth problems](#gmail-oauth-problems)
@@ -53,8 +54,9 @@ If newer code is already installed and reports the database as outdated, `db che
 `db backup` will reject it because both require the current schema. Run `autorentledger db upgrade`;
 the schema lifecycle creates a timestamped sibling backup before changing an existing database.
 
-AutoRentLedger does not upload, prune, or catalog backups. Its `daily` command can create a
-verified backup before sync, but an external scheduler still decides when that command runs.
+AutoRentLedger does not upload or catalog backups. Its `daily` command creates a verified backup
+before sync and, only after sync succeeds, retains a bounded number of recognizable daily backups.
+An external scheduler still decides when that command runs.
 
 ## Routine sync
 
@@ -105,21 +107,29 @@ sync, current-attention, and actionable-suggestion counts. An attention item or 
 the final `STATUS` section say `Needs attention` but still exits `0`; only an operational failure
 exits `1`.
 
-Useful options mirror `sync`, with one backup-directory option:
+Useful options mirror `sync`, with backup-directory and retention options:
 
 ```powershell
 autorentledger daily `
   --database data/autorentledger.db `
   --backup-dir backups `
+  --keep-backups 30 `
   --query "subject:zelle" `
   --max-results 100 `
   --credentials credentials.json `
   --token token.json
 ```
 
-If backup creation fails, Gmail authentication and sync are not attempted. If sync fails, the
-verified pre-run backup remains available. Repeated runs are safe because existing Gmail evidence
-and payment events are idempotent; each successful run may create its own backup.
+If backup creation fails, Gmail authentication, sync, and retention are not attempted. If sync
+fails, the verified pre-run backup remains available and retention does not run. After a fully
+successful sync, retention keeps the newest 30 files matching the dedicated daily-backup naming
+pattern by default. `--keep-backups` accepts another positive integer. Unrelated files, manual
+backup names, subdirectories, and symlinks are not eligible. A retention failure exits `1` but does
+not undo the completed sync or remove the current verified backup.
+
+Repeated runs are safe because existing Gmail evidence and payment events are idempotent. Exit `0`
+means the operation, including retention, completed; `Needs attention` is still an exit-`0` ledger
+status. Exit `1` means readiness, backup, Gmail access, sync, or retention failed.
 
 `daily` does not create allocations or aliases, generate obligations, rebuild payments, or change
 payers, rent accounts, or schedules. It does not install or configure a schedule.
@@ -131,7 +141,7 @@ action using paths appropriate for the local checkout:
 
 ```text
 Program/script: C:\path\to\AutoRentLedger\.venv\Scripts\autorentledger.exe
-Arguments:      daily --database data\autorentledger.db --credentials credentials.json --token token.json
+Arguments:      daily --database data\autorentledger.db --backup-dir backups --keep-backups 30 --credentials credentials.json --token token.json
 Start in:       C:\path\to\AutoRentLedger
 ```
 
@@ -511,6 +521,33 @@ autorentledger db upgrade --database data/autorentledger.db
 ```
 
 Run `db check` after the upgrade.
+
+## If the database is unhealthy
+
+Use this recovery sequence rather than editing SQLite rows manually:
+
+1. Stop the local web server and disable or pause the external `daily` task so the active database
+   is not changing.
+2. Run `autorentledger db check --database data/autorentledger.db` and retain its safe diagnostic.
+3. Identify the latest known-good verified backup in `backups/`. Daily backups use the
+   `autorentledger-daily-...db` name; explicitly created and pre-restore backups may have other
+   names.
+4. Restore the selected candidate:
+
+   ```powershell
+   autorentledger db restore backups/SELECTED-BACKUP.db `
+     --database data/autorentledger.db
+   ```
+
+5. Run `autorentledger db check --database data/autorentledger.db` again.
+6. Run `autorentledger sync` to catch up immutable Gmail evidence received after that recovery
+   point.
+7. Verify `autorentledger overview --period YYYY-MM` and `autorentledger review`, then resume the
+   external task and web server.
+
+Restore accepts only a healthy current-schema candidate, preserves the active database when one
+exists, stages the replacement, validates it, and rolls back after a failed final validation. It
+does not repair or migrate the selected backup.
 
 ## Backup
 

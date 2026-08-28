@@ -139,8 +139,9 @@ For one externally scheduled run with a verified pre-sync backup:
 autorentledger daily
 ```
 
-`daily` performs one run only. Windows Task Scheduler, cron, or another external scheduler decides
-when it runs; AutoRentLedger contains no scheduler or daemon.
+`daily` performs one run only. It retains the newest 30 recognizable daily backups by default;
+change that positive limit with `--keep-backups`. Windows Task Scheduler, cron, or another external
+scheduler decides when it runs; AutoRentLedger contains no scheduler or daemon.
 
 At the beginning of a month, preview and explicitly create scheduled obligations first:
 
@@ -268,6 +269,8 @@ services do not depend on Google SDK objects.
 
 - [Operational runbook](docs/RUNBOOK.md): normal operation, common scenarios, troubleshooting,
   parser rebuild, and database recovery.
+- [Architecture and maintenance notes](docs/ARCHITECTURE.md): source-of-truth boundaries,
+  invariants, and dependency-update procedure.
 
 ## Explicit non-goals
 

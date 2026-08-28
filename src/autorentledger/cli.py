@@ -16,8 +16,11 @@ from autorentledger.allocations import (
 )
 from autorentledger.daily import (
     DailyBackupError,
+    DailyGmailAccessError,
     DailyOperationResult,
+    DailyRetentionError,
     DailySyncError,
+    GmailAccessError,
     daily_needs_attention,
     run_daily_operation,
 )
@@ -135,6 +138,16 @@ WEB_LOOPBACK_ERROR = (
 )
 
 
+def _positive_integer(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("expected a positive integer") from error
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("expected a positive integer")
+    return parsed
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="autorentledger")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -170,6 +183,7 @@ def build_parser() -> argparse.ArgumentParser:
     daily.add_argument("--credentials", type=Path, default=Path("credentials.json"))
     daily.add_argument("--token", type=Path, default=Path("token.json"))
     daily.add_argument("--backup-dir", type=Path, default=Path("backups"))
+    daily.add_argument("--keep-backups", type=_positive_integer, default=30)
 
     parse = subparsers.add_parser("parse", help="parse locally stored raw emails")
     parse.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
@@ -425,8 +439,12 @@ def run_sync_command(
 ) -> int:
     try:
         result = _run_sync(source, database_path, query, max_results)
-    except Exception as error:  # noqa: BLE001 - external sync stage boundary
-        print(f"Sync failed during evidence refresh ({type(error).__name__}).")
+    except GmailAccessError:
+        _print_gmail_access_failure()
+        return 1
+    except Exception:  # noqa: BLE001 - external sync stage boundary
+        print("Sync failed during evidence refresh.")
+        print("Run: autorentledger db check")
         return 1
     _print_sync_result(result)
     return 0
@@ -439,7 +457,7 @@ def _run_sync(
     max_results: int,
 ) -> SyncResult:
     return run_sync(
-        source,
+        _GmailAccessSource(source),
         SQLiteRawEmailRepository(database_path),
         SQLitePaymentEventRepository(database_path),
         SQLiteReconciliationRepository(database_path),
@@ -457,23 +475,43 @@ def run_daily_command(
     token_path: Path,
     query: str,
     max_results: int,
+    keep_backups: int,
 ) -> int:
     def sync_operation() -> SyncResult:
-        source = GmailSource.authenticate(credentials_path, token_path)
+        try:
+            source = GmailSource.authenticate(credentials_path, token_path)
+        except Exception as error:
+            raise GmailAccessError from error
         return _run_sync(source, database_path, query, max_results)
 
     try:
-        result = run_daily_operation(database_path, backup_directory, sync_operation)
+        result = run_daily_operation(
+            database_path,
+            backup_directory,
+            sync_operation,
+            keep_backups=keep_backups,
+        )
     except DatabaseSchemaError as error:
+        print("Daily failed during database readiness.")
         print(error)
+        print("Run: autorentledger db status")
+        print("After the database is current, run: autorentledger db check")
         return 1
     except DailyBackupError:
         print("Daily failed during backup.")
         print("Sync was not attempted.")
         return 1
+    except DailyGmailAccessError as error:
+        _print_gmail_access_failure()
+        print(f"Backup was created successfully: {error.backup_path}")
+        return 1
     except DailySyncError as error:
         print("Daily failed during sync.")
         print(f"Backup was created successfully: {error.backup_path}")
+        return 1
+    except DailyRetentionError as error:
+        print("Daily completed, but backup retention failed.")
+        print(f"Current backup was preserved: {error.backup_path}")
         return 1
 
     _print_daily_result(result)
@@ -499,8 +537,33 @@ def _print_daily_result(result: DailyOperationResult) -> None:
     print(f"Unparsed emails: {sync.review.unparsed_emails}")
     print("SUGGESTIONS")
     print(f"Actionable: {len(sync.actionable_suggestions)}")
+    print("RETENTION")
+    print(f"Kept: {result.retention.kept_count}")
+    print(f"Deleted: {result.retention.deleted_count}")
     print("STATUS")
     print("Needs attention" if daily_needs_attention(sync) else "Clear")
+
+
+class _GmailAccessSource:
+    def __init__(self, source: EmailSource) -> None:
+        self._source = source
+
+    def search(self, query: str, max_results: int = 100):
+        try:
+            return self._source.search(query, max_results)
+        except Exception as error:
+            raise GmailAccessError from error
+
+    def get_raw_message(self, message_id: str) -> bytes:
+        try:
+            return self._source.get_raw_message(message_id)
+        except Exception as error:
+            raise GmailAccessError from error
+
+
+def _print_gmail_access_failure() -> None:
+    print("Gmail access failed.")
+    print("Check credentials/token configuration and try again.")
 
 
 def _print_sync_result(result: SyncResult) -> None:
@@ -1498,6 +1561,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.token,
             args.query,
             args.max_results,
+            args.keep_backups,
         )
     if args.command not in {"search", "web"}:
         try:
@@ -1514,8 +1578,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "sync":
         try:
             source = GmailSource.authenticate(args.credentials, args.token)
-        except Exception as error:  # noqa: BLE001 - external OAuth boundary
-            print(f"Sync failed during Gmail authentication ({type(error).__name__}).")
+        except Exception:  # noqa: BLE001 - external OAuth boundary
+            _print_gmail_access_failure()
             return 1
         return run_sync_command(source, args.database, args.query, args.max_results)
     if args.command == "parse":
