@@ -34,6 +34,10 @@ class PaymentRebuildNotFoundError(ValueError):
     """The selected payment event does not exist."""
 
 
+class PaymentRebuildNotEligibleError(ValueError):
+    """The selected payment has no parser/raw-email origin."""
+
+
 class PaymentRebuildInvariantError(RuntimeError):
     """Stored rebuild inputs violate structural ledger assumptions."""
 
@@ -80,6 +84,11 @@ def rebuild_payments(
     """Reparse selected events and apply each safe update in its own transaction."""
     sources = repository.list_rebuild_sources(payment_event_id)
     if payment_event_id is not None and not sources:
+        payment = repository.get(payment_event_id)
+        if payment is not None and payment.manual_evidence_id is not None:
+            raise PaymentRebuildNotEligibleError(
+                f"Payment {payment_event_id} is manual evidence and cannot be rebuilt."
+            )
         raise PaymentRebuildNotFoundError(
             f"Payment {payment_event_id} does not exist."
         )

@@ -1,22 +1,21 @@
 # AutoRentLedger Architecture and Maintenance Notes
 
 AutoRentLedger is a local rent-payment ledger, not a general property-management or accounting
-platform. Its purpose is to turn immutable Gmail payment evidence into an explicit, reviewable
-answer to “who paid what rent?”
+platform. Its purpose is to turn immutable Gmail payment evidence and explicit manual payment
+evidence into an explicit, reviewable answer to “who paid what rent?”
 
 ## Data flow
 
 ```text
-Gmail notifications (read-only)
-        |
-        v
-immutable raw email evidence
-        |
-        v
-deterministic, versioned parser
-        |
-        v
-normalized payment events
+Gmail notifications (read-only)       explicit manual evidence
+        |                                      |
+        v                                      |
+immutable raw email evidence                  |
+        |                                      |
+        v                                      |
+deterministic, versioned parser                |
+        |                                      |
+        +-------------> normalized payment events
         |
         v
 identity and rent-account interpretation
@@ -32,14 +31,15 @@ reconciliation / review / suggestions
 CLI and read-only web projections
 ```
 
-SQLite is the durable local store. Gmail supplies evidence; it is not the source of accounting
-truth. Reports, review items, suggestions, and owner overviews are recomputed read models rather
-than persisted workflow state.
+SQLite is the durable local store. Gmail and explicit manual records supply evidence; neither
+source decides its payer, rent account, or obligation meaning. Each payment event has exactly one
+source: a raw email or a manual evidence row. Reports, review items, suggestions, and owner
+overviews are recomputed read models rather than persisted workflow state.
 
 ## Invariants to preserve
 
-- Raw evidence is not accounting meaning. Raw MIME stays immutable; payment events are
-  deterministic normalized observations.
+- Evidence origin is not accounting meaning. Raw MIME stays immutable; manual evidence records a
+  payment observed outside Gmail; both normalize into payment events.
 - A payer is not a rent account, a payment is not an allocation, and a schedule is not an
   obligation.
 - Actual obligations state what was owed. Schedules can explicitly generate missing obligations
@@ -51,7 +51,8 @@ than persisted workflow state.
 - The CLI owns explicit mutations. The authenticated Flask UI remains read-only and loopback-only.
 - `sync` and `daily` may refresh raw evidence and payment events only. They never create aliases,
   allocations, or obligations and never rebuild old payments automatically.
-- Parser rebuild is explicit and cannot reduce a payment below its allocated total.
+- Parser rebuild is explicit, applies only to Gmail-derived events, and cannot reduce a payment
+  below its allocated total. Manual events are never reparsed.
 - Restore validates a current-schema candidate and never silently migrates it.
 
 ## Dependency maintenance

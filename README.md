@@ -4,14 +4,16 @@ AutoRentLedger turns messy Zelle notification evidence into a trustworthy, audit
 **who paid what rent?**
 
 It is a small, local Python application. It reads payment notifications from Gmail with read-only
-permission, preserves the original email evidence in SQLite, deterministically derives payment
-events, and connects money to monthly rent only through explicit allocations. It is deliberately
-not a general property-management system.
+permission, preserves the original email evidence in SQLite, accepts explicit evidence for
+legitimate historical payments that have no email, normalizes both sources into payment events,
+and connects money to monthly rent only through explicit allocations. It is deliberately not a
+general property-management system.
 
 ## What it does
 
 - Searches Gmail for candidate payment notifications without modifying messages or labels.
 - Stores immutable raw MIME evidence locally and ingests it idempotently.
+- Stores explicit manual evidence for historical payments that did not originate in Gmail.
 - Deterministically parses supported Chase and U.S. Bank Zelle notifications into payment events.
 - Resolves observed sender names through explicitly managed payer aliases.
 - Models units, household-style rent accounts, recurring schedules, and monthly obligations.
@@ -27,13 +29,12 @@ payments, edit Gmail, or infer rent intent from payment dates, amounts, or memos
 ## Core architecture
 
 ```text
-Gmail notification
-       |
-       v
-immutable raw email evidence
-       |
-       v
-normalized payment event ---------> payer identity / aliases
+Gmail notification                         explicit manual evidence
+       |                                             |
+       v                                             |
+immutable raw email evidence                         |
+       |                                             |
+       +-----------------------> normalized payment event ---------> payer identity / aliases
        |                                      |
        |                                      v
        |                                rent account ------> unit
@@ -52,7 +53,8 @@ The important distinctions are:
 
 | Concept | Meaning |
 | --- | --- |
-| Payment event | A normalized observation derived from immutable email evidence. It is not a tenant. |
+| Payment evidence | Either immutable Gmail/raw-email evidence or an explicit manual record of an observed historical payment. |
+| Payment event | A normalized payment observation with exactly one evidence source. It is not a tenant. |
 | Payer | The identity that sent money. A payer is not a rent account. |
 | Rent account | The household/account associated with a unit and eventual rent responsibility. |
 | Obligation | The authoritative fact that a specific account owed an amount for a month. |
@@ -183,6 +185,7 @@ LAN, Tailscale-IP, and public binding. See the runbook for private Tailscale Ser
 | Inspect the owner dashboard | `autorentledger overview --period YYYY-MM` |
 | Inspect focused exceptions | `autorentledger review` |
 | List normalized payments | `autorentledger payments` |
+| Record historical/manual payment evidence | `autorentledger payment manual-add --sender "Synthetic Tenant" --amount 1450.00 --date 2026-05-03` |
 | Preview conservative allocation suggestions | `autorentledger allocation suggestions` |
 | Allocate payment money explicitly | `autorentledger allocation add --payment ID --obligation ID --amount 675.00` |
 | Preview monthly obligation generation | `autorentledger obligations generate --period YYYY-MM --dry-run` |
@@ -221,7 +224,8 @@ Observed evidence and historical accounting are intentionally protected:
 
 - Gmail access is read-only.
 - Raw email evidence is immutable.
-- Payment events can only be re-derived through the explicit parser rebuild workflow.
+- Gmail-derived payment events can only be re-derived through the explicit parser rebuild
+  workflow; manual payment events are never parser-rebuild candidates.
 - Existing obligations are never overwritten by schedules.
 - Allocations are created and removed explicitly; suggestions never apply themselves.
 - Reporting, review, reconciliation, suggestions, health checks, and overview are read-only.
@@ -259,7 +263,7 @@ pytest
 
 GitHub Actions runs the same checks on Python 3.11 for every push and pull request. Tests use
 synthetic local fixtures and require no Gmail credentials, network access, or operational database.
-The current SQLite schema version is 8.
+The current SQLite schema version is 9.
 
 The application uses Python, standard-library `sqlite3`, and a small service/repository structure
 under `src/autorentledger/`. Gmail remains behind an email-source adapter; domain and read-model

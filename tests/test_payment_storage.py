@@ -48,6 +48,7 @@ def test_payment_events_schema_initialization(tmp_path):
     assert columns == {
         "id",
         "raw_email_id",
+        "manual_evidence_id",
         "provider",
         "sender_name",
         "amount_cents",
@@ -58,6 +59,12 @@ def test_payment_events_schema_initialization(tmp_path):
     }
     assert any(
         row[2] == "raw_emails" and row[3] == "raw_email_id" and row[4] == "id"
+        for row in foreign_keys
+    )
+    assert any(
+        row[2] == "manual_payment_evidence"
+        and row[3] == "manual_evidence_id"
+        and row[4] == "id"
         for row in foreign_keys
     )
 

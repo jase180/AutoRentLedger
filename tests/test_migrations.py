@@ -123,7 +123,7 @@ def test_current_upgrade_is_a_no_op_and_does_not_duplicate_data(tmp_path):
     assert payers.get_payer(payer.id) == payer
 
 
-def test_v7_to_v8_adds_legacy_provenance_and_preserves_ledger_rows(tmp_path):
+def test_v7_to_current_adds_legacy_provenance_and_preserves_ledger_rows(tmp_path):
     database_path = tmp_path / "v7.sqlite3"
     with sqlite3.connect(database_path) as connection:
         connection.execute("PRAGMA foreign_keys = ON")
@@ -159,16 +159,105 @@ def test_v7_to_v8_adds_legacy_provenance_and_preserves_ledger_rows(tmp_path):
 
     result = upgrade_database(database_path)
 
-    assert (result.from_version, result.to_version) == (7, 8)
+    assert (result.from_version, result.to_version) == (7, 9)
     assert snapshot_tables(database_path, preserved) == preserved
     upgraded = SQLitePaymentEventRepository(database_path).get(payment.id)
     assert upgraded is not None
     assert upgraded.id == payment.id
     assert upgraded.raw_email_id == raw.id
+    assert upgraded.manual_evidence_id is None
     assert upgraded.parser_version == "legacy-unversioned"
     assert SQLiteRawEmailRepository(database_path).get(raw.gmail_message_id).raw_mime == raw_bytes
     assert SQLitePayerRepository(database_path).get_alias(alias.normalized_alias) == alias
     assert SQLiteAllocationRepository(database_path).get(allocation.id) == allocation
+
+
+def test_v8_to_v9_preserves_gmail_payments_allocations_and_foreign_keys(tmp_path):
+    database_path = tmp_path / "v8.sqlite3"
+    with sqlite3.connect(database_path) as connection:
+        connection.execute("PRAGMA foreign_keys = ON")
+        for version in range(1, 9):
+            MIGRATIONS[version](connection)
+        connection.execute("PRAGMA user_version = 8")
+
+    raw, payment, payer, _, raw_bytes = add_payment_era_rows(database_path)
+    rentals = SQLiteRentalRepository(database_path)
+    unit = rentals.create_unit("Synthetic Unit")
+    account = rentals.create_rent_account(unit.id, "Synthetic Household", None, None)
+    rentals.add_payer(account.id, payer.id)
+    obligation = SQLiteObligationRepository(database_path).create(
+        account.id, "2026-09", 123456, date(2026, 9, 1)
+    )
+    allocation = SQLiteAllocationRepository(database_path).create_checked(
+        payment.id, obligation.id, 100000
+    )
+    before_payment = SQLitePaymentEventRepository(database_path).get(payment.id)
+
+    result = upgrade_database(database_path)
+
+    assert (result.from_version, result.to_version) == (8, 9)
+    after_payment = SQLitePaymentEventRepository(database_path).get(payment.id)
+    assert after_payment is not None
+    assert before_payment is not None
+    assert after_payment.id == before_payment.id
+    assert after_payment.raw_email_id == before_payment.raw_email_id == raw.id
+    assert after_payment.manual_evidence_id is None
+    assert (
+        after_payment.provider,
+        after_payment.sender_name,
+        after_payment.amount_cents,
+        after_payment.occurred_on,
+        after_payment.memo,
+        after_payment.parsed_at,
+        after_payment.parser_version,
+    ) == (
+        before_payment.provider,
+        before_payment.sender_name,
+        before_payment.amount_cents,
+        before_payment.occurred_on,
+        before_payment.memo,
+        before_payment.parsed_at,
+        before_payment.parser_version,
+    )
+    assert SQLiteAllocationRepository(database_path).get(allocation.id) == allocation
+    assert SQLiteRawEmailRepository(database_path).get(raw.gmail_message_id).raw_mime == raw_bytes
+    with sqlite3.connect(database_path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 9
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+        assert connection.execute(
+            "SELECT COUNT(*) FROM manual_payment_evidence"
+        ).fetchone()[0] == 0
+
+
+def test_v9_migration_failure_rolls_back_table_rebuild(tmp_path):
+    database_path = tmp_path / "v8-failure.sqlite3"
+    with sqlite3.connect(database_path) as connection:
+        connection.execute("PRAGMA foreign_keys = ON")
+        for version in range(1, 9):
+            MIGRATIONS[version](connection)
+        connection.execute("PRAGMA user_version = 8")
+    raw, payment, *_ = add_payment_era_rows(database_path)
+    before = snapshot_tables(database_path, ["raw_emails", "payment_events"])
+
+    def fail_after_v9_changes(connection):
+        MIGRATIONS[9](connection)
+        raise sqlite3.OperationalError("synthetic migration failure")
+
+    migrations = dict(MIGRATIONS)
+    migrations[9] = fail_after_v9_changes
+    with pytest.raises(MigrationError):
+        upgrade_database(database_path, migrations=migrations)
+
+    assert snapshot_tables(database_path, before) == before
+    with sqlite3.connect(database_path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 8
+        assert connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE name = 'manual_payment_evidence'"
+        ).fetchone() is None
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+    unchanged = SQLitePaymentEventRepository(database_path).get(payment.id)
+    assert unchanged is not None
+    assert unchanged.raw_email_id == raw.id
 
 
 def test_unversioned_payment_era_upgrade_preserves_rows_ids_blobs_and_aliases(tmp_path):

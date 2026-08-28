@@ -46,6 +46,11 @@ from autorentledger.maintenance import (
     rename_payer,
     rename_rent_account,
 )
+from autorentledger.manual_payments import (
+    ManualPaymentDuplicateError,
+    ManualPaymentValidationError,
+    create_manual_payment,
+)
 from autorentledger.obligations import (
     DuplicateObligationError,
     ObligationAccountNotFoundError,
@@ -62,6 +67,7 @@ from autorentledger.payment_listing import (
 from autorentledger.processing import process_raw_emails
 from autorentledger.rebuilding import (
     PaymentRebuildInvariantError,
+    PaymentRebuildNotEligibleError,
     PaymentRebuildNotFoundError,
     PaymentRebuildOutcome,
     PaymentRebuildResult,
@@ -105,6 +111,7 @@ from autorentledger.storage.migrations import (
 )
 from autorentledger.storage.sqlite import (
     SQLiteAllocationRepository,
+    SQLiteManualPaymentRepository,
     SQLiteObligationRepository,
     SQLitePayerRepository,
     SQLitePaymentEventRepository,
@@ -200,6 +207,18 @@ def build_parser() -> argparse.ArgumentParser:
     payments_rebuild.add_argument("--dry-run", action="store_true")
     payments_rebuild.add_argument("--payment", type=int)
     payments_rebuild.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+    payment = subparsers.add_parser("payment", help="create explicit payment evidence")
+    payment_commands = payment.add_subparsers(dest="payment_command", required=True)
+    manual_add = payment_commands.add_parser(
+        "manual-add", help="create payment evidence that did not originate in Gmail"
+    )
+    manual_add.add_argument("--sender", required=True)
+    manual_add.add_argument("--amount", required=True)
+    manual_add.add_argument("--date", required=True, dest="payment_date")
+    manual_add.add_argument("--note")
+    manual_add.add_argument("--confirm-duplicate", action="store_true")
+    manual_add.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
 
     payer = subparsers.add_parser("payer", help="manage payer identities")
     payer_commands = payer.add_subparsers(dest="payer_command", required=True)
@@ -662,6 +681,51 @@ def run_payment_listing(database_path: Path) -> int:
     return 0
 
 
+def run_manual_payment_add(
+    database_path: Path,
+    sender_name: str,
+    amount: str,
+    payment_date: str,
+    note: str | None,
+    *,
+    confirm_duplicate: bool,
+) -> int:
+    try:
+        result = create_manual_payment(
+            SQLiteManualPaymentRepository(database_path),
+            sender_name,
+            amount,
+            payment_date,
+            note,
+            confirm_duplicate=confirm_duplicate,
+        )
+    except ManualPaymentDuplicateError as error:
+        print("Possible duplicate manual payment:")
+        for match in error.matches:
+            print(f"Payment {match.payment_event_id}")
+            print(f"Date: {match.occurred_on}")
+            print(f"Sender: {match.sender_name}")
+            print(f"Amount: {_format_currency(match.amount_cents)}")
+        print("Use --confirm-duplicate to enter another.")
+        return 1
+    except ManualPaymentValidationError as error:
+        print(error)
+        return 1
+    except sqlite3.Error:
+        print("Manual payment creation failed. Run `autorentledger db check` for details.")
+        return 1
+
+    payment = result.payment_event
+    print(f"Created manual payment {payment.id}")
+    print(f"Date: {payment.occurred_on}")
+    print(f"Sender: {payment.sender_name}")
+    print(f"Amount: {_format_currency(payment.amount_cents)}")
+    print("Source: manual")
+    if result.evidence.note is not None:
+        print(f"Note: {result.evidence.note}")
+    return 0
+
+
 def run_payment_rebuild(
     database_path: Path, *, dry_run: bool, payment_event_id: int | None
 ) -> int:
@@ -673,6 +737,7 @@ def run_payment_rebuild(
         )
     except (
         PaymentRebuildInvariantError,
+        PaymentRebuildNotEligibleError,
         PaymentRebuildNotFoundError,
         sqlite3.Error,
     ) as error:
@@ -1594,6 +1659,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                 payment_event_id=args.payment,
             )
         return run_payment_listing(args.database)
+    if args.command == "payment":
+        if args.payment_command == "manual-add":
+            return run_manual_payment_add(
+                args.database,
+                args.sender,
+                args.amount,
+                args.payment_date,
+                args.note,
+                confirm_duplicate=args.confirm_duplicate,
+            )
+        raise AssertionError(f"Unhandled payment command: {args.payment_command}")
     if args.command == "payer":
         if args.payer_command == "add":
             return run_payer_add(args.database, args.display_name)

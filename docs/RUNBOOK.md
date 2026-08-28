@@ -15,6 +15,7 @@ database-backed command when using a non-default database.
 - [Monthly setup](#monthly-setup)
 - [Add a new payer](#add-a-new-payer)
 - [Add a unit, rent account, association, and schedule](#add-a-unit-rent-account-association-and-schedule)
+- [Enter a historical payment without Gmail evidence](#enter-a-historical-payment-without-gmail-evidence)
 - [Payment is unresolved](#payment-is-unresolved)
 - [Payment is unallocated](#payment-is-unallocated)
 - [Partial payment](#partial-payment)
@@ -282,6 +283,53 @@ high-confidence automatic suggestions.
 
 Schedules must be contained within the rent account’s active dates, use due days 1–28, and cannot
 overlap another schedule for the same account.
+
+## Enter a historical payment without Gmail evidence
+
+Do not invent a raw email or edit SQLite. Record the payment as explicit manual evidence:
+
+```powershell
+autorentledger payment manual-add `
+  --sender "Synthetic Tenant" `
+  --amount 1450.00 `
+  --date 2026-05-03 `
+  --note "Historical rent entered from owner records"
+```
+
+This creates one manual evidence row and one normalized payment event atomically. It does not
+create a payer, alias, rent account, obligation, or allocation. The sender still resolves through
+the same exact alias rules as Gmail-derived payments. If the same normalized sender, amount, and
+date already exist in manual evidence, the command stops with a possible-duplicate warning. Use
+`--confirm-duplicate` only after confirming that a second legitimate payment occurred. Matching
+Gmail evidence does not trigger this narrowly scoped manual duplicate check.
+
+For a historical month, keep the evidence and accounting steps explicit (all IDs are synthetic):
+
+```powershell
+autorentledger obligation add `
+  --account 3 `
+  --period 2026-05 `
+  --amount 1450.00 `
+  --due-date 2026-05-01
+
+autorentledger payment manual-add `
+  --sender "Synthetic Tenant" `
+  --amount 1450.00 `
+  --date 2026-05-03 `
+  --note "Historical rent entered from owner records"
+
+autorentledger allocation add `
+  --payment 42 `
+  --obligation 18 `
+  --amount 1450.00
+
+autorentledger reconcile --period 2026-05
+```
+
+`manual-add` means “this payment happened.” `allocation add` separately means “this money
+satisfied this obligation.” Manual payments appear in the normal payment list, review queue,
+suggestions, reporting, overview, and read-only web Payments page. They are not parser-rebuild
+candidates. M22A intentionally provides no manual edit, delete, or void command.
 
 ## Payment is unresolved
 

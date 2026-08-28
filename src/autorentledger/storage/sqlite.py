@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
@@ -41,7 +41,7 @@ class RawEmailRecord:
 @dataclass(frozen=True)
 class PaymentEventRecord:
     id: int
-    raw_email_id: int
+    raw_email_id: int | None
     provider: str
     sender_name: str
     amount_cents: int
@@ -49,6 +49,32 @@ class PaymentEventRecord:
     memo: str | None
     parsed_at: str
     parser_version: str
+    manual_evidence_id: int | None = None
+
+
+@dataclass(frozen=True)
+class ManualPaymentEvidenceRecord:
+    id: int
+    sender_name: str
+    amount_cents: int
+    occurred_on: str
+    note: str | None
+    created_at: str
+
+
+@dataclass(frozen=True)
+class ManualPaymentDuplicateRecord:
+    payment_event_id: int
+    manual_evidence_id: int
+    sender_name: str
+    amount_cents: int
+    occurred_on: str
+
+
+@dataclass(frozen=True)
+class ManualPaymentCreationStorageResult:
+    evidence: ManualPaymentEvidenceRecord
+    payment_event: PaymentEventRecord
 
 
 @dataclass(frozen=True)
@@ -298,6 +324,11 @@ class MaintenanceStorageError(Exception):
     """Base error for transactional maintenance validation."""
 
 
+class ManualPaymentDuplicateStorageError(Exception):
+    def __init__(self, matches: tuple[ManualPaymentDuplicateRecord, ...]) -> None:
+        self.matches = matches
+
+
 class MaintenancePayerNotFoundError(MaintenanceStorageError):
     pass
 
@@ -477,7 +508,11 @@ class SQLitePaymentEventRepository:
 
     def _initialize_schema(self) -> None:
         with self._connect() as connection:
-            create_payment_event_schema(connection)
+            exists = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'payment_events'"
+            ).fetchone()
+            if exists is None:
+                create_payment_event_schema(connection)
 
     def contains_raw_email(self, raw_email_id: int) -> bool:
         with self._connect() as connection:
@@ -579,10 +614,10 @@ class SQLitePaymentEventRepository:
     def list_rebuild_sources(
         self, payment_event_id: int | None = None
     ) -> list[PaymentRebuildSourceRecord]:
-        where_clause = ""
+        where_clause = "WHERE payment_events.raw_email_id IS NOT NULL"
         parameters: tuple[int, ...] = ()
         if payment_event_id is not None:
-            where_clause = "WHERE payment_events.id = ?"
+            where_clause += " AND payment_events.id = ?"
             parameters = (payment_event_id,)
         with self._connect_read_only() as connection:
             rows = connection.execute(
@@ -682,7 +717,113 @@ class SQLitePaymentEventRepository:
 def _payment_event_record(row: sqlite3.Row) -> PaymentEventRecord:
     values = dict(row)
     values.setdefault("parser_version", LEGACY_UNVERSIONED_PARSER_VERSION)
+    values.setdefault("manual_evidence_id", None)
     return PaymentEventRecord(**values)
+
+
+class SQLiteManualPaymentRepository:
+    """Atomically persist explicit manual evidence and its normalized payment event."""
+
+    def __init__(self, database_path: Path) -> None:
+        self.database_path = database_path
+        self.database_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def _connect(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(self.database_path)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        return connection
+
+    def create_checked(
+        self,
+        sender_name: str,
+        amount_cents: int,
+        occurred_on: date,
+        note: str | None,
+        parser_version: str,
+        *,
+        confirm_duplicate: bool,
+        normalize_sender: Callable[[str], str],
+    ) -> ManualPaymentCreationStorageResult:
+        occurred_on_text = occurred_on.isoformat()
+        normalized_sender = normalize_sender(sender_name)
+        created_at = datetime.now(UTC).isoformat()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            duplicate_rows = connection.execute(
+                """
+                SELECT
+                    payment_events.id AS payment_event_id,
+                    manual_payment_evidence.id AS manual_evidence_id,
+                    manual_payment_evidence.sender_name,
+                    manual_payment_evidence.amount_cents,
+                    manual_payment_evidence.occurred_on
+                FROM manual_payment_evidence
+                JOIN payment_events
+                    ON payment_events.manual_evidence_id = manual_payment_evidence.id
+                WHERE manual_payment_evidence.amount_cents = ?
+                    AND manual_payment_evidence.occurred_on = ?
+                ORDER BY payment_events.id
+                """,
+                (amount_cents, occurred_on_text),
+            ).fetchall()
+            matches = tuple(
+                ManualPaymentDuplicateRecord(**dict(row))
+                for row in duplicate_rows
+                if normalize_sender(str(row["sender_name"])) == normalized_sender
+            )
+            if matches and not confirm_duplicate:
+                raise ManualPaymentDuplicateStorageError(matches)
+
+            evidence_cursor = connection.execute(
+                """
+                INSERT INTO manual_payment_evidence (
+                    sender_name, amount_cents, occurred_on, note, created_at
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (sender_name, amount_cents, occurred_on_text, note, created_at),
+            )
+            evidence_id = int(evidence_cursor.lastrowid)
+            event_cursor = connection.execute(
+                """
+                INSERT INTO payment_events (
+                    raw_email_id, manual_evidence_id, provider, sender_name,
+                    amount_cents, occurred_on, memo, parsed_at, parser_version
+                ) VALUES (NULL, ?, 'manual', ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    evidence_id,
+                    sender_name,
+                    amount_cents,
+                    occurred_on_text,
+                    note,
+                    created_at,
+                    parser_version,
+                ),
+            )
+            payment_event_id = int(event_cursor.lastrowid)
+
+        evidence = ManualPaymentEvidenceRecord(
+            evidence_id,
+            sender_name,
+            amount_cents,
+            occurred_on_text,
+            note,
+            created_at,
+        )
+        payment_event = PaymentEventRecord(
+            payment_event_id,
+            None,
+            "manual",
+            sender_name,
+            amount_cents,
+            occurred_on_text,
+            note,
+            created_at,
+            parser_version,
+            evidence_id,
+        )
+        return ManualPaymentCreationStorageResult(evidence, payment_event)
 
 
 class SQLitePayerRepository:
