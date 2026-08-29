@@ -40,6 +40,9 @@ overviews are recomputed read models rather than persisted workflow state.
 
 - Evidence origin is not accounting meaning. Raw MIME stays immutable; manual evidence records a
   payment observed outside Gmail; both normalize into payment events.
+- Manual evidence is append-audited. Corrections preserve the original evidence, append a full
+  effective-state revision, and update the same normalized payment projection atomically. A void
+  appends history and deactivates that projection without deleting either record.
 - A payer is not a rent account, a payment is not an allocation, and a schedule is not an
   obligation.
 - Actual obligations state what was owed. Schedules can explicitly generate missing obligations
@@ -53,6 +56,8 @@ overviews are recomputed read models rather than persisted workflow state.
   allocations, or obligations and never rebuild old payments automatically.
 - Parser rebuild is explicit, applies only to Gmail-derived events, and cannot reduce a payment
   below its allocated total. Manual events are never reparsed.
+- Manual correction cannot reduce a payment below its allocated total, and void requires zero
+  allocations. Neither operation changes aliases, obligations, or allocation targets.
 - Restore validates a current-schema candidate and never silently migrates it.
 
 ## Dependency maintenance

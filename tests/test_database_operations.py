@@ -146,7 +146,7 @@ def test_healthy_database_check_is_strictly_read_only_and_cli_is_private(
     assert "Ledger:        OK" in output
     assert "Database healthy." in output
     assert "PRIVATE_SYNTHETIC" not in output
-    assert before[0] == CURRENT_SCHEMA_VERSION == 9
+    assert before[0] == CURRENT_SCHEMA_VERSION == 10
 
 
 def test_payment_allocation_overage_is_detected_without_repair(tmp_path):
@@ -491,7 +491,7 @@ def test_cli_backup_restore_output_is_private_and_schema_commands_still_work(
     assert "Database restored from:" in output
     assert "Pre-restore backup:" in output
     assert "PRIVATE_SYNTHETIC" not in output
-    assert CURRENT_SCHEMA_VERSION == 9
+    assert CURRENT_SCHEMA_VERSION == 10
     assert database_snapshot(active)[1] == set(EXPECTED_COLUMNS)
 
 

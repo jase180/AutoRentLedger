@@ -159,7 +159,7 @@ def test_v7_to_current_adds_legacy_provenance_and_preserves_ledger_rows(tmp_path
 
     result = upgrade_database(database_path)
 
-    assert (result.from_version, result.to_version) == (7, 9)
+    assert (result.from_version, result.to_version) == (7, 10)
     assert snapshot_tables(database_path, preserved) == preserved
     upgraded = SQLitePaymentEventRepository(database_path).get(payment.id)
     assert upgraded is not None
@@ -172,7 +172,7 @@ def test_v7_to_current_adds_legacy_provenance_and_preserves_ledger_rows(tmp_path
     assert SQLiteAllocationRepository(database_path).get(allocation.id) == allocation
 
 
-def test_v8_to_v9_preserves_gmail_payments_allocations_and_foreign_keys(tmp_path):
+def test_v8_to_current_preserves_gmail_payments_allocations_and_foreign_keys(tmp_path):
     database_path = tmp_path / "v8.sqlite3"
     with sqlite3.connect(database_path) as connection:
         connection.execute("PRAGMA foreign_keys = ON")
@@ -195,7 +195,7 @@ def test_v8_to_v9_preserves_gmail_payments_allocations_and_foreign_keys(tmp_path
 
     result = upgrade_database(database_path)
 
-    assert (result.from_version, result.to_version) == (8, 9)
+    assert (result.from_version, result.to_version) == (8, 10)
     after_payment = SQLitePaymentEventRepository(database_path).get(payment.id)
     assert after_payment is not None
     assert before_payment is not None
@@ -222,11 +222,100 @@ def test_v8_to_v9_preserves_gmail_payments_allocations_and_foreign_keys(tmp_path
     assert SQLiteAllocationRepository(database_path).get(allocation.id) == allocation
     assert SQLiteRawEmailRepository(database_path).get(raw.gmail_message_id).raw_mime == raw_bytes
     with sqlite3.connect(database_path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 9
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 10
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
         assert connection.execute(
             "SELECT COUNT(*) FROM manual_payment_evidence"
         ).fetchone()[0] == 0
+
+
+def test_v9_to_v10_adds_manual_audit_state_without_changing_existing_rows(tmp_path):
+    database_path = tmp_path / "v9.sqlite3"
+    with sqlite3.connect(database_path) as connection:
+        connection.execute("PRAGMA foreign_keys = ON")
+        for version in range(1, 10):
+            MIGRATIONS[version](connection)
+        connection.execute("PRAGMA user_version = 9")
+        connection.execute(
+            """
+            INSERT INTO manual_payment_evidence (
+                id, sender_name, amount_cents, occurred_on, note, created_at
+            ) VALUES (7, 'Synthetic Tenant', 145000, '2026-05-03',
+                      'Synthetic original note', '2026-08-01T00:00:00+00:00')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO payment_events (
+                id, raw_email_id, manual_evidence_id, provider, sender_name,
+                amount_cents, occurred_on, memo, parsed_at, parser_version
+            ) VALUES (42, NULL, 7, 'manual', 'Synthetic Tenant', 145000,
+                      '2026-05-03', 'Synthetic original note',
+                      '2026-08-01T00:00:00+00:00', 'manual')
+            """
+        )
+    rentals = SQLiteRentalRepository(database_path)
+    unit = rentals.create_unit("Synthetic Unit")
+    account = rentals.create_rent_account(unit.id, "Synthetic Household", None, None)
+    obligation = SQLiteObligationRepository(database_path).create(
+        account.id, "2026-05", 145000, date(2026, 5, 1)
+    )
+    allocation = SQLiteAllocationRepository(database_path).create_checked(
+        42, obligation.id, 100000
+    )
+    before = snapshot_tables(
+        database_path,
+        ["manual_payment_evidence", "payment_allocations"],
+    )
+
+    result = upgrade_database(database_path)
+
+    assert (result.from_version, result.to_version) == (9, 10)
+    assert snapshot_tables(database_path, before) == before
+    payment = SQLitePaymentEventRepository(database_path).get(42)
+    assert payment is not None
+    assert payment.id == 42
+    assert payment.manual_evidence_id == 7
+    assert payment.raw_email_id is None
+    assert payment.voided_at is None
+    assert SQLiteAllocationRepository(database_path).get(allocation.id) == allocation
+    with sqlite3.connect(database_path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 10
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+        assert connection.execute(
+            "SELECT COUNT(*) FROM manual_payment_revisions"
+        ).fetchone()[0] == 0
+
+
+def test_v10_migration_failure_rolls_back_void_column_and_revision_table(tmp_path):
+    database_path = tmp_path / "v9-failure.sqlite3"
+    with sqlite3.connect(database_path) as connection:
+        connection.execute("PRAGMA foreign_keys = ON")
+        for version in range(1, 10):
+            MIGRATIONS[version](connection)
+        connection.execute("PRAGMA user_version = 9")
+    before = snapshot_tables(database_path, ["payment_events", "manual_payment_evidence"])
+
+    def fail_after_v10_changes(connection):
+        MIGRATIONS[10](connection)
+        raise sqlite3.OperationalError("synthetic v10 migration failure")
+
+    migrations = dict(MIGRATIONS)
+    migrations[10] = fail_after_v10_changes
+    with pytest.raises(MigrationError):
+        upgrade_database(database_path, migrations=migrations)
+
+    assert snapshot_tables(database_path, before) == before
+    with sqlite3.connect(database_path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 9
+        columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(payment_events)")
+        }
+        assert "voided_at" not in columns
+        assert connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE name = 'manual_payment_revisions'"
+        ).fetchone() is None
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
 
 
 def test_v9_migration_failure_rolls_back_table_rebuild(tmp_path):

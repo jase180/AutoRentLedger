@@ -369,11 +369,11 @@ def test_suggestions_are_read_only_private_safe_and_add_no_schema(tmp_path, caps
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             )
         }
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 9
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 10
     assert not tables.intersection(
         {"allocation_suggestions", "suggestion_status", "accepted_suggestions", "suggestion_history"}
     )
-    assert CURRENT_SCHEMA_VERSION == 9
+    assert CURRENT_SCHEMA_VERSION == 10
 
 
 def test_no_fuzzy_or_time_ranged_membership_and_schedules_do_not_invent_obligations(tmp_path):

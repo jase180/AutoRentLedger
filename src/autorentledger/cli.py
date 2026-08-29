@@ -47,9 +47,16 @@ from autorentledger.maintenance import (
     rename_rent_account,
 )
 from autorentledger.manual_payments import (
+    ManualPaymentAllocationConflictError,
     ManualPaymentDuplicateError,
+    ManualPaymentNotFoundError,
+    ManualPaymentSourceError,
     ManualPaymentValidationError,
+    ManualPaymentVoidedError,
+    correct_manual_payment,
     create_manual_payment,
+    get_manual_payment_history,
+    void_manual_payment,
 )
 from autorentledger.obligations import (
     DuplicateObligationError,
@@ -219,6 +226,31 @@ def build_parser() -> argparse.ArgumentParser:
     manual_add.add_argument("--note")
     manual_add.add_argument("--confirm-duplicate", action="store_true")
     manual_add.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+    manual_correct = payment_commands.add_parser(
+        "manual-correct", help="append a correction to manual payment evidence"
+    )
+    manual_correct.add_argument("payment_id", type=int)
+    manual_correct.add_argument("--sender")
+    manual_correct.add_argument("--amount")
+    manual_correct.add_argument("--date", dest="payment_date")
+    manual_correct.add_argument("--note")
+    manual_correct.add_argument("--reason", required=True)
+    manual_correct.add_argument("--confirm-duplicate", action="store_true")
+    manual_correct.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+    manual_void = payment_commands.add_parser(
+        "manual-void", help="append a void revision for a manual payment"
+    )
+    manual_void.add_argument("payment_id", type=int)
+    manual_void.add_argument("--reason", required=True)
+    manual_void.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+    manual_history = payment_commands.add_parser(
+        "manual-history", help="show original manual evidence and all revisions"
+    )
+    manual_history.add_argument("payment_id", type=int)
+    manual_history.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
 
     payer = subparsers.add_parser("payer", help="manage payer identities")
     payer_commands = payer.add_subparsers(dest="payer_command", required=True)
@@ -670,13 +702,14 @@ def run_payment_listing(database_path: Path) -> int:
     except PaymentListingInvariantError as error:
         print(error)
         return 1
-    print(f"{'ID':<4} {'DATE':<10} {'SENDER':<24} {'AMOUNT':>12}  PROVIDER")
+    print(f"{'ID':<4} {'DATE':<10} {'SENDER':<24} {'AMOUNT':>12}  {'PROVIDER':<12} STATUS")
     for event in events:
         occurred_on = event.occurred_on.isoformat() if event.occurred_on else "-"
         amount = _format_currency(event.amount_cents)
         print(
             f"{event.payment_event_id:<4} {occurred_on:<10} {event.sender_name:<24} "
-            f"{amount:>12}  {event.provider}"
+            f"{amount:>12}  {event.provider:<12} "
+            f"{'VOIDED' if event.voided_at is not None else 'ACTIVE'}"
         )
     return 0
 
@@ -700,13 +733,7 @@ def run_manual_payment_add(
             confirm_duplicate=confirm_duplicate,
         )
     except ManualPaymentDuplicateError as error:
-        print("Possible duplicate manual payment:")
-        for match in error.matches:
-            print(f"Payment {match.payment_event_id}")
-            print(f"Date: {match.occurred_on}")
-            print(f"Sender: {match.sender_name}")
-            print(f"Amount: {_format_currency(match.amount_cents)}")
-        print("Use --confirm-duplicate to enter another.")
+        _print_manual_duplicates(error)
         return 1
     except ManualPaymentValidationError as error:
         print(error)
@@ -724,6 +751,141 @@ def run_manual_payment_add(
     if result.evidence.note is not None:
         print(f"Note: {result.evidence.note}")
     return 0
+
+
+def run_manual_payment_correct(
+    database_path: Path,
+    payment_event_id: int,
+    *,
+    sender_name: str | None,
+    amount: str | None,
+    payment_date: str | None,
+    note: str | None,
+    reason: str,
+    confirm_duplicate: bool,
+) -> int:
+    try:
+        result = correct_manual_payment(
+            SQLiteManualPaymentRepository(database_path),
+            payment_event_id,
+            reason=reason,
+            sender_name=sender_name,
+            amount=amount,
+            occurred_on=payment_date,
+            note=note,
+            confirm_duplicate=confirm_duplicate,
+        )
+    except ManualPaymentDuplicateError as error:
+        _print_manual_duplicates(error)
+        return 1
+    except ManualPaymentAllocationConflictError as error:
+        print(
+            f"Payment {payment_event_id} has {_format_currency(error.allocated_cents)} "
+            "allocated; the corrected amount cannot be lower."
+        )
+        return 1
+    except (
+        ManualPaymentValidationError,
+        ManualPaymentNotFoundError,
+        ManualPaymentSourceError,
+        ManualPaymentVoidedError,
+    ) as error:
+        print(error)
+        return 1
+    except sqlite3.Error:
+        print("Manual payment correction failed. Run `autorentledger db check` for details.")
+        return 1
+    payment = result.payment_event
+    print(f"Corrected manual payment {payment.id}")
+    print(f"Date: {payment.occurred_on}")
+    print(f"Sender: {payment.sender_name}")
+    print(f"Amount: {_format_currency(payment.amount_cents)}")
+    print(f"Revision: {result.revision.id}")
+    return 0
+
+
+def run_manual_payment_void(
+    database_path: Path, payment_event_id: int, *, reason: str
+) -> int:
+    try:
+        result = void_manual_payment(
+            SQLiteManualPaymentRepository(database_path),
+            payment_event_id,
+            reason=reason,
+        )
+    except ManualPaymentAllocationConflictError as error:
+        print(
+            f"Payment {payment_event_id} has {_format_currency(error.allocated_cents)} "
+            "allocated. Remove its allocations before voiding."
+        )
+        return 1
+    except (
+        ManualPaymentValidationError,
+        ManualPaymentNotFoundError,
+        ManualPaymentSourceError,
+        ManualPaymentVoidedError,
+    ) as error:
+        print(error)
+        return 1
+    except sqlite3.Error:
+        print("Manual payment void failed. Run `autorentledger db check` for details.")
+        return 1
+    print(f"Voided manual payment {result.payment_event.id}")
+    print(f"Revision: {result.revision.id}")
+    print(f"Reason: {result.revision.reason}")
+    return 0
+
+
+def run_manual_payment_history(database_path: Path, payment_event_id: int) -> int:
+    try:
+        history = get_manual_payment_history(
+            SQLiteManualPaymentRepository(database_path), payment_event_id
+        )
+    except (ManualPaymentNotFoundError, ManualPaymentSourceError) as error:
+        print(error)
+        return 1
+    except sqlite3.Error:
+        print("Manual payment history failed. Run `autorentledger db check` for details.")
+        return 1
+    print(f"Payment {payment_event_id}")
+    print("Original:")
+    _print_manual_state(
+        history.evidence.occurred_on,
+        history.evidence.sender_name,
+        history.evidence.amount_cents,
+        history.evidence.note,
+    )
+    for number, revision in enumerate(history.revisions, start=1):
+        print(f"Revision {number} - {revision.revision_type}")
+        print(f"Reason: {revision.reason}")
+        _print_manual_state(
+            revision.occurred_on,
+            revision.sender_name,
+            revision.amount_cents,
+            revision.note,
+        )
+    print(f"Status: {'VOIDED' if history.payment_event.voided_at else 'ACTIVE'}")
+    return 0
+
+
+def _print_manual_duplicates(error: ManualPaymentDuplicateError) -> None:
+    print("Possible duplicate manual payment:")
+    for match in error.matches:
+        print(f"Payment {match.payment_event_id}")
+        print(f"Date: {match.occurred_on}")
+        print(f"Sender: {match.sender_name}")
+        print(f"Amount: {_format_currency(match.amount_cents)}")
+    print("Use --confirm-duplicate to enter another.")
+
+
+def _print_manual_state(
+    occurred_on: str, sender_name: str, amount_cents: int, note: str | None
+) -> None:
+    print(f"  {occurred_on}")
+    print(f"  {sender_name}")
+    print(f"  {_format_currency(amount_cents)}")
+    if note is not None:
+        print(f"  Note: {note}")
 
 
 def run_payment_rebuild(
@@ -1669,6 +1831,23 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.note,
                 confirm_duplicate=args.confirm_duplicate,
             )
+        if args.payment_command == "manual-correct":
+            return run_manual_payment_correct(
+                args.database,
+                args.payment_id,
+                sender_name=args.sender,
+                amount=args.amount,
+                payment_date=args.payment_date,
+                note=args.note,
+                reason=args.reason,
+                confirm_duplicate=args.confirm_duplicate,
+            )
+        if args.payment_command == "manual-void":
+            return run_manual_payment_void(
+                args.database, args.payment_id, reason=args.reason
+            )
+        if args.payment_command == "manual-history":
+            return run_manual_payment_history(args.database, args.payment_id)
         raise AssertionError(f"Unhandled payment command: {args.payment_command}")
     if args.command == "payer":
         if args.payer_command == "add":

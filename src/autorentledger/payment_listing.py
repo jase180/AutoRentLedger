@@ -24,6 +24,7 @@ class PaymentListRecord:
     payer_display_name: str | None
     allocated_cents: int
     unallocated_cents: int
+    voided_at: str | None
 
 
 def list_payment_records(
@@ -33,8 +34,16 @@ def list_payment_records(
     aliases = {alias.normalized_alias: alias for alias in repository.list_aliases()}
     records: list[PaymentListRecord] = []
     for source in repository.list_payment_sources():
-        unallocated_cents = source.amount_cents - source.allocated_cents
-        if source.allocated_cents < 0 or unallocated_cents < 0:
+        unallocated_cents = (
+            0
+            if source.voided_at is not None
+            else source.amount_cents - source.allocated_cents
+        )
+        if (
+            source.allocated_cents < 0
+            or source.allocated_cents > source.amount_cents
+            or unallocated_cents < 0
+        ):
             raise PaymentListingInvariantError(
                 f"Payment {source.payment_event_id} is allocated above its payment amount."
             )
@@ -54,6 +63,7 @@ def list_payment_records(
                 payer_display_name=alias.payer_display_name if alias else None,
                 allocated_cents=source.allocated_cents,
                 unallocated_cents=unallocated_cents,
+                voided_at=source.voided_at,
             )
         )
     return tuple(records)

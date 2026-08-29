@@ -56,6 +56,7 @@ def test_payment_events_schema_initialization(tmp_path):
         "memo",
         "parsed_at",
         "parser_version",
+        "voided_at",
     }
     assert any(
         row[2] == "raw_emails" and row[3] == "raw_email_id" and row[4] == "id"

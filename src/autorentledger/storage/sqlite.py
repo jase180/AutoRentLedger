@@ -50,6 +50,7 @@ class PaymentEventRecord:
     parsed_at: str
     parser_version: str
     manual_evidence_id: int | None = None
+    voided_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -74,6 +75,32 @@ class ManualPaymentDuplicateRecord:
 @dataclass(frozen=True)
 class ManualPaymentCreationStorageResult:
     evidence: ManualPaymentEvidenceRecord
+    payment_event: PaymentEventRecord
+
+
+@dataclass(frozen=True)
+class ManualPaymentRevisionRecord:
+    id: int
+    manual_evidence_id: int
+    revision_type: str
+    sender_name: str
+    amount_cents: int
+    occurred_on: str
+    note: str | None
+    reason: str
+    created_at: str
+
+
+@dataclass(frozen=True)
+class ManualPaymentRevisionStorageResult:
+    revision: ManualPaymentRevisionRecord
+    payment_event: PaymentEventRecord
+
+
+@dataclass(frozen=True)
+class ManualPaymentHistoryStorageResult:
+    evidence: ManualPaymentEvidenceRecord
+    revisions: tuple[ManualPaymentRevisionRecord, ...]
     payment_event: PaymentEventRecord
 
 
@@ -113,6 +140,7 @@ class PaymentListingSourceRecord:
     sender_name: str
     amount_cents: int
     allocated_cents: int
+    voided_at: str | None
 
 
 @dataclass(frozen=True)
@@ -329,6 +357,27 @@ class ManualPaymentDuplicateStorageError(Exception):
         self.matches = matches
 
 
+class ManualPaymentNotFoundStorageError(Exception):
+    pass
+
+
+class ManualPaymentGmailDerivedStorageError(Exception):
+    pass
+
+
+class ManualPaymentVoidedStorageError(Exception):
+    pass
+
+
+class ManualPaymentNoChangeStorageError(Exception):
+    pass
+
+
+class ManualPaymentAllocationConflictStorageError(Exception):
+    def __init__(self, allocated_cents: int) -> None:
+        self.allocated_cents = allocated_cents
+
+
 class MaintenancePayerNotFoundError(MaintenanceStorageError):
     pass
 
@@ -389,6 +438,10 @@ class AllocationStorageError(Exception):
 
 
 class AllocationPaymentNotFoundError(AllocationStorageError):
+    pass
+
+
+class AllocationPaymentVoidedError(AllocationStorageError):
     pass
 
 
@@ -605,6 +658,7 @@ class SQLitePaymentEventRepository:
                 """
                 SELECT sender_name, COUNT(*) AS count
                 FROM payment_events
+                WHERE voided_at IS NULL
                 GROUP BY sender_name
                 ORDER BY sender_name COLLATE NOCASE, sender_name
                 """
@@ -718,6 +772,7 @@ def _payment_event_record(row: sqlite3.Row) -> PaymentEventRecord:
     values = dict(row)
     values.setdefault("parser_version", LEGACY_UNVERSIONED_PARSER_VERSION)
     values.setdefault("manual_evidence_id", None)
+    values.setdefault("voided_at", None)
     return PaymentEventRecord(**values)
 
 
@@ -746,31 +801,15 @@ class SQLiteManualPaymentRepository:
         normalize_sender: Callable[[str], str],
     ) -> ManualPaymentCreationStorageResult:
         occurred_on_text = occurred_on.isoformat()
-        normalized_sender = normalize_sender(sender_name)
         created_at = datetime.now(UTC).isoformat()
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            duplicate_rows = connection.execute(
-                """
-                SELECT
-                    payment_events.id AS payment_event_id,
-                    manual_payment_evidence.id AS manual_evidence_id,
-                    manual_payment_evidence.sender_name,
-                    manual_payment_evidence.amount_cents,
-                    manual_payment_evidence.occurred_on
-                FROM manual_payment_evidence
-                JOIN payment_events
-                    ON payment_events.manual_evidence_id = manual_payment_evidence.id
-                WHERE manual_payment_evidence.amount_cents = ?
-                    AND manual_payment_evidence.occurred_on = ?
-                ORDER BY payment_events.id
-                """,
-                (amount_cents, occurred_on_text),
-            ).fetchall()
-            matches = tuple(
-                ManualPaymentDuplicateRecord(**dict(row))
-                for row in duplicate_rows
-                if normalize_sender(str(row["sender_name"])) == normalized_sender
+            matches = _matching_manual_payments(
+                connection,
+                sender_name,
+                amount_cents,
+                occurred_on_text,
+                normalize_sender,
             )
             if matches and not confirm_duplicate:
                 raise ManualPaymentDuplicateStorageError(matches)
@@ -824,6 +863,260 @@ class SQLiteManualPaymentRepository:
             evidence_id,
         )
         return ManualPaymentCreationStorageResult(evidence, payment_event)
+
+    def correct_checked(
+        self,
+        payment_event_id: int,
+        *,
+        sender_name: str | None,
+        amount_cents: int | None,
+        occurred_on: date | None,
+        note: str | None,
+        note_provided: bool,
+        reason: str,
+        confirm_duplicate: bool,
+        normalize_sender: Callable[[str], str],
+    ) -> ManualPaymentRevisionStorageResult:
+        created_at = datetime.now(UTC).isoformat()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            current = connection.execute(
+                "SELECT * FROM payment_events WHERE id = ?", (payment_event_id,)
+            ).fetchone()
+            manual_evidence_id = _require_active_manual_payment(current)
+            effective_sender = (
+                sender_name if sender_name is not None else str(current["sender_name"])
+            )
+            effective_amount = (
+                amount_cents
+                if amount_cents is not None
+                else int(current["amount_cents"])
+            )
+            effective_date = (
+                occurred_on.isoformat()
+                if occurred_on is not None
+                else str(current["occurred_on"])
+            )
+            effective_note = note if note_provided else current["memo"]
+            if (
+                effective_sender == current["sender_name"]
+                and effective_amount == current["amount_cents"]
+                and effective_date == current["occurred_on"]
+                and effective_note == current["memo"]
+            ):
+                raise ManualPaymentNoChangeStorageError
+            allocated_cents = int(
+                connection.execute(
+                    """
+                    SELECT COALESCE(SUM(amount_cents), 0)
+                    FROM payment_allocations
+                    WHERE payment_event_id = ?
+                    """,
+                    (payment_event_id,),
+                ).fetchone()[0]
+            )
+            if effective_amount < allocated_cents:
+                raise ManualPaymentAllocationConflictStorageError(allocated_cents)
+            matches = _matching_manual_payments(
+                connection,
+                effective_sender,
+                effective_amount,
+                effective_date,
+                normalize_sender,
+                exclude_payment_event_id=payment_event_id,
+            )
+            if matches and not confirm_duplicate:
+                raise ManualPaymentDuplicateStorageError(matches)
+
+            cursor = connection.execute(
+                """
+                INSERT INTO manual_payment_revisions (
+                    manual_evidence_id, revision_type, sender_name, amount_cents,
+                    occurred_on, note, reason, created_at
+                ) VALUES (?, 'correction', ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    manual_evidence_id,
+                    effective_sender,
+                    effective_amount,
+                    effective_date,
+                    effective_note,
+                    reason,
+                    created_at,
+                ),
+            )
+            revision_id = int(cursor.lastrowid)
+            connection.execute(
+                """
+                UPDATE payment_events
+                SET sender_name = ?, amount_cents = ?, occurred_on = ?, memo = ?, parsed_at = ?
+                WHERE id = ?
+                """,
+                (
+                    effective_sender,
+                    effective_amount,
+                    effective_date,
+                    effective_note,
+                    created_at,
+                    payment_event_id,
+                ),
+            )
+            updated = connection.execute(
+                "SELECT * FROM payment_events WHERE id = ?", (payment_event_id,)
+            ).fetchone()
+
+        revision = ManualPaymentRevisionRecord(
+            revision_id,
+            manual_evidence_id,
+            "correction",
+            effective_sender,
+            effective_amount,
+            effective_date,
+            effective_note,
+            reason,
+            created_at,
+        )
+        return ManualPaymentRevisionStorageResult(
+            revision, _payment_event_record(updated)
+        )
+
+    def void_checked(
+        self, payment_event_id: int, reason: str
+    ) -> ManualPaymentRevisionStorageResult:
+        created_at = datetime.now(UTC).isoformat()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            current = connection.execute(
+                "SELECT * FROM payment_events WHERE id = ?", (payment_event_id,)
+            ).fetchone()
+            manual_evidence_id = _require_active_manual_payment(current)
+            allocated_cents = int(
+                connection.execute(
+                    """
+                    SELECT COALESCE(SUM(amount_cents), 0)
+                    FROM payment_allocations
+                    WHERE payment_event_id = ?
+                    """,
+                    (payment_event_id,),
+                ).fetchone()[0]
+            )
+            if allocated_cents:
+                raise ManualPaymentAllocationConflictStorageError(allocated_cents)
+            cursor = connection.execute(
+                """
+                INSERT INTO manual_payment_revisions (
+                    manual_evidence_id, revision_type, sender_name, amount_cents,
+                    occurred_on, note, reason, created_at
+                ) VALUES (?, 'void', ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    manual_evidence_id,
+                    current["sender_name"],
+                    current["amount_cents"],
+                    current["occurred_on"],
+                    current["memo"],
+                    reason,
+                    created_at,
+                ),
+            )
+            revision_id = int(cursor.lastrowid)
+            connection.execute(
+                "UPDATE payment_events SET voided_at = ? WHERE id = ?",
+                (created_at, payment_event_id),
+            )
+            updated = connection.execute(
+                "SELECT * FROM payment_events WHERE id = ?", (payment_event_id,)
+            ).fetchone()
+
+        revision = ManualPaymentRevisionRecord(
+            revision_id,
+            manual_evidence_id,
+            "void",
+            str(current["sender_name"]),
+            int(current["amount_cents"]),
+            str(current["occurred_on"]),
+            current["memo"],
+            reason,
+            created_at,
+        )
+        return ManualPaymentRevisionStorageResult(
+            revision, _payment_event_record(updated)
+        )
+
+    def get_history(self, payment_event_id: int) -> ManualPaymentHistoryStorageResult:
+        with self._connect() as connection:
+            payment = connection.execute(
+                "SELECT * FROM payment_events WHERE id = ?", (payment_event_id,)
+            ).fetchone()
+            if payment is None:
+                raise ManualPaymentNotFoundStorageError
+            if payment["manual_evidence_id"] is None:
+                raise ManualPaymentGmailDerivedStorageError
+            evidence = connection.execute(
+                "SELECT * FROM manual_payment_evidence WHERE id = ?",
+                (payment["manual_evidence_id"],),
+            ).fetchone()
+            if evidence is None:
+                raise ManualPaymentNotFoundStorageError
+            revisions = connection.execute(
+                """
+                SELECT * FROM manual_payment_revisions
+                WHERE manual_evidence_id = ?
+                ORDER BY id
+                """,
+                (payment["manual_evidence_id"],),
+            ).fetchall()
+        return ManualPaymentHistoryStorageResult(
+            ManualPaymentEvidenceRecord(**dict(evidence)),
+            tuple(ManualPaymentRevisionRecord(**dict(row)) for row in revisions),
+            _payment_event_record(payment),
+        )
+
+
+def _require_active_manual_payment(payment: sqlite3.Row | None) -> int:
+    if payment is None:
+        raise ManualPaymentNotFoundStorageError
+    if payment["manual_evidence_id"] is None:
+        raise ManualPaymentGmailDerivedStorageError
+    if payment["voided_at"] is not None:
+        raise ManualPaymentVoidedStorageError
+    return int(payment["manual_evidence_id"])
+
+
+def _matching_manual_payments(
+    connection: sqlite3.Connection,
+    sender_name: str,
+    amount_cents: int,
+    occurred_on: str,
+    normalize_sender: Callable[[str], str],
+    *,
+    exclude_payment_event_id: int | None = None,
+) -> tuple[ManualPaymentDuplicateRecord, ...]:
+    rows = connection.execute(
+        """
+        SELECT
+            payment_events.id AS payment_event_id,
+            manual_payment_evidence.id AS manual_evidence_id,
+            payment_events.sender_name,
+            payment_events.amount_cents,
+            payment_events.occurred_on
+        FROM payment_events
+        JOIN manual_payment_evidence
+            ON manual_payment_evidence.id = payment_events.manual_evidence_id
+        WHERE payment_events.amount_cents = ?
+            AND payment_events.occurred_on = ?
+            AND payment_events.voided_at IS NULL
+            AND (? IS NULL OR payment_events.id != ?)
+        ORDER BY payment_events.id
+        """,
+        (amount_cents, occurred_on, exclude_payment_event_id, exclude_payment_event_id),
+    ).fetchall()
+    normalized_sender = normalize_sender(sender_name)
+    return tuple(
+        ManualPaymentDuplicateRecord(**dict(row))
+        for row in rows
+        if normalize_sender(str(row["sender_name"])) == normalized_sender
+    )
 
 
 class SQLitePayerRepository:
@@ -1657,12 +1950,22 @@ class SQLiteAllocationRepository:
         created_at = datetime.now(UTC).isoformat()
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
+            payment_columns = {
+                str(row[1])
+                for row in connection.execute("PRAGMA table_info(payment_events)")
+            }
+            voided_projection = (
+                "voided_at" if "voided_at" in payment_columns else "NULL AS voided_at"
+            )
             payment = connection.execute(
-                "SELECT amount_cents FROM payment_events WHERE id = ?",
+                f"SELECT amount_cents, {voided_projection} "
+                "FROM payment_events WHERE id = ?",
                 (payment_event_id,),
             ).fetchone()
             if payment is None:
                 raise AllocationPaymentNotFoundError
+            if payment["voided_at"] is not None:
+                raise AllocationPaymentVoidedError
 
             obligation = connection.execute(
                 "SELECT amount_cents FROM rent_obligations WHERE id = ?",
@@ -1908,6 +2211,7 @@ class SQLiteReportingRepository:
                     ON payment_allocations.payment_event_id = payment_events.id
                 WHERE payment_events.occurred_on >= ?
                     AND payment_events.occurred_on < ?
+                    AND payment_events.voided_at IS NULL
                 GROUP BY payment_events.id, payment_events.amount_cents
                 ORDER BY payment_events.id
                 """,
@@ -1946,7 +2250,8 @@ class SQLitePaymentListingRepository:
                         payment_events.provider,
                         payment_events.sender_name,
                         payment_events.amount_cents,
-                        0 AS allocated_cents
+                        0 AS allocated_cents,
+                        payment_events.voided_at
                     FROM payment_events
                     ORDER BY payment_events.id
                     """
@@ -1960,7 +2265,8 @@ class SQLitePaymentListingRepository:
                     payment_events.provider,
                     payment_events.sender_name,
                     payment_events.amount_cents,
-                    COALESCE(SUM(payment_allocations.amount_cents), 0) AS allocated_cents
+                    COALESCE(SUM(payment_allocations.amount_cents), 0) AS allocated_cents,
+                    payment_events.voided_at
                 FROM payment_events
                 LEFT JOIN payment_allocations
                     ON payment_allocations.payment_event_id = payment_events.id
@@ -1969,7 +2275,8 @@ class SQLitePaymentListingRepository:
                     payment_events.occurred_on,
                     payment_events.provider,
                     payment_events.sender_name,
-                    payment_events.amount_cents
+                    payment_events.amount_cents,
+                    payment_events.voided_at
                 ORDER BY payment_events.id
                 """
             ).fetchall()
@@ -2015,6 +2322,7 @@ class SQLiteReviewRepository:
                 """
                 SELECT sender_name, COUNT(*) AS count
                 FROM payment_events
+                WHERE voided_at IS NULL
                 GROUP BY sender_name
                 ORDER BY sender_name COLLATE NOCASE, sender_name
                 """
@@ -2039,6 +2347,7 @@ class SQLiteReviewRepository:
                 FROM payment_events
                 LEFT JOIN payment_allocations
                     ON payment_allocations.payment_event_id = payment_events.id
+                WHERE payment_events.voided_at IS NULL
                 GROUP BY payment_events.id, payment_events.amount_cents
                 ORDER BY payment_events.id
                 """
@@ -2079,10 +2388,10 @@ class SQLiteSuggestionRepository:
     def list_payment_sources(
         self, payment_event_id: int | None = None
     ) -> list[SuggestionPaymentSourceRecord]:
-        where_clause = ""
+        where_clause = "WHERE payment_events.voided_at IS NULL"
         parameters: tuple[int, ...] = ()
         if payment_event_id is not None:
-            where_clause = "WHERE payment_events.id = ?"
+            where_clause += " AND payment_events.id = ?"
             parameters = (payment_event_id,)
         with self._connect() as connection:
             rows = connection.execute(

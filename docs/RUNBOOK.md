@@ -16,6 +16,9 @@ database-backed command when using a non-default database.
 - [Add a new payer](#add-a-new-payer)
 - [Add a unit, rent account, association, and schedule](#add-a-unit-rent-account-association-and-schedule)
 - [Enter a historical payment without Gmail evidence](#enter-a-historical-payment-without-gmail-evidence)
+- [Correct a manual payment](#correct-a-manual-payment)
+- [Void a manual payment](#void-a-manual-payment)
+- [Inspect manual payment history](#inspect-manual-payment-history)
 - [Payment is unresolved](#payment-is-unresolved)
 - [Payment is unallocated](#payment-is-unallocated)
 - [Partial payment](#partial-payment)
@@ -329,7 +332,59 @@ autorentledger reconcile --period 2026-05
 `manual-add` means “this payment happened.” `allocation add` separately means “this money
 satisfied this obligation.” Manual payments appear in the normal payment list, review queue,
 suggestions, reporting, overview, and read-only web Payments page. They are not parser-rebuild
-candidates. M22A intentionally provides no manual edit, delete, or void command.
+candidates. There is no generic payment editor or destructive delete command.
+
+## Correct a manual payment
+
+Use an audited correction when an explicitly entered manual payment has the wrong sender, amount,
+date, or note. Supply only the fields that need changing; omitted fields carry forward from the
+current effective state. A reason and at least one changed field are required:
+
+```powershell
+autorentledger payment manual-correct 42 `
+  --date 2026-05-04 `
+  --note "Corrected historical entry" `
+  --reason "Payment date was copied incorrectly"
+```
+
+The original `manual_payment_evidence` row remains unchanged. AutoRentLedger appends a full
+correction revision and updates the same normalized payment event atomically, preserving its ID,
+source link, and allocations. `--note ""` clears the effective note. A corrected amount cannot be
+less than the amount already allocated. A correction that matches another active manual payment's
+normalized sender, amount, and date is blocked unless the separate payment is confirmed with
+`--confirm-duplicate`.
+
+Changing the sender causes exact-alias payer resolution to recompute; changing the date changes
+occurrence-month payment intake. Neither change moves an allocation or edits an obligation.
+Gmail-derived payments cannot use `manual-correct`; their only re-derivation path is parser rebuild.
+
+## Void a manual payment
+
+Use a void when a manual payment should not have been entered at all:
+
+```powershell
+autorentledger payment manual-void 42 `
+  --reason "Duplicate historical entry"
+```
+
+The manual evidence, normalized payment row, and revision history remain stored. The payment is
+marked voided and no longer contributes to review, suggestions, payment intake, reporting, or the
+owner overview. It cannot receive a new allocation. Existing allocations must first be removed
+explicitly with `autorentledger allocation remove ALLOCATION_ID`; void never removes allocations
+or changes obligations automatically. Gmail-derived and already-voided payments are rejected.
+There is no delete or unvoid command.
+
+## Inspect manual payment history
+
+Display the immutable original entry, each full correction/void revision, its reason, and current
+status:
+
+```powershell
+autorentledger payment manual-history 42
+```
+
+This command is read-only. It rejects Gmail-derived payments because their provenance and rebuild
+workflow are different.
 
 ## Payment is unresolved
 

@@ -36,6 +36,7 @@
               <th>Date</th>
               <th>Sender</th>
               <th>Provider</th>
+              <th>Status</th>
               <th class="money">Amount</th>
               <th>Payer</th>
               <th class="money">Allocated</th>
@@ -49,6 +50,7 @@
                 <td>{{ payment.occurred_on if payment.occurred_on else "Unknown" }}</td>
                 <td>{{ payment.sender_name }}</td>
                 <td>{{ payment.provider }}</td>
+                <td>{% if payment.voided_at %}<span class="status-badge">VOIDED</span>{% else %}ACTIVE{% endif %}</td>
                 <td class="money">{{ payment.amount_cents|money }}</td>
                 <td>{% if payment.payer_id is none %}<span class="unresolved">Unresolved</span>{% else %}{{ payment.payer_display_name }}{% endif %}</td>
                 <td class="money">{{ payment.allocated_cents|money }}</td>

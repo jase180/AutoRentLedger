@@ -11,7 +11,7 @@ from pathlib import Path
 
 from autorentledger.parsing.version import LEGACY_UNVERSIONED_PARSER_VERSION
 
-CURRENT_SCHEMA_VERSION = 9
+CURRENT_SCHEMA_VERSION = 10
 
 RAW_EMAILS_SQL = """
     CREATE TABLE IF NOT EXISTS raw_emails (
@@ -53,7 +53,7 @@ MANUAL_PAYMENT_EVIDENCE_SQL = """
     )
 """
 
-PAYMENT_EVENTS_SQL = """
+PAYMENT_EVENTS_V9_SQL = """
     CREATE TABLE IF NOT EXISTS payment_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         raw_email_id INTEGER UNIQUE,
@@ -73,6 +73,50 @@ PAYMENT_EVENTS_SQL = """
         FOREIGN KEY (raw_email_id)
             REFERENCES raw_emails(id)
             ON DELETE RESTRICT,
+        FOREIGN KEY (manual_evidence_id)
+            REFERENCES manual_payment_evidence(id)
+            ON DELETE RESTRICT
+    )
+"""
+
+PAYMENT_EVENTS_SQL = """
+    CREATE TABLE IF NOT EXISTS payment_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        raw_email_id INTEGER UNIQUE,
+        manual_evidence_id INTEGER UNIQUE,
+        provider TEXT NOT NULL,
+        sender_name TEXT NOT NULL,
+        amount_cents INTEGER NOT NULL,
+        occurred_on TEXT,
+        memo TEXT,
+        parsed_at TEXT NOT NULL,
+        parser_version TEXT NOT NULL,
+        voided_at TEXT,
+        CHECK (
+            (raw_email_id IS NOT NULL AND manual_evidence_id IS NULL)
+            OR
+            (raw_email_id IS NULL AND manual_evidence_id IS NOT NULL)
+        ),
+        FOREIGN KEY (raw_email_id)
+            REFERENCES raw_emails(id)
+            ON DELETE RESTRICT,
+        FOREIGN KEY (manual_evidence_id)
+            REFERENCES manual_payment_evidence(id)
+            ON DELETE RESTRICT
+    )
+"""
+
+MANUAL_PAYMENT_REVISIONS_SQL = """
+    CREATE TABLE IF NOT EXISTS manual_payment_revisions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        manual_evidence_id INTEGER NOT NULL,
+        revision_type TEXT NOT NULL CHECK (revision_type IN ('correction', 'void')),
+        sender_name TEXT NOT NULL CHECK (length(trim(sender_name)) > 0),
+        amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+        occurred_on TEXT NOT NULL,
+        note TEXT,
+        reason TEXT NOT NULL CHECK (length(trim(reason)) > 0),
+        created_at TEXT NOT NULL,
         FOREIGN KEY (manual_evidence_id)
             REFERENCES manual_payment_evidence(id)
             ON DELETE RESTRICT
@@ -215,10 +259,24 @@ EXPECTED_COLUMNS: dict[str, frozenset[str]] = {
             "memo",
             "parsed_at",
             "parser_version",
+            "voided_at",
         }
     ),
     "manual_payment_evidence": frozenset(
         {"id", "sender_name", "amount_cents", "occurred_on", "note", "created_at"}
+    ),
+    "manual_payment_revisions": frozenset(
+        {
+            "id",
+            "manual_evidence_id",
+            "revision_type",
+            "sender_name",
+            "amount_cents",
+            "occurred_on",
+            "note",
+            "reason",
+            "created_at",
+        }
     ),
     "payers": frozenset({"id", "display_name", "created_at"}),
     "payer_aliases": frozenset(
@@ -277,19 +335,29 @@ TABLES_BY_VERSION: dict[int, frozenset[str]] = {
         }
     ),
     6: frozenset(
-        set(EXPECTED_COLUMNS) - {"rent_schedules", "manual_payment_evidence"}
+        set(EXPECTED_COLUMNS)
+        - {"rent_schedules", "manual_payment_evidence", "manual_payment_revisions"}
     ),
-    7: frozenset(set(EXPECTED_COLUMNS) - {"manual_payment_evidence"}),
-    8: frozenset(set(EXPECTED_COLUMNS) - {"manual_payment_evidence"}),
-    9: frozenset(EXPECTED_COLUMNS),
+    7: frozenset(
+        set(EXPECTED_COLUMNS)
+        - {"manual_payment_evidence", "manual_payment_revisions"}
+    ),
+    8: frozenset(
+        set(EXPECTED_COLUMNS)
+        - {"manual_payment_evidence", "manual_payment_revisions"}
+    ),
+    9: frozenset(set(EXPECTED_COLUMNS) - {"manual_payment_revisions"}),
+    10: frozenset(EXPECTED_COLUMNS),
 }
 
 PAYMENT_EVENT_COLUMNS_V7 = frozenset(
-    EXPECTED_COLUMNS["payment_events"] - {"parser_version", "manual_evidence_id"}
+    EXPECTED_COLUMNS["payment_events"]
+    - {"parser_version", "manual_evidence_id", "voided_at"}
 )
 PAYMENT_EVENT_COLUMNS_V8 = frozenset(
-    EXPECTED_COLUMNS["payment_events"] - {"manual_evidence_id"}
+    EXPECTED_COLUMNS["payment_events"] - {"manual_evidence_id", "voided_at"}
 )
+PAYMENT_EVENT_COLUMNS_V9 = frozenset(EXPECTED_COLUMNS["payment_events"] - {"voided_at"})
 
 
 class DatabaseSchemaError(RuntimeError):
@@ -350,6 +418,7 @@ def create_raw_email_schema(connection: sqlite3.Connection) -> None:
 def create_payment_event_schema(connection: sqlite3.Connection) -> None:
     connection.execute(MANUAL_PAYMENT_EVIDENCE_SQL)
     connection.execute(PAYMENT_EVENTS_SQL)
+    connection.execute(MANUAL_PAYMENT_REVISIONS_SQL)
 
 
 def create_payment_event_v2_schema(connection: sqlite3.Connection) -> None:
@@ -392,7 +461,7 @@ def add_manual_payment_evidence(connection: sqlite3.Connection) -> None:
     connection.execute(MANUAL_PAYMENT_EVIDENCE_SQL)
     connection.execute("ALTER TABLE payment_allocations RENAME TO payment_allocations_v8")
     connection.execute("ALTER TABLE payment_events RENAME TO payment_events_v8")
-    connection.execute(PAYMENT_EVENTS_SQL)
+    connection.execute(PAYMENT_EVENTS_V9_SQL)
     connection.execute(
         """
         INSERT INTO payment_events (
@@ -421,6 +490,12 @@ def add_manual_payment_evidence(connection: sqlite3.Connection) -> None:
     connection.execute("DROP TABLE payment_events_v8")
 
 
+def add_manual_payment_revisions(connection: sqlite3.Connection) -> None:
+    """Add append-only manual audit history and explicit void projection state."""
+    connection.execute("ALTER TABLE payment_events ADD COLUMN voided_at TEXT")
+    connection.execute(MANUAL_PAYMENT_REVISIONS_SQL)
+
+
 MIGRATIONS: dict[int, Migration] = {
     1: create_raw_email_schema,
     2: create_payment_event_v2_schema,
@@ -431,6 +506,7 @@ MIGRATIONS: dict[int, Migration] = {
     7: create_rent_schedule_schema,
     8: add_payment_parser_provenance,
     9: add_manual_payment_evidence,
+    10: add_manual_payment_revisions,
 }
 
 
@@ -594,6 +670,8 @@ def _expected_columns(table: str, version: int) -> frozenset[str]:
         return PAYMENT_EVENT_COLUMNS_V7
     if table == "payment_events" and version < 9:
         return PAYMENT_EVENT_COLUMNS_V8
+    if table == "payment_events" and version < 10:
+        return PAYMENT_EVENT_COLUMNS_V9
     return EXPECTED_COLUMNS[table]
 
 

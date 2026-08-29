@@ -410,8 +410,8 @@ def test_v6_to_current_upgrade_preserves_prior_rows_and_adds_new_schema_state(tm
 
     after = database_snapshot(database_path)
     assert result.from_version == 6
-    assert result.to_version == CURRENT_SCHEMA_VERSION == 9
-    assert after[0] == 9
+    assert result.to_version == CURRENT_SCHEMA_VERSION == 10
+    assert after[0] == 10
     for table, rows in before[1].items():
         assert after[1][table] == rows
     assert after[1]["rent_schedules"] == []

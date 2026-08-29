@@ -7,6 +7,7 @@ from autorentledger.storage import (
     AllocationObligationNotFoundError,
     AllocationPairExistsError,
     AllocationPaymentNotFoundError,
+    AllocationPaymentVoidedError,
     PaymentAllocationRecord,
     SQLiteAllocationRepository,
 )
@@ -36,6 +37,10 @@ def create_allocation(
     except AllocationPaymentNotFoundError as error:
         raise AllocationValidationError(
             f"Payment {payment_event_id} does not exist."
+        ) from error
+    except AllocationPaymentVoidedError as error:
+        raise AllocationValidationError(
+            f"Payment {payment_event_id} is voided and cannot be allocated."
         ) from error
     except AllocationObligationNotFoundError as error:
         raise AllocationValidationError(

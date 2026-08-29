@@ -14,6 +14,7 @@ general property-management system.
 - Searches Gmail for candidate payment notifications without modifying messages or labels.
 - Stores immutable raw MIME evidence locally and ingests it idempotently.
 - Stores explicit manual evidence for historical payments that did not originate in Gmail.
+- Preserves append-only correction and void history for manual payment evidence.
 - Deterministically parses supported Chase and U.S. Bank Zelle notifications into payment events.
 - Resolves observed sender names through explicitly managed payer aliases.
 - Models units, household-style rent accounts, recurring schedules, and monthly obligations.
@@ -186,6 +187,9 @@ LAN, Tailscale-IP, and public binding. See the runbook for private Tailscale Ser
 | Inspect focused exceptions | `autorentledger review` |
 | List normalized payments | `autorentledger payments` |
 | Record historical/manual payment evidence | `autorentledger payment manual-add --sender "Synthetic Tenant" --amount 1450.00 --date 2026-05-03` |
+| Correct a manual payment without replacing its original evidence | `autorentledger payment manual-correct ID --date 2026-05-04 --reason "Date entered incorrectly"` |
+| Void an erroneous unallocated manual payment | `autorentledger payment manual-void ID --reason "Duplicate historical entry"` |
+| Inspect a manual payment's audit history | `autorentledger payment manual-history ID` |
 | Preview conservative allocation suggestions | `autorentledger allocation suggestions` |
 | Allocate payment money explicitly | `autorentledger allocation add --payment ID --obligation ID --amount 675.00` |
 | Preview monthly obligation generation | `autorentledger obligations generate --period YYYY-MM --dry-run` |
@@ -226,6 +230,9 @@ Observed evidence and historical accounting are intentionally protected:
 - Raw email evidence is immutable.
 - Gmail-derived payment events can only be re-derived through the explicit parser rebuild
   workflow; manual payment events are never parser-rebuild candidates.
+- Manual payment corrections append a full effective-state revision while updating the same
+  normalized payment projection. Voids deactivate the projection without deleting evidence or
+  history; neither operation applies to Gmail-derived payments.
 - Existing obligations are never overwritten by schedules.
 - Allocations are created and removed explicitly; suggestions never apply themselves.
 - Reporting, review, reconciliation, suggestions, health checks, and overview are read-only.
@@ -263,7 +270,7 @@ pytest
 
 GitHub Actions runs the same checks on Python 3.11 for every push and pull request. Tests use
 synthetic local fixtures and require no Gmail credentials, network access, or operational database.
-The current SQLite schema version is 9.
+The current SQLite schema version is 10.
 
 The application uses Python, standard-library `sqlite3`, and a small service/repository structure
 under `src/autorentledger/`. Gmail remains behind an email-source adapter; domain and read-model

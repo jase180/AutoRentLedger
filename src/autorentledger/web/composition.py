@@ -115,16 +115,17 @@ def build_web_payments(
     visible = tuple(
         record
         for record in records
-        if (not unallocated_only or record.unallocated_cents > 0)
-        and (not unresolved_only or record.payer_id is None)
+        if (not unallocated_only or (record.voided_at is None and record.unallocated_cents > 0))
+        and (not unresolved_only or (record.voided_at is None and record.payer_id is None))
     )
+    active_visible = tuple(record for record in visible if record.voided_at is None)
     return PaymentsPage(
         records=visible,
         unallocated_only=unallocated_only,
         unresolved_only=unresolved_only,
-        observed_cents=sum(record.amount_cents for record in visible),
-        allocated_cents=sum(record.allocated_cents for record in visible),
-        unallocated_cents=sum(record.unallocated_cents for record in visible),
+        observed_cents=sum(record.amount_cents for record in active_visible),
+        allocated_cents=sum(record.allocated_cents for record in active_visible),
+        unallocated_cents=sum(record.unallocated_cents for record in active_visible),
     )
 
 
