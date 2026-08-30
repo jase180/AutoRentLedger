@@ -130,12 +130,24 @@ from autorentledger.storage.sqlite import (
     SQLiteReportingRepository,
     SQLiteReviewRepository,
     SQLiteSuggestionRepository,
+    SQLiteTenancySetupRepository,
 )
 from autorentledger.suggestions import (
     SuggestionInvariantError,
     SuggestionPaymentNotFoundError,
     SuggestionReason,
     find_allocation_suggestions,
+)
+from autorentledger.tenancy_setup import (
+    SetupAction,
+    TenancySetupConflictError,
+    TenancySetupNotFoundError,
+    TenancySetupPreview,
+    TenancySetupRequest,
+    TenancySetupResult,
+    TenancySetupValidationError,
+    apply_tenancy_setup,
+    preview_tenancy_setup,
 )
 from autorentledger.web import (
     WebAuthConfigurationError,
@@ -251,6 +263,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
     manual_history.add_argument("payment_id", type=int)
     manual_history.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+    setup = subparsers.add_parser("setup", help="preview or apply guided setup workflows")
+    setup_commands = setup.add_subparsers(dest="setup_command", required=True)
+    tenancy = setup_commands.add_parser(
+        "tenancy", help="preview or create one tenancy configuration"
+    )
+    unit_choice = tenancy.add_mutually_exclusive_group(required=True)
+    unit_choice.add_argument("--unit", type=int)
+    unit_choice.add_argument("--unit-label")
+    tenancy.add_argument("--account-name", required=True)
+    tenancy.add_argument("--active-from")
+    tenancy.add_argument("--active-to")
+    payer_choice = tenancy.add_mutually_exclusive_group(required=True)
+    payer_choice.add_argument("--payer", type=int)
+    payer_choice.add_argument("--payer-name")
+    tenancy.add_argument("--alias", action="append", default=[])
+    tenancy.add_argument("--rent")
+    tenancy.add_argument("--due-day", type=int)
+    tenancy.add_argument("--apply", action="store_true")
+    tenancy.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
 
     payer = subparsers.add_parser("payer", help="manage payer identities")
     payer_commands = payer.add_subparsers(dest="payer_command", required=True)
@@ -886,6 +918,115 @@ def _print_manual_state(
     print(f"  {_format_currency(amount_cents)}")
     if note is not None:
         print(f"  Note: {note}")
+
+
+def run_tenancy_setup(
+    database_path: Path,
+    *,
+    unit_id: int | None,
+    unit_label: str | None,
+    account_name: str,
+    active_from: str | None,
+    active_to: str | None,
+    payer_id: int | None,
+    payer_name: str | None,
+    aliases: Sequence[str],
+    rent: str | None,
+    due_day: int | None,
+    apply: bool,
+) -> int:
+    request = TenancySetupRequest(
+        account_name=account_name,
+        unit_id=unit_id,
+        unit_label=unit_label,
+        active_from=active_from,
+        active_to=active_to,
+        payer_id=payer_id,
+        payer_name=payer_name,
+        aliases=tuple(aliases),
+        rent=rent,
+        due_day=due_day,
+    )
+    repository = SQLiteTenancySetupRepository(database_path)
+    try:
+        if apply:
+            _print_tenancy_result(apply_tenancy_setup(repository, request))
+        else:
+            _print_tenancy_preview(preview_tenancy_setup(repository, request))
+    except (
+        TenancySetupConflictError,
+        TenancySetupNotFoundError,
+        TenancySetupValidationError,
+    ) as error:
+        print(error)
+        return 1
+    except sqlite3.Error:
+        print("Tenancy setup failed. Run `autorentledger db check` for details.")
+        return 1
+    return 0
+
+
+def _print_tenancy_preview(preview: TenancySetupPreview) -> None:
+    print("Tenancy setup preview")
+    print("Unit:")
+    if preview.unit_action is SetupAction.REUSE:
+        print(f"  REUSE {preview.unit_id} - {preview.unit_label}")
+    else:
+        print(f'  CREATE "{preview.unit_label}"')
+    print("Rent account:")
+    print(f'  CREATE "{preview.account_name}"')
+    print(f"  Active from: {preview.active_from or '-'}")
+    print(f"  Active to: {preview.active_to or '-'}")
+    print("Payer:")
+    if preview.payer_action is SetupAction.REUSE:
+        print(f"  REUSE {preview.payer_id} - {preview.payer_name}")
+    else:
+        print(f'  CREATE "{preview.payer_name}"')
+    print("Aliases:")
+    if preview.aliases:
+        for alias in preview.aliases:
+            print(f"  {alias.action} {alias.alias}")
+    else:
+        print("  None.")
+    print("Association:")
+    print("  CREATE payer -> new rent account")
+    print("Schedule:")
+    if preview.rent_cents is None:
+        print("  None.")
+    else:
+        print(
+            f"  CREATE {_format_currency(preview.rent_cents)} "
+            f"due day {preview.due_day}"
+        )
+        print(f"  Active from: {preview.active_from}")
+        print(f"  Active to: {preview.active_to or '-'}")
+    print("No obligations, payments, or allocations will be created.")
+    print("Re-run with --apply to create this setup.")
+
+
+def _print_tenancy_result(result: TenancySetupResult) -> None:
+    print("Created tenancy setup")
+    unit_suffix = " (reused)" if result.unit_reused else ""
+    payer_suffix = " (reused)" if result.payer_reused else ""
+    print(f"Unit: {result.unit.id} - {result.unit.label}{unit_suffix}")
+    print(f"Rent account: {result.account.id} - {result.account.display_name}")
+    print(f"Payer: {result.payer.id} - {result.payer.display_name}{payer_suffix}")
+    print("Aliases:")
+    if result.aliases:
+        for item in result.aliases:
+            suffix = " (reused)" if item.reused else ""
+            print(f"  {item.alias.alias}{suffix}")
+    else:
+        print("  None.")
+    if result.schedule is None:
+        print("Schedule: none")
+    else:
+        print(
+            f"Schedule: {result.schedule.id} - "
+            f"{_format_currency(result.schedule.amount_cents)} "
+            f"due day {result.schedule.due_day}"
+        )
+    print("No obligations, payments, or allocations were created.")
 
 
 def run_payment_rebuild(
@@ -1849,6 +1990,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.payment_command == "manual-history":
             return run_manual_payment_history(args.database, args.payment_id)
         raise AssertionError(f"Unhandled payment command: {args.payment_command}")
+    if args.command == "setup":
+        if args.setup_command == "tenancy":
+            return run_tenancy_setup(
+                args.database,
+                unit_id=args.unit,
+                unit_label=args.unit_label,
+                account_name=args.account_name,
+                active_from=args.active_from,
+                active_to=args.active_to,
+                payer_id=args.payer,
+                payer_name=args.payer_name,
+                aliases=args.alias,
+                rent=args.rent,
+                due_day=args.due_day,
+                apply=args.apply,
+            )
+        raise AssertionError(f"Unhandled setup command: {args.setup_command}")
     if args.command == "payer":
         if args.payer_command == "add":
             return run_payer_add(args.database, args.display_name)

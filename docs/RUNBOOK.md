@@ -13,6 +13,7 @@ database-backed command when using a non-default database.
 - [Scheduled daily operation](#scheduled-daily-operation)
 - [Local read-only web view](#local-read-only-web-view)
 - [Monthly setup](#monthly-setup)
+- [Bootstrap a tenancy](#bootstrap-a-tenancy)
 - [Add a new payer](#add-a-new-payer)
 - [Add a unit, rent account, association, and schedule](#add-a-unit-rent-account-association-and-schedule)
 - [Enter a historical payment without Gmail evidence](#enter-a-historical-payment-without-gmail-evidence)
@@ -227,6 +228,80 @@ exists. Running generation again is idempotent.
 A schedule that overlaps any part of the requested month creates a full monthly obligation; there
 is no proration. Changing or ending a schedule never changes an obligation that already exists.
 Manual obligations remain supported and take precedence by causing generation to skip that month.
+
+## Bootstrap a tenancy
+
+`setup tenancy` is a preview-first convenience wrapper over the existing unit, rent-account,
+payer, alias, payer-association, and rent-schedule primitives. It does not introduce a tenant or
+occupant model. It also never creates obligations, payments, or allocations.
+
+Preview a setup using a new unit and a new payer:
+
+```powershell
+autorentledger setup tenancy `
+  --unit-label "2F" `
+  --account-name "Synthetic Household" `
+  --active-from 2026-05-01 `
+  --payer-name "Synthetic Tenant" `
+  --alias "SYNTHETIC TENANT" `
+  --alias "Synthetic A Tenant" `
+  --rent 1450.00 `
+  --due-day 1
+```
+
+The default output is a plan only. It validates the full request, reports CREATE versus REUSE, and
+writes zero rows. A new payer's display name is automatically included as an alias. Normalized
+duplicates collapse safely, so `Synthetic Tenant` and `SYNTHETIC TENANT` create only one alias in
+the example. Alias matching remains trim/collapse/casefold normalization followed by an exact key
+lookup—there is no fuzzy matching.
+
+After reviewing the plan, apply the same command explicitly:
+
+```powershell
+autorentledger setup tenancy `
+  --unit-label "2F" `
+  --account-name "Synthetic Household" `
+  --active-from 2026-05-01 `
+  --payer-name "Synthetic Tenant" `
+  --alias "SYNTHETIC TENANT" `
+  --alias "Synthetic A Tenant" `
+  --rent 1450.00 `
+  --due-day 1 `
+  --apply
+```
+
+Apply is one SQLite transaction: a late alias, association, or schedule failure rolls back every
+new setup record. A second run using `--unit-label "2F"` fails after creation rather than silently
+reusing the unit; use the printed ID explicitly when reuse is intended.
+
+To create a new rent account while reusing an existing unit and payer, supply their IDs. Existing
+payers receive only explicitly supplied aliases; their display name is not added automatically:
+
+```powershell
+autorentledger setup tenancy `
+  --unit 3 `
+  --account-name "Another Synthetic Household" `
+  --active-from 2026-09-01 `
+  --payer 7 `
+  --alias "SYNTHETIC TENANT ZELLE" `
+  --rent 1500.00 `
+  --due-day 1
+```
+
+An alias already owned by payer 7 is shown as REUSE. An alias owned by another payer aborts setup;
+it is never reassigned. A payer display-name match never causes reuse—use `--payer ID` explicitly.
+The schedule is optional: omit both `--rent` and `--due-day` to create none. When requested, both
+are required along with `--active-from`, and the schedule inherits the rent account's active
+dates. Generate obligations later through the separate preview/apply workflow:
+
+```powershell
+autorentledger obligations generate --period 2026-09 --dry-run
+autorentledger obligations generate --period 2026-09
+```
+
+A payer is the observed sender identity and is not necessarily the tenant or occupant. The rent
+account remains the household/account configuration, and allocation remains a separate explicit
+accounting decision.
 
 ## Add a new payer
 

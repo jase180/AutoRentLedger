@@ -157,6 +157,28 @@ autorentledger overview --period 2026-09
 `sync` may add raw emails and new payment events. It does not generate obligations, create
 allocations, rebuild old payment events, or change identity/rental configuration.
 
+### Bootstrap one tenancy
+
+Preview a new unit, rent account, payer, aliases, association, and optional schedule in one
+deterministic plan:
+
+```powershell
+autorentledger setup tenancy `
+  --unit-label "2F" `
+  --account-name "Synthetic Household" `
+  --active-from 2026-05-01 `
+  --payer-name "Synthetic Tenant" `
+  --alias "SYNTHETIC TENANT" `
+  --rent 1450.00 `
+  --due-day 1
+```
+
+Preview is the default and writes nothing. Add `--apply` only after reviewing each CREATE or REUSE
+action. The command is a convenience wrapper over the existing primitives; it creates no tenant
+model, obligations, payments, or allocations. Payers remain distinct from rent accounts, and
+sender resolution remains exact after conservative alias normalization. See the runbook for new
+and reused-record examples.
+
 ### Local read-only web view
 
 Serve the same canonical owner overview in a local browser:
@@ -183,6 +205,7 @@ LAN, Tailscale-IP, and public binding. See the runbook for private Tailscale Ser
 | Refresh evidence and current attention | `autorentledger sync` |
 | Create a verified backup, sync, and summarize attention | `autorentledger daily` |
 | Open the local read-only browser view | `autorentledger web` |
+| Preview one guided tenancy setup | `autorentledger setup tenancy ...` |
 | Inspect the owner dashboard | `autorentledger overview --period YYYY-MM` |
 | Inspect focused exceptions | `autorentledger review` |
 | List normalized payments | `autorentledger payments` |
