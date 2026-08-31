@@ -43,6 +43,8 @@ overviews are recomputed read models rather than persisted workflow state.
 - Manual evidence is append-audited. Corrections preserve the original evidence, append a full
   effective-state revision, and update the same normalized payment projection atomically. A void
   appends history and deactivates that projection without deleting either record.
+- Gmail evidence is immutable. An explicit Gmail-payment void appends a separate audit record and
+  deactivates the same normalized payment event without changing its ID, parsed facts, or raw email.
 - A payer is not a rent account, a payment is not an allocation, and a schedule is not an
   obligation.
 - Actual obligations state what was owed. Schedules can explicitly generate missing obligations

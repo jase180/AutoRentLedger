@@ -406,7 +406,7 @@ def test_service_and_cli_are_strictly_read_only_and_private(tmp_path, capsys):
     assert obligation.id > 0
 
     version, tables, _ = before
-    assert version == CURRENT_SCHEMA_VERSION == 10
+    assert version == CURRENT_SCHEMA_VERSION == 11
     assert not any(
         word in table for table in tables for word in ("overview", "dashboard", "cache", "status")
     )

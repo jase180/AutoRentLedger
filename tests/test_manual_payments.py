@@ -290,8 +290,8 @@ def test_manual_add_cli_output_duplicate_override_and_schema_guard(tmp_path, cap
     assert main([*args, "--confirm-duplicate"]) == 0
     assert table_count(database_path, "payment_events") == 2
     with sqlite3.connect(database_path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 10
-    assert CURRENT_SCHEMA_VERSION == 10
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 11
+    assert CURRENT_SCHEMA_VERSION == 11
 
 
 def test_sync_and_processing_do_not_modify_manual_evidence(tmp_path):

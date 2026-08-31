@@ -309,7 +309,7 @@ def test_app_factory_is_side_effect_free_and_registers_auth_and_ledger_routes(tm
     assert app.config["SESSION_COOKIE_SAMESITE"] == "Lax"
     assert app.config["SESSION_COOKIE_SECURE"] is False
     assert database_snapshot(database_path) == before
-    assert before[0] == CURRENT_SCHEMA_VERSION == 10
+    assert before[0] == CURRENT_SCHEMA_VERSION == 11
     assert {rule.rule for rule in app.url_map.iter_rules()} == {
         "/",
         "/attention",
@@ -468,7 +468,7 @@ def test_authentication_and_all_authenticated_views_never_mutate_database(tmp_pa
     assert client.post("/logout").status_code == 302
 
     assert database_snapshot(database_path) == before
-    assert before[0] == CURRENT_SCHEMA_VERSION == 10
+    assert before[0] == CURRENT_SCHEMA_VERSION == 11
 
 
 def test_authentication_precedes_database_and_domain_access(tmp_path, monkeypatch):
@@ -816,7 +816,7 @@ def test_attention_renders_canonical_global_queue_privately_and_read_only(tmp_pa
     ):
         assert sentinel not in output
     assert database_snapshot(database_path) == before
-    assert before[0] == CURRENT_SCHEMA_VERSION == 10
+    assert before[0] == CURRENT_SCHEMA_VERSION == 11
 
 
 def test_attention_is_global_and_does_not_deduplicate_cross_category_items(tmp_path):
@@ -1024,7 +1024,7 @@ def test_payments_page_composes_identity_allocations_privately_and_read_only(tmp
     ):
         assert sentinel not in output
     assert database_snapshot(database_path) == before
-    assert before[0] == CURRENT_SCHEMA_VERSION == 10
+    assert before[0] == CURRENT_SCHEMA_VERSION == 11
 
 
 def test_payment_filters_and_visible_summary_totals(tmp_path):
@@ -1314,7 +1314,7 @@ def test_obligations_renders_canonical_reconciliation_privately_and_read_only(
     ):
         assert sentinel not in output
     assert database_snapshot(database_path) == before
-    assert before[0] == CURRENT_SCHEMA_VERSION == 10
+    assert before[0] == CURRENT_SCHEMA_VERSION == 11
 
 
 def test_obligations_excludes_schedules_and_actual_obligation_is_authoritative(

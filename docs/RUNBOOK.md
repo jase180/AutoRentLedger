@@ -21,6 +21,7 @@ database-backed command when using a non-default database.
 - [Correct a manual payment](#correct-a-manual-payment)
 - [Void a manual payment](#void-a-manual-payment)
 - [Inspect manual payment history](#inspect-manual-payment-history)
+- [Void a Gmail-derived payment](#void-a-gmail-derived-payment)
 - [Payment is unresolved](#payment-is-unresolved)
 - [Payment is unallocated](#payment-is-unallocated)
 - [Partial payment](#partial-payment)
@@ -281,6 +282,27 @@ The report excludes voided payments from active sender totals and possible dupli
 groups unparsed evidence by trimmed subject only and never prints raw MIME, message bodies, or
 Gmail message IDs. It creates no aliases, schedules, obligations, allocations, manual payments,
 or tenancy configuration.
+
+## Void a Gmail-derived payment
+
+Discovery reports possible duplicates but never changes them. Review a suspected event first:
+
+```powershell
+autorentledger payment gmail-history 19
+```
+
+Only after confirming that the event is not valid active accounting money, record an audited void:
+
+```powershell
+autorentledger payment gmail-void 19 `
+  --reason "Duplicate forwarded notification of payment 12"
+```
+
+A void is not a delete. The raw Gmail email remains immutable, the normalized payment keeps the
+same ID and parsed facts, and the audit reason is retained. The event is merely excluded from
+active money, review, suggestions, reports, and discovery totals. If the payment has allocations,
+inspect and remove those allocations explicitly before voiding; the command never removes them
+automatically. There is no Gmail correction or unvoid command.
 
 ## Bootstrap a tenancy
 

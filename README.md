@@ -230,6 +230,8 @@ LAN, Tailscale-IP, and public binding. See the runbook for private Tailscale Ser
 | Correct a manual payment without replacing its original evidence | `autorentledger payment manual-correct ID --date 2026-05-04 --reason "Date entered incorrectly"` |
 | Void an erroneous unallocated manual payment | `autorentledger payment manual-void ID --reason "Duplicate historical entry"` |
 | Inspect a manual payment's audit history | `autorentledger payment manual-history ID` |
+| Inspect a Gmail-derived payment's audit state | `autorentledger payment gmail-history ID` |
+| Void a confirmed invalid Gmail-derived payment | `autorentledger payment gmail-void ID --reason "Duplicate forwarded notification"` |
 | Preview conservative allocation suggestions | `autorentledger allocation suggestions` |
 | Allocate payment money explicitly | `autorentledger allocation add --payment ID --obligation ID --amount 675.00` |
 | Preview monthly obligation generation | `autorentledger obligations generate --period YYYY-MM --dry-run` |

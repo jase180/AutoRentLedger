@@ -159,7 +159,7 @@ def test_v7_to_current_adds_legacy_provenance_and_preserves_ledger_rows(tmp_path
 
     result = upgrade_database(database_path)
 
-    assert (result.from_version, result.to_version) == (7, 10)
+    assert (result.from_version, result.to_version) == (7, 11)
     assert snapshot_tables(database_path, preserved) == preserved
     upgraded = SQLitePaymentEventRepository(database_path).get(payment.id)
     assert upgraded is not None
@@ -195,7 +195,7 @@ def test_v8_to_current_preserves_gmail_payments_allocations_and_foreign_keys(tmp
 
     result = upgrade_database(database_path)
 
-    assert (result.from_version, result.to_version) == (8, 10)
+    assert (result.from_version, result.to_version) == (8, 11)
     after_payment = SQLitePaymentEventRepository(database_path).get(payment.id)
     assert after_payment is not None
     assert before_payment is not None
@@ -222,7 +222,7 @@ def test_v8_to_current_preserves_gmail_payments_allocations_and_foreign_keys(tmp
     assert SQLiteAllocationRepository(database_path).get(allocation.id) == allocation
     assert SQLiteRawEmailRepository(database_path).get(raw.gmail_message_id).raw_mime == raw_bytes
     with sqlite3.connect(database_path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 10
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 11
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
         assert connection.execute(
             "SELECT COUNT(*) FROM manual_payment_evidence"
@@ -270,7 +270,7 @@ def test_v9_to_v10_adds_manual_audit_state_without_changing_existing_rows(tmp_pa
 
     result = upgrade_database(database_path)
 
-    assert (result.from_version, result.to_version) == (9, 10)
+    assert (result.from_version, result.to_version) == (9, 11)
     assert snapshot_tables(database_path, before) == before
     payment = SQLitePaymentEventRepository(database_path).get(42)
     assert payment is not None
@@ -280,7 +280,7 @@ def test_v9_to_v10_adds_manual_audit_state_without_changing_existing_rows(tmp_pa
     assert payment.voided_at is None
     assert SQLiteAllocationRepository(database_path).get(allocation.id) == allocation
     with sqlite3.connect(database_path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 10
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 11
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
         assert connection.execute(
             "SELECT COUNT(*) FROM manual_payment_revisions"

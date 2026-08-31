@@ -11,7 +11,7 @@ from pathlib import Path
 
 from autorentledger.parsing.version import LEGACY_UNVERSIONED_PARSER_VERSION
 
-CURRENT_SCHEMA_VERSION = 10
+CURRENT_SCHEMA_VERSION = 11
 
 RAW_EMAILS_SQL = """
     CREATE TABLE IF NOT EXISTS raw_emails (
@@ -119,6 +119,18 @@ MANUAL_PAYMENT_REVISIONS_SQL = """
         created_at TEXT NOT NULL,
         FOREIGN KEY (manual_evidence_id)
             REFERENCES manual_payment_evidence(id)
+            ON DELETE RESTRICT
+    )
+"""
+
+GMAIL_PAYMENT_VOIDS_SQL = """
+    CREATE TABLE IF NOT EXISTS gmail_payment_voids (
+        id INTEGER PRIMARY KEY,
+        payment_event_id INTEGER NOT NULL UNIQUE,
+        reason TEXT NOT NULL CHECK(length(trim(reason)) > 0),
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (payment_event_id)
+            REFERENCES payment_events(id)
             ON DELETE RESTRICT
     )
 """
@@ -278,6 +290,9 @@ EXPECTED_COLUMNS: dict[str, frozenset[str]] = {
             "created_at",
         }
     ),
+    "gmail_payment_voids": frozenset(
+        {"id", "payment_event_id", "reason", "created_at"}
+    ),
     "payers": frozenset({"id", "display_name", "created_at"}),
     "payer_aliases": frozenset(
         {"id", "payer_id", "alias", "normalized_alias", "created_at"}
@@ -336,18 +351,34 @@ TABLES_BY_VERSION: dict[int, frozenset[str]] = {
     ),
     6: frozenset(
         set(EXPECTED_COLUMNS)
-        - {"rent_schedules", "manual_payment_evidence", "manual_payment_revisions"}
+        - {
+            "rent_schedules",
+            "manual_payment_evidence",
+            "manual_payment_revisions",
+            "gmail_payment_voids",
+        }
     ),
     7: frozenset(
         set(EXPECTED_COLUMNS)
-        - {"manual_payment_evidence", "manual_payment_revisions"}
+        - {
+            "manual_payment_evidence",
+            "manual_payment_revisions",
+            "gmail_payment_voids",
+        }
     ),
     8: frozenset(
         set(EXPECTED_COLUMNS)
-        - {"manual_payment_evidence", "manual_payment_revisions"}
+        - {
+            "manual_payment_evidence",
+            "manual_payment_revisions",
+            "gmail_payment_voids",
+        }
     ),
-    9: frozenset(set(EXPECTED_COLUMNS) - {"manual_payment_revisions"}),
-    10: frozenset(EXPECTED_COLUMNS),
+    9: frozenset(
+        set(EXPECTED_COLUMNS) - {"manual_payment_revisions", "gmail_payment_voids"}
+    ),
+    10: frozenset(set(EXPECTED_COLUMNS) - {"gmail_payment_voids"}),
+    11: frozenset(EXPECTED_COLUMNS),
 }
 
 PAYMENT_EVENT_COLUMNS_V7 = frozenset(
@@ -496,6 +527,11 @@ def add_manual_payment_revisions(connection: sqlite3.Connection) -> None:
     connection.execute(MANUAL_PAYMENT_REVISIONS_SQL)
 
 
+def add_gmail_payment_voids(connection: sqlite3.Connection) -> None:
+    """Add the append-only audit record for explicit Gmail payment voids."""
+    connection.execute(GMAIL_PAYMENT_VOIDS_SQL)
+
+
 MIGRATIONS: dict[int, Migration] = {
     1: create_raw_email_schema,
     2: create_payment_event_v2_schema,
@@ -507,6 +543,7 @@ MIGRATIONS: dict[int, Migration] = {
     8: add_payment_parser_provenance,
     9: add_manual_payment_evidence,
     10: add_manual_payment_revisions,
+    11: add_gmail_payment_voids,
 }
 
 

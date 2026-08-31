@@ -38,6 +38,16 @@ from autorentledger.discovery import (
 )
 from autorentledger.email.gmail import GmailSource
 from autorentledger.email.source import EmailSource
+from autorentledger.gmail_payments import (
+    GmailPaymentAllocationConflictError,
+    GmailPaymentAlreadyVoidedError,
+    GmailPaymentInvariantError,
+    GmailPaymentNotFoundError,
+    GmailPaymentSourceError,
+    GmailPaymentValidationError,
+    get_gmail_payment_history,
+    void_gmail_payment,
+)
 from autorentledger.identity import normalize_alias, unresolved_senders
 from autorentledger.ingestion import ingest_raw_emails
 from autorentledger.maintenance import (
@@ -124,6 +134,7 @@ from autorentledger.storage.migrations import (
 from autorentledger.storage.sqlite import (
     SQLiteAllocationRepository,
     SQLiteDiscoveryRepository,
+    SQLiteGmailPaymentRepository,
     SQLiteManualPaymentRepository,
     SQLiteObligationRepository,
     SQLitePayerRepository,
@@ -269,6 +280,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     manual_history.add_argument("payment_id", type=int)
     manual_history.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+    gmail_void = payment_commands.add_parser(
+        "gmail-void", help="deactivate a Gmail-derived payment with an audit reason"
+    )
+    gmail_void.add_argument("payment_id", type=int)
+    gmail_void.add_argument("--reason", required=True)
+    gmail_void.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+    gmail_history = payment_commands.add_parser(
+        "gmail-history", help="show a Gmail payment and its void audit state"
+    )
+    gmail_history.add_argument("payment_id", type=int)
+    gmail_history.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
 
     setup = subparsers.add_parser("setup", help="preview or apply guided setup workflows")
     setup_commands = setup.add_subparsers(dest="setup_command", required=True)
@@ -916,6 +940,69 @@ def run_manual_payment_history(database_path: Path, payment_event_id: int) -> in
             revision.note,
         )
     print(f"Status: {'VOIDED' if history.payment_event.voided_at else 'ACTIVE'}")
+    return 0
+
+
+def run_gmail_payment_void(
+    database_path: Path, payment_event_id: int, *, reason: str
+) -> int:
+    try:
+        result = void_gmail_payment(
+            SQLiteGmailPaymentRepository(database_path),
+            payment_event_id,
+            reason=reason,
+        )
+    except GmailPaymentAllocationConflictError as error:
+        print(
+            f"Payment {payment_event_id} has {_format_currency(error.allocated_cents)} "
+            "allocated. Remove its allocations explicitly before voiding."
+        )
+        return 1
+    except (
+        GmailPaymentValidationError,
+        GmailPaymentNotFoundError,
+        GmailPaymentSourceError,
+        GmailPaymentAlreadyVoidedError,
+    ) as error:
+        print(error)
+        return 1
+    except (GmailPaymentInvariantError, sqlite3.Error):
+        print("Gmail payment void failed. Run `autorentledger db check` for details.")
+        return 1
+    print(f"Voided Gmail payment {result.payment_event.id}")
+    print(f"Audit record: {result.void.id}")
+    print(f"Reason: {result.void.reason}")
+    return 0
+
+
+def run_gmail_payment_history(database_path: Path, payment_event_id: int) -> int:
+    try:
+        history = get_gmail_payment_history(
+            SQLiteGmailPaymentRepository(database_path), payment_event_id
+        )
+    except (GmailPaymentNotFoundError, GmailPaymentSourceError) as error:
+        print(error)
+        return 1
+    except (GmailPaymentInvariantError, sqlite3.Error):
+        print("Gmail payment history failed. Run `autorentledger db check` for details.")
+        return 1
+    payment = history.payment_event
+    print(f"Payment {payment.id}")
+    print("Source:")
+    print("  Gmail")
+    print(f"  Raw email ID: {payment.raw_email_id}")
+    print("Payment:")
+    print(f"  Sender: {payment.sender_name}")
+    print(f"  Amount: {_format_currency(payment.amount_cents)}")
+    print(f"  Date: {payment.occurred_on or 'Unknown'}")
+    print("Current state:")
+    print(f"  {'VOIDED' if payment.voided_at else 'ACTIVE'}")
+    print("Void:")
+    if history.void is None:
+        print("  None")
+    else:
+        print(f"  Reason: {history.void.reason}")
+        print(f"  Voided at: {history.void.created_at}")
     return 0
 
 
@@ -2078,6 +2165,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         if args.payment_command == "manual-history":
             return run_manual_payment_history(args.database, args.payment_id)
+        if args.payment_command == "gmail-void":
+            return run_gmail_payment_void(
+                args.database, args.payment_id, reason=args.reason
+            )
+        if args.payment_command == "gmail-history":
+            return run_gmail_payment_history(args.database, args.payment_id)
         raise AssertionError(f"Unhandled payment command: {args.payment_command}")
     if args.command == "setup":
         if args.setup_command == "tenancy":
