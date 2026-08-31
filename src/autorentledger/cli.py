@@ -8,6 +8,14 @@ import sqlite3
 from collections.abc import Sequence
 from pathlib import Path
 
+from autorentledger.allocation_planning import (
+    AllocationPlan,
+    AllocationPlanApplyError,
+    AllocationPlanNotActionableError,
+    AllocationPlanValidationError,
+    apply_allocation_plan,
+    build_allocation_plan,
+)
 from autorentledger.allocations import (
     AllocationNotFoundError,
     AllocationValidationError,
@@ -132,6 +140,7 @@ from autorentledger.storage.migrations import (
     upgrade_database,
 )
 from autorentledger.storage.sqlite import (
+    SQLiteAllocationPlanningRepository,
     SQLiteAllocationRepository,
     SQLiteDiscoveryRepository,
     SQLiteGmailPaymentRepository,
@@ -476,6 +485,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     allocation_suggestions.add_argument("--payment", type=int)
     allocation_suggestions.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+    allocation_plan = allocation_commands.add_parser(
+        "plan", help="preview or apply deterministic historical allocations"
+    )
+    allocation_plan.add_argument("--from", required=True, dest="period_from")
+    allocation_plan.add_argument("--to", required=True, dest="period_to")
+    allocation_plan.add_argument("--apply", action="store_true")
+    allocation_plan.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
 
     allocations = subparsers.add_parser("allocations", help="list payment allocations")
     allocations.add_argument("--payment", type=int)
@@ -1803,6 +1820,111 @@ def run_allocation_suggestions(
     return 0
 
 
+def run_allocation_plan(
+    database_path: Path,
+    period_from: str,
+    period_to: str,
+    *,
+    apply: bool,
+) -> int:
+    planning_repository = SQLiteAllocationPlanningRepository(database_path)
+    try:
+        if apply:
+            result = apply_allocation_plan(
+                planning_repository,
+                _allocation_repository(database_path),
+                period_from,
+                period_to,
+            )
+            plan = result.plan
+        else:
+            plan = build_allocation_plan(
+                planning_repository, period_from, period_to
+            )
+            result = None
+    except AllocationPlanNotActionableError as error:
+        _print_allocation_plan(error.plan)
+        print("Plan is not fully actionable.")
+        print("No allocations were created.")
+        print("Resolve the listed issues and rerun preview.")
+        return 1
+    except AllocationPlanValidationError as error:
+        print(error)
+        return 1
+    except (AllocationPlanApplyError, sqlite3.Error):
+        print("Allocation plan failed. Run `autorentledger db check` for details.")
+        return 1
+    if not apply:
+        _print_allocation_plan(plan)
+        print("No allocations were created. Re-run with --apply after review.")
+        return 0
+    if not result.allocations:
+        print("No new allocations are needed.")
+        return 0
+    print("Allocation plan applied.")
+    print(f"Created allocations: {len(result.allocations)}")
+    print(
+        "Accounts affected: "
+        f"{len({link.rent_account_id for link in plan.accounts if link.planned_allocations})}"
+    )
+    _print_projected_reconciliation(plan)
+    return 0
+
+
+def _print_allocation_plan(plan: AllocationPlan) -> None:
+    print("Allocation plan preview")
+    print(f"Period: {plan.period_from} through {plan.period_to}")
+    for account in plan.accounts:
+        print(f"Account {account.rent_account_id} - {account.account_name}")
+        print(f"Unit: {account.unit_label}")
+        print("Proposed allocations:")
+        proposed = False
+        for payment in account.payments:
+            if not payment.allocations:
+                continue
+            proposed = True
+            print(f"Payment {payment.payment_event_id}")
+            print(f"  Date: {payment.occurred_on.isoformat()}")
+            print(f"  Amount: {_format_currency(payment.amount_cents)}")
+            print(
+                "  Remaining before plan: "
+                f"{_format_currency(payment.remaining_before_cents)}"
+            )
+            for link in payment.allocations:
+                print(
+                    f"  -> Obligation {link.rent_obligation_id} "
+                    f"({link.obligation_period}): {_format_currency(link.amount_cents)}"
+                )
+        if not proposed:
+            print("  None")
+        print("Projected obligation state:")
+        for obligation in account.projected_obligations:
+            print(
+                f"  {obligation.period} obligation {obligation.rent_obligation_id}: "
+                f"{obligation.status or 'INVALID'} "
+                f"({_format_currency(obligation.remaining_cents)} remaining)"
+            )
+    issues = [*plan.global_issues]
+    for account in plan.accounts:
+        issues.extend(account.issues)
+    print("Needs review:")
+    if not issues:
+        print("  None")
+    else:
+        for issue in issues:
+            print(f"  {issue.code}: {issue.message}")
+
+
+def _print_projected_reconciliation(plan: AllocationPlan) -> None:
+    print("Projected reconciliation:")
+    for account in plan.accounts:
+        if not account.planned_allocations:
+            continue
+        print(f"  Account {account.rent_account_id} - {account.account_name}")
+        for obligation in account.projected_obligations:
+            print(f"    {obligation.period}: {obligation.status or 'INVALID'}")
+
+
 def _format_decimal_cents(amount_cents: int) -> str:
     dollars, cents = divmod(amount_cents, 100)
     return f"{dollars}.{cents:02d}"
@@ -2288,6 +2410,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             return run_allocation_remove(args.database, args.allocation_id)
         if args.allocation_command == "suggestions":
             return run_allocation_suggestions(args.database, args.payment)
+        if args.allocation_command == "plan":
+            return run_allocation_plan(
+                args.database,
+                args.period_from,
+                args.period_to,
+                apply=args.apply,
+            )
         raise AssertionError(f"Unhandled allocation command: {args.allocation_command}")
     if args.command == "allocations":
         return run_allocation_listing(args.database, args.payment, args.obligation)

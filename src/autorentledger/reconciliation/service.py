@@ -73,12 +73,7 @@ def _derive(source: ReconciliationSourceRecord) -> ReconciliationRecord:
         )
 
     remaining_cents = source.owed_cents - source.allocated_cents
-    if source.allocated_cents == 0:
-        status = ReconciliationStatus.UNPAID
-    elif remaining_cents == 0:
-        status = ReconciliationStatus.PAID
-    else:
-        status = ReconciliationStatus.PARTIAL
+    status = derive_reconciliation_status(source.owed_cents, source.allocated_cents)
 
     return ReconciliationRecord(
         obligation_id=source.obligation_id,
@@ -93,3 +88,14 @@ def _derive(source: ReconciliationSourceRecord) -> ReconciliationRecord:
         remaining_cents=remaining_cents,
         status=status,
     )
+
+
+def derive_reconciliation_status(
+    owed_cents: int, allocated_cents: int
+) -> ReconciliationStatus:
+    """Apply the canonical status rule to a validated owed/allocation balance."""
+    if allocated_cents == 0:
+        return ReconciliationStatus.UNPAID
+    if allocated_cents == owed_cents:
+        return ReconciliationStatus.PAID
+    return ReconciliationStatus.PARTIAL

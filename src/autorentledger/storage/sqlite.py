@@ -194,6 +194,27 @@ class SuggestionAccountSourceRecord:
 
 
 @dataclass(frozen=True)
+class AllocationPlanningPaymentSourceRecord:
+    payment_event_id: int
+    sender_name: str
+    amount_cents: int
+    occurred_on: str | None
+    allocated_cents: int
+
+
+@dataclass(frozen=True)
+class AllocationPlanningObligationSourceRecord:
+    obligation_id: int
+    rent_account_id: int
+    unit_label: str
+    account_display_name: str
+    period: str
+    due_date: str
+    owed_cents: int
+    allocated_cents: int
+
+
+@dataclass(frozen=True)
 class PayerRecord:
     id: int
     display_name: str
@@ -2384,73 +2405,24 @@ class SQLiteAllocationRepository:
         amount_cents: int,
     ) -> PaymentAllocationRecord:
         """Atomically validate both remaining amounts and insert one allocation."""
-        created_at = datetime.now(UTC).isoformat()
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            payment_columns = {
-                str(row[1])
-                for row in connection.execute("PRAGMA table_info(payment_events)")
-            }
-            voided_projection = (
-                "voided_at" if "voided_at" in payment_columns else "NULL AS voided_at"
+            allocation = self._insert_checked(
+                connection, payment_event_id, rent_obligation_id, amount_cents
             )
-            payment = connection.execute(
-                f"SELECT amount_cents, {voided_projection} "
-                "FROM payment_events WHERE id = ?",
-                (payment_event_id,),
-            ).fetchone()
-            if payment is None:
-                raise AllocationPaymentNotFoundError
-            if payment["voided_at"] is not None:
-                raise AllocationPaymentVoidedError
+        return allocation
 
-            obligation = connection.execute(
-                "SELECT amount_cents FROM rent_obligations WHERE id = ?",
-                (rent_obligation_id,),
-            ).fetchone()
-            if obligation is None:
-                raise AllocationObligationNotFoundError
-
-            duplicate = connection.execute(
-                """
-                SELECT 1 FROM payment_allocations
-                WHERE payment_event_id = ? AND rent_obligation_id = ?
-                """,
-                (payment_event_id, rent_obligation_id),
-            ).fetchone()
-            if duplicate is not None:
-                raise AllocationPairExistsError
-
-            payment_allocated = self._allocated_total(
-                connection, "payment_event_id", payment_event_id
+    def create_many_checked(
+        self, links: tuple[tuple[int, int, int], ...]
+    ) -> tuple[PaymentAllocationRecord, ...]:
+        """Validate and insert a complete allocation plan in one transaction."""
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            created = tuple(
+                self._insert_checked(connection, payment_id, obligation_id, amount_cents)
+                for payment_id, obligation_id, amount_cents in links
             )
-            payment_remaining = int(payment["amount_cents"]) - payment_allocated
-            if amount_cents > payment_remaining:
-                raise AllocationExceedsPaymentError(payment_remaining)
-
-            obligation_allocated = self._allocated_total(
-                connection, "rent_obligation_id", rent_obligation_id
-            )
-            obligation_remaining = int(obligation["amount_cents"]) - obligation_allocated
-            if amount_cents > obligation_remaining:
-                raise AllocationExceedsObligationError(obligation_remaining)
-
-            cursor = connection.execute(
-                """
-                INSERT INTO payment_allocations (
-                    payment_event_id, rent_obligation_id, amount_cents, created_at
-                ) VALUES (?, ?, ?, ?)
-                """,
-                (payment_event_id, rent_obligation_id, amount_cents, created_at),
-            )
-            allocation_id = int(cursor.lastrowid)
-        return PaymentAllocationRecord(
-            allocation_id,
-            payment_event_id,
-            rent_obligation_id,
-            amount_cents,
-            created_at,
-        )
+        return created
 
     def get(self, allocation_id: int) -> PaymentAllocationRecord | None:
         with self._connect() as connection:
@@ -2548,6 +2520,73 @@ class SQLiteAllocationRepository:
             (source_id,),
         ).fetchone()
         return int(row["total"])
+
+    def _insert_checked(
+        self,
+        connection: sqlite3.Connection,
+        payment_event_id: int,
+        rent_obligation_id: int,
+        amount_cents: int,
+    ) -> PaymentAllocationRecord:
+        created_at = datetime.now(UTC).isoformat()
+        payment_columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(payment_events)")
+        }
+        voided_projection = (
+            "voided_at" if "voided_at" in payment_columns else "NULL AS voided_at"
+        )
+        payment = connection.execute(
+            f"SELECT amount_cents, {voided_projection} "
+            "FROM payment_events WHERE id = ?",
+            (payment_event_id,),
+        ).fetchone()
+        if payment is None:
+            raise AllocationPaymentNotFoundError
+        if payment["voided_at"] is not None:
+            raise AllocationPaymentVoidedError
+        obligation = connection.execute(
+            "SELECT amount_cents FROM rent_obligations WHERE id = ?",
+            (rent_obligation_id,),
+        ).fetchone()
+        if obligation is None:
+            raise AllocationObligationNotFoundError
+        duplicate = connection.execute(
+            """
+            SELECT 1 FROM payment_allocations
+            WHERE payment_event_id = ? AND rent_obligation_id = ?
+            """,
+            (payment_event_id, rent_obligation_id),
+        ).fetchone()
+        if duplicate is not None:
+            raise AllocationPairExistsError
+        payment_allocated = self._allocated_total(
+            connection, "payment_event_id", payment_event_id
+        )
+        payment_remaining = int(payment["amount_cents"]) - payment_allocated
+        if amount_cents > payment_remaining:
+            raise AllocationExceedsPaymentError(payment_remaining)
+        obligation_allocated = self._allocated_total(
+            connection, "rent_obligation_id", rent_obligation_id
+        )
+        obligation_remaining = int(obligation["amount_cents"]) - obligation_allocated
+        if amount_cents > obligation_remaining:
+            raise AllocationExceedsObligationError(obligation_remaining)
+        cursor = connection.execute(
+            """
+            INSERT INTO payment_allocations (
+                payment_event_id, rent_obligation_id, amount_cents, created_at
+            ) VALUES (?, ?, ?, ?)
+            """,
+            (payment_event_id, rent_obligation_id, amount_cents, created_at),
+        )
+        return PaymentAllocationRecord(
+            int(cursor.lastrowid),
+            payment_event_id,
+            rent_obligation_id,
+            amount_cents,
+            created_at,
+        )
 
 
 class SQLiteReconciliationRepository:
@@ -2946,3 +2985,98 @@ class SQLiteSuggestionRepository:
                 """
             ).fetchall()
         return [SuggestionAccountSourceRecord(**dict(row)) for row in rows]
+
+
+class SQLiteAllocationPlanningRepository:
+    """Read active payment, identity, account, and obligation planning inputs."""
+
+    def __init__(self, database_path: Path) -> None:
+        self.database_path = database_path
+
+    def _connect(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(
+            self.database_path.resolve().as_uri() + "?mode=ro", uri=True
+        )
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        return connection
+
+    def list_payment_sources(self) -> list[AllocationPlanningPaymentSourceRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    payment_events.id AS payment_event_id,
+                    payment_events.sender_name,
+                    payment_events.amount_cents,
+                    payment_events.occurred_on,
+                    COALESCE(SUM(payment_allocations.amount_cents), 0) AS allocated_cents
+                FROM payment_events
+                LEFT JOIN payment_allocations
+                    ON payment_allocations.payment_event_id = payment_events.id
+                WHERE payment_events.voided_at IS NULL
+                GROUP BY
+                    payment_events.id,
+                    payment_events.sender_name,
+                    payment_events.amount_cents,
+                    payment_events.occurred_on
+                ORDER BY
+                    payment_events.occurred_on IS NULL,
+                    payment_events.occurred_on,
+                    payment_events.id
+                """
+            ).fetchall()
+        return [AllocationPlanningPaymentSourceRecord(**dict(row)) for row in rows]
+
+    def list_obligation_sources(
+        self, period_from: str, period_to: str
+    ) -> list[AllocationPlanningObligationSourceRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    rent_obligations.id AS obligation_id,
+                    rent_obligations.rent_account_id,
+                    units.label AS unit_label,
+                    rent_accounts.display_name AS account_display_name,
+                    rent_obligations.period,
+                    rent_obligations.due_date,
+                    rent_obligations.amount_cents AS owed_cents,
+                    COALESCE(SUM(payment_allocations.amount_cents), 0) AS allocated_cents
+                FROM rent_obligations
+                JOIN rent_accounts
+                    ON rent_accounts.id = rent_obligations.rent_account_id
+                JOIN units ON units.id = rent_accounts.unit_id
+                LEFT JOIN payment_allocations
+                    ON payment_allocations.rent_obligation_id = rent_obligations.id
+                WHERE rent_obligations.period >= ? AND rent_obligations.period <= ?
+                GROUP BY
+                    rent_obligations.id,
+                    rent_obligations.rent_account_id,
+                    units.label,
+                    rent_accounts.display_name,
+                    rent_obligations.period,
+                    rent_obligations.due_date,
+                    rent_obligations.amount_cents
+                ORDER BY rent_obligations.due_date, rent_obligations.id
+                """,
+                (period_from, period_to),
+            ).fetchall()
+        return [AllocationPlanningObligationSourceRecord(**dict(row)) for row in rows]
+
+    def list_alias_sources(self) -> list[SuggestionAliasSourceRecord]:
+        return SQLiteSuggestionRepository(self.database_path).list_alias_sources()
+
+    def list_account_sources(self) -> list[SuggestionAccountSourceRecord]:
+        return SQLiteSuggestionRepository(self.database_path).list_account_sources()
+
+    def list_existing_pairs(self) -> set[tuple[int, int]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT payment_event_id, rent_obligation_id
+                FROM payment_allocations
+                ORDER BY payment_event_id, rent_obligation_id
+                """
+            ).fetchall()
+        return {(int(row[0]), int(row[1])) for row in rows}

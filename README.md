@@ -234,6 +234,8 @@ LAN, Tailscale-IP, and public binding. See the runbook for private Tailscale Ser
 | Void a confirmed invalid Gmail-derived payment | `autorentledger payment gmail-void ID --reason "Duplicate forwarded notification"` |
 | Preview conservative allocation suggestions | `autorentledger allocation suggestions` |
 | Allocate payment money explicitly | `autorentledger allocation add --payment ID --obligation ID --amount 675.00` |
+| Preview historical allocations | `autorentledger allocation plan --from 2026-05 --to 2026-08` |
+| Apply a fully reviewed historical plan | `autorentledger allocation plan --from 2026-05 --to 2026-08 --apply` |
 | Preview monthly obligation generation | `autorentledger obligations generate --period YYYY-MM --dry-run` |
 | Show monthly reconciliation | `autorentledger reconcile --period YYYY-MM` |
 | Show/export a monthly report | `autorentledger report --period YYYY-MM --csv reports/YYYY-MM.csv` |

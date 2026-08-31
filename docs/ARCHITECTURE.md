@@ -53,6 +53,9 @@ overviews are recomputed read models rather than persisted workflow state.
   may exceed neither the source payment nor the destination obligation.
 - Exact aliases provide identity interpretation. No fuzzy, memo, or AI matching is authoritative.
 - Suggestions are derived, conservative, and non-authoritative; users apply allocations explicitly.
+- Historical allocation plans are ephemeral and review-first. They require exact identity and an
+  unambiguous explicit account association, then simulate oldest-outstanding-first. Chronology is
+  only a deterministic planning heuristic, never evidence of which rent month a payment satisfies.
 - The CLI owns explicit mutations. The authenticated Flask UI remains read-only and loopback-only.
 - `sync` and `daily` may refresh raw evidence and payment events only. They never create aliases,
   allocations, or obligations and never rebuild old payments automatically.

@@ -24,6 +24,7 @@ database-backed command when using a non-default database.
 - [Void a Gmail-derived payment](#void-a-gmail-derived-payment)
 - [Payment is unresolved](#payment-is-unresolved)
 - [Payment is unallocated](#payment-is-unallocated)
+- [Plan historical allocations](#plan-historical-allocations)
 - [Partial payment](#partial-payment)
 - [One payment covers multiple months](#one-payment-covers-multiple-months)
 - [Someone else pays the rent](#someone-else-pays-the-rent)
@@ -582,6 +583,42 @@ autorentledger obligation show 8
 ```
 
 No suggestion is auto-applied. Payment money may remain unallocated when that is the truthful state.
+
+## Plan historical allocations
+
+Use the planner only after bad Gmail evidence has been reviewed or voided, exact payer aliases and
+rent-account associations are confirmed, and the historical obligations actually exist. Preview
+is the default and writes nothing:
+
+```powershell
+autorentledger allocation plan `
+  --from 2026-05 `
+  --to 2026-08
+```
+
+Review every displayed payment-to-obligation link and every `Needs review` issue. The heuristic is
+deliberately narrow: after exact alias resolution leads to exactly one relevant rent account, it
+applies payments chronologically to that account's oldest outstanding obligation. Payment date and
+amount are not evidence of the rent month, and owner review remains required.
+
+Resolve unresolved senders, ambiguous account associations, missing dates, invalid evidence, and
+other issues, then rerun the preview. Apply is explicit and rebuilds the plan from current state:
+
+```powershell
+autorentledger allocation plan `
+  --from 2026-05 `
+  --to 2026-08 `
+  --apply
+```
+
+Apply refuses the entire run when any issue remains. Otherwise all proposed links are inserted in
+one transaction through the same allocation validation used by `allocation add`; a late failure
+rolls back every new link while preserving existing allocations. The planner never creates
+aliases, accounts, obligations, or persisted plan records. Reconcile after a successful apply:
+
+```powershell
+autorentledger reconcile --period 2026-05
+```
 
 ## Partial payment
 
