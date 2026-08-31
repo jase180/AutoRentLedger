@@ -157,6 +157,22 @@ autorentledger overview --period 2026-09
 `sync` may add raw emails and new payment events. It does not generate obligations, create
 allocations, rebuild old payment events, or change identity/rental configuration.
 
+### Discover historical payment evidence
+
+Before configuring a newly bootstrapped ledger, inspect the evidence already collected:
+
+```powershell
+autorentledger discovery payments
+```
+
+The read-only report inventories exact observed sender spellings, current exact-alias resolution,
+active payment counts and totals, possible same-sender/date/amount notification duplicates, and
+unparsed Gmail subjects. Possible duplicates are warnings only: the command never collapses,
+voids, or changes payments. It does not infer tenants, units, rent accounts, associations, or
+aliases and writes no configuration or accounting state. Review the evidence first, then use
+`setup tenancy` for confirmed configuration and explicit obligation/allocation commands for
+accounting interpretation.
+
 ### Bootstrap one tenancy
 
 Preview a new unit, rent account, payer, aliases, association, and optional schedule in one
@@ -205,6 +221,7 @@ LAN, Tailscale-IP, and public binding. See the runbook for private Tailscale Ser
 | Refresh evidence and current attention | `autorentledger sync` |
 | Create a verified backup, sync, and summarize attention | `autorentledger daily` |
 | Open the local read-only browser view | `autorentledger web` |
+| Inventory historical payment evidence before setup | `autorentledger discovery payments` |
 | Preview one guided tenancy setup | `autorentledger setup tenancy ...` |
 | Inspect the owner dashboard | `autorentledger overview --period YYYY-MM` |
 | Inspect focused exceptions | `autorentledger review` |

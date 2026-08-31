@@ -13,6 +13,7 @@ database-backed command when using a non-default database.
 - [Scheduled daily operation](#scheduled-daily-operation)
 - [Local read-only web view](#local-read-only-web-view)
 - [Monthly setup](#monthly-setup)
+- [Bootstrap discovery](#bootstrap-discovery)
 - [Bootstrap a tenancy](#bootstrap-a-tenancy)
 - [Add a new payer](#add-a-new-payer)
 - [Add a unit, rent account, association, and schedule](#add-a-unit-rent-account-association-and-schedule)
@@ -228,6 +229,58 @@ exists. Running generation again is idempotent.
 A schedule that overlaps any part of the requested month creates a full monthly obligation; there
 is no proration. Changing or ending a schedule never changes an obligation that already exists.
 Manual obligations remain supported and take precedence by causing generation to skip that month.
+
+## Bootstrap discovery
+
+Use this workflow before creating payer, unit, or rent-account configuration from a historical
+mailbox. Discovery reports only observed evidence and current explicit alias resolution; it does
+not infer a tenant, unit, account, association, or setup command.
+
+1. Verify the current database and make a recovery point:
+
+   ```powershell
+   autorentledger db check
+   autorentledger db backup
+   ```
+
+2. In Gmail, manually apply a narrow label to the relevant historical notifications. Gmail access
+   by AutoRentLedger remains read-only; the application never creates or changes that label.
+3. Ingest the labeled evidence with a bounded query:
+
+   ```powershell
+   autorentledger sync `
+     --query "label:autorentledger-bootstrap" `
+     --max-results 500
+   ```
+
+4. Run the all-history, read-only inventory:
+
+   ```powershell
+   autorentledger discovery payments
+   ```
+
+5. Inspect the exact observed sender spellings and unresolved alias state.
+6. Inspect unparsed subject formats and the possible duplicate-notification groups. A duplicate
+   group means only that active events share normalized sender, occurred date, and amount. It may
+   still represent legitimate separate payments; discovery never voids or merges anything.
+7. Confirm payer, unit, and rent-account mappings manually.
+8. Run `autorentledger setup tenancy ...` as a preview, then repeat it with `--apply` only for
+   confirmed configuration.
+9. Generate obligations separately with the existing dry-run-first command.
+10. Create allocations explicitly and run reconciliation.
+
+The boundary is intentional:
+
+```text
+discovery payments  -> observes evidence
+setup tenancy       -> creates confirmed configuration
+allocation add      -> records accounting interpretation
+```
+
+The report excludes voided payments from active sender totals and possible duplicate groups. It
+groups unparsed evidence by trimmed subject only and never prints raw MIME, message bodies, or
+Gmail message IDs. It creates no aliases, schedules, obligations, allocations, manual payments,
+or tenancy configuration.
 
 ## Bootstrap a tenancy
 
