@@ -56,7 +56,9 @@ overviews are recomputed read models rather than persisted workflow state.
 - Historical allocation plans are ephemeral and review-first. They require exact identity and an
   unambiguous explicit account association, then simulate oldest-outstanding-first. Chronology is
   only a deterministic planning heuristic, never evidence of which rent month a payment satisfies.
-- The CLI owns explicit mutations. The authenticated Flask UI remains read-only and loopback-only.
+- The CLI owns explicit mutations. The authenticated Flask UI remains read-only and loopback-only;
+  allocation-plan and drill-down pages compose the canonical planner, audit, allocation, and
+  reconciliation services used by terminal workflows.
 - `sync` and `daily` may refresh raw evidence and payment events only. They never create aliases,
   allocations, or obligations and never rebuild old payments automatically.
 - Parser rebuild is explicit, applies only to Gmail-derived events, and cannot reduce a payment

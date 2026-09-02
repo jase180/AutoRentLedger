@@ -57,7 +57,7 @@
             {% for account in overview.accounts %}
               <tr>
                 <td>{{ account.unit_label }}</td>
-                <td>{{ account.account_display_name }}</td>
+                <td><a href="{{ url_for('web.rent_account_detail', rent_account_id=account.rent_account_id) }}#obligation-{{ account.rent_obligation_id }}">{{ account.account_display_name }}</a></td>
                 <td class="money">{{ account.owed_cents|money }}</td>
                 <td class="money">{{ account.allocated_cents|money }}</td>
                 <td class="money">{{ account.remaining_cents|money }}</td>
@@ -118,7 +118,7 @@
       <div class="panel-list">
         {% for suggestion in overview.actionable_suggestions %}
           <article class="suggestion-panel">
-            <h3>Payment {{ suggestion.payment_event_id }}</h3>
+            <h3><a href="{{ url_for('web.payment_detail', payment_event_id=suggestion.payment_event_id) }}">Payment {{ suggestion.payment_event_id }}</a></h3>
             <p>{{ suggestion.unit_label }} / {{ suggestion.account_display_name }} / {{ suggestion.period }}</p>
             <dl>
               <div><dt>Suggested amount</dt><dd>{{ suggestion.suggested_amount_cents|money }}</dd></div>

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from flask import Blueprint, current_app, redirect, render_template, request, url_for
 
+from autorentledger.allocation_planning import AllocationPlanValidationError
 from autorentledger.obligations import ObligationValidationError, parse_monthly_period
 from autorentledger.storage.migrations import DatabaseSchemaError, require_current_schema
 from autorentledger.web import composition
@@ -214,6 +215,148 @@ def obligations():
 
     return render_template(
         "obligations.html", obligations=obligations_page, active_page="obligations"
+    )
+
+
+@web_blueprint.get("/allocation-plan")
+@login_required
+def allocation_plan():
+    period_from = request.args.get("from", "")
+    period_to = request.args.get("to", "")
+    if not period_from and not period_to:
+        return render_template(
+            "allocation_plan.html",
+            plan=None,
+            period_from="",
+            period_to="",
+            validation_error=None,
+            active_page="allocation-plan",
+        )
+
+    database_path = Path(current_app.config["AUTORENTLEDGER_DATABASE"])
+    try:
+        require_current_schema(database_path)
+        plan = composition.build_web_allocation_plan(
+            database_path, period_from, period_to
+        )
+    except AllocationPlanValidationError:
+        return (
+            render_template(
+                "allocation_plan.html",
+                plan=None,
+                period_from=period_from,
+                period_to=period_to,
+                validation_error=(
+                    "Invalid period range. Use YYYY-MM and ensure From is not after To."
+                ),
+                active_page="allocation-plan",
+            ),
+            400,
+        )
+    except DatabaseSchemaError:
+        return _database_not_ready("allocation-plan")
+    except Exception:  # Safe browser boundary for domain/storage failures.
+        current_app.logger.exception("Unable to build allocation plan view")
+        return _safe_unavailable(
+            "Allocation plan unavailable",
+            "Unable to build allocation plan view.",
+            "allocation-plan",
+        )
+    return render_template(
+        "allocation_plan.html",
+        plan=plan,
+        period_from=period_from,
+        period_to=period_to,
+        validation_error=None,
+        active_page="allocation-plan",
+    )
+
+
+@web_blueprint.get("/payments/<int:payment_event_id>")
+@login_required
+def payment_detail(payment_event_id: int):
+    database_path = Path(current_app.config["AUTORENTLEDGER_DATABASE"])
+    try:
+        require_current_schema(database_path)
+        detail = composition.build_web_payment_detail(database_path, payment_event_id)
+    except DatabaseSchemaError:
+        return _database_not_ready("payments")
+    except composition.WebDetailNotFoundError:
+        return (
+            render_template(
+                "error.html",
+                title="Payment not found",
+                message="The requested payment does not exist.",
+                commands=(),
+                active_page="payments",
+            ),
+            404,
+        )
+    except Exception:  # Safe browser boundary for domain/storage failures.
+        current_app.logger.exception("Unable to build payment detail")
+        return _safe_unavailable(
+            "Payment unavailable", "Unable to build payment detail.", "payments"
+        )
+    return render_template(
+        "payment_detail.html", detail=detail, active_page="payments"
+    )
+
+
+@web_blueprint.get("/rent-accounts/<int:rent_account_id>")
+@login_required
+def rent_account_detail(rent_account_id: int):
+    database_path = Path(current_app.config["AUTORENTLEDGER_DATABASE"])
+    try:
+        require_current_schema(database_path)
+        detail = composition.build_web_rent_account_detail(database_path, rent_account_id)
+    except DatabaseSchemaError:
+        return _database_not_ready("obligations")
+    except composition.WebDetailNotFoundError:
+        return (
+            render_template(
+                "error.html",
+                title="Rent account not found",
+                message="The requested rent account does not exist.",
+                commands=(),
+                active_page="obligations",
+            ),
+            404,
+        )
+    except Exception:  # Safe browser boundary for domain/storage failures.
+        current_app.logger.exception("Unable to build rent account detail")
+        return _safe_unavailable(
+            "Rent account unavailable",
+            "Unable to build rent account detail.",
+            "obligations",
+        )
+    return render_template(
+        "rent_account_detail.html", detail=detail, active_page="obligations"
+    )
+
+
+def _database_not_ready(active_page: str):
+    return (
+        render_template(
+            "error.html",
+            title="Database not ready",
+            message="The AutoRentLedger database is missing, outdated, or invalid.",
+            commands=("autorentledger db status", "autorentledger db upgrade"),
+            active_page=active_page,
+        ),
+        503,
+    )
+
+
+def _safe_unavailable(title: str, message: str, active_page: str):
+    return (
+        render_template(
+            "error.html",
+            title=title,
+            message=message,
+            commands=("autorentledger db check",),
+            active_page=active_page,
+        ),
+        500,
     )
 
 

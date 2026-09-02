@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block title %}{{ detail.account.display_name }} | AutoRentLedger{% endblock %}
+
+{% block content %}
+  <section class="page-heading">
+    <div>
+      <p class="eyebrow">Rent account {{ detail.account.id }}</p>
+      <h1>{{ detail.account.unit_label }} — {{ detail.account.display_name }}</h1>
+      <p class="section-note">Actual obligations and canonical reconciliation with contributing payments.</p>
+    </div>
+    <a class="back-link" href="{{ url_for('web.obligations') }}">Back to obligations</a>
+  </section>
+
+  <dl class="fact-grid account-facts">
+    <div><dt>Account ID</dt><dd>{{ detail.account.id }}</dd></div>
+    <div><dt>Unit</dt><dd>{{ detail.account.unit_label }}</dd></div>
+    <div><dt>Active from</dt><dd>{{ detail.account.active_from if detail.account.active_from else "Not set" }}</dd></div>
+    <div><dt>Active to</dt><dd>{{ detail.account.active_to if detail.account.active_to else "Open" }}</dd></div>
+  </dl>
+
+  <section aria-labelledby="associated-payers-heading">
+    <h2 id="associated-payers-heading">Associated payers</h2>
+    {% if detail.payers %}
+      <ul class="plain-list">
+        {% for payer in detail.payers %}<li>{{ payer.display_name }} <span class="muted">(payer {{ payer.id }})</span></li>{% endfor %}
+      </ul>
+    {% else %}
+      <p class="empty-state">No associated payers.</p>
+    {% endif %}
+  </section>
+
+  <section aria-labelledby="account-obligations-heading">
+    <h2 id="account-obligations-heading">Monthly obligations</h2>
+    {% if detail.obligations %}
+      <div class="obligation-card-list">
+        {% for item in detail.obligations %}
+          {% set obligation = item.reconciliation %}
+          <article class="detail-card obligation-detail" id="obligation-{{ obligation.obligation_id }}">
+            <div class="section-heading-row">
+              <h3>{{ obligation.period|month_heading }} · obligation {{ obligation.obligation_id }}</h3>
+              <span class="status status-{{ obligation.status.value|lower }}">{{ obligation.status.value }}</span>
+            </div>
+            <dl class="fact-grid compact-facts">
+              <div><dt>Due</dt><dd>{{ obligation.due_date }}</dd></div>
+              <div><dt>Owed</dt><dd>{{ obligation.owed_cents|money }}</dd></div>
+              <div><dt>Allocated</dt><dd>{{ obligation.allocated_cents|money }}</dd></div>
+              <div><dt>Remaining</dt><dd>{{ obligation.remaining_cents|money }}</dd></div>
+            </dl>
+            <h3 class="subsection-heading">Contributing payments</h3>
+            {% if item.contributions %}
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Payment</th><th>Date</th><th>Sender</th><th class="money">Allocation</th></tr></thead>
+                  <tbody>
+                    {% for payment in item.contributions %}
+                      <tr>
+                        <td><a href="{{ url_for('web.payment_detail', payment_event_id=payment.payment_event_id) }}">{{ payment.payment_event_id }}</a></td>
+                        <td>{{ payment.occurred_on if payment.occurred_on else "Unknown" }}</td>
+                        <td>{{ payment.sender_name }}</td>
+                        <td class="money">{{ payment.amount_cents|money }}</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            {% else %}
+              <p class="empty-state">No contributing payments.</p>
+            {% endif %}
+          </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="empty-state">No obligations exist for this rent account.</p>
+    {% endif %}
+  </section>
+{% endblock %}

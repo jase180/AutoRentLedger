@@ -204,12 +204,15 @@ autorentledger web --database data/autorentledger.db --host 127.0.0.1 --port 800
 ```
 
 Then open `http://127.0.0.1:8000/`. The local browser includes **Overview**, **Attention**,
-**Payments**, and **Obligations**. Attention is the global/current derived review queue. Payments
+**Payments**, **Obligations**, and **Allocation Plan**. Attention is the global/current derived review queue. Payments
 shows normalized payments with current exact-alias payer interpretation and payment-centric
-allocated/unallocated amounts. Obligations shows month-scoped canonical reconciliation for actual
-obligations only; schedules and missing-obligation warnings remain separate on Overview. Every
-screen is read-only; none query Gmail, sync, generate obligations, create
-allocations, or expose ledger write routes. The UI requires one owner password configured through
+allocated/unallocated amounts, and payment IDs open provenance, audit, and allocation details.
+Obligations shows month-scoped canonical reconciliation for actual obligations only; account links
+open associated payers, monthly obligations, and contributing payments. Allocation Plan renders
+the exact M26 CLI preview—including every proposed link and blocking issue—but cannot apply it.
+Schedules and missing-obligation warnings remain separate on Overview. Every screen is read-only;
+none query Gmail, sync, generate obligations, create allocations, or expose ledger write routes.
+The UI requires one owner password configured through
 `AUTORENTLEDGER_WEB_PASSWORD_HASH` and `AUTORENTLEDGER_WEB_SECRET_KEY`; neither value belongs in
 Git or SQLite. Flask still accepts only `127.0.0.1`, `localhost`, or `::1` and rejects direct
 LAN, Tailscale-IP, and public binding. See the runbook for private Tailscale Serve access.

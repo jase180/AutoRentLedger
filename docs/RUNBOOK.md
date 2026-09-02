@@ -198,6 +198,16 @@ canonical PAID, PARTIAL, or UNPAID reconciliation for one month. This view is re
 not treat schedules as debt: missing scheduled obligations remain warnings on Overview and never
 increase obligation totals until an actual obligation exists.
 
+Use `http://127.0.0.1:8000/allocation-plan?from=2026-05&to=2026-08` to inspect the exact same
+deterministic historical allocation preview produced by the CLI. It displays every proposed
+payment-to-obligation link, projected reconciliation state, and ambiguity. It has no Apply action;
+apply a fully reviewed plan explicitly with `autorentledger allocation plan ... --apply`.
+
+Payment IDs link to `/payments/<id>`, which shows provenance, active/voided audit history, and
+current allocation links without exposing raw Gmail content or Gmail message identity. Account
+links open `/rent-accounts/<id>`, which shows associated payers, actual obligations, canonical
+reconciliation, and each contributing payment. These drill-down pages are inspection-only.
+
 The pages require the single owner password and otherwise retain their existing read-only
 semantics. Authentication uses a signed Flask session cookie; it does not create users, roles,
 login history, or database-backed sessions. The only POST routes are login and logout. The web UI

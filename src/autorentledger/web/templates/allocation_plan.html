@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+
+{% block title %}Allocation Plan | AutoRentLedger{% endblock %}
+
+{% block content %}
+  <section class="page-heading allocation-plan-heading">
+    <div>
+      <p class="eyebrow">Read-only historical preview</p>
+      <h1>Allocation Plan</h1>
+      <p class="section-note">Exact identity + explicit account association + oldest outstanding obligation. Review only; the web cannot apply allocations.</p>
+    </div>
+    <form class="period-form range-form" method="get" action="{{ url_for('web.allocation_plan') }}">
+      <label for="period-from">From
+        <input id="period-from" type="month" name="from" value="{{ period_from }}" required>
+      </label>
+      <label for="period-to">To
+        <input id="period-to" type="month" name="to" value="{{ period_to }}" required>
+      </label>
+      <button type="submit">Preview</button>
+    </form>
+  </section>
+
+  {% if validation_error %}
+    <p class="validation-error" role="alert">{{ validation_error }}</p>
+  {% elif plan %}
+    <section class="plan-state" aria-labelledby="plan-state-heading">
+      <h2 id="plan-state-heading">{{ plan.period_from|month_heading }} — {{ plan.period_to|month_heading }}</h2>
+      {% if plan.actionable %}
+        <p class="clean-state"><strong>Actionable preview.</strong> Review every proposed link before using the CLI to apply it.</p>
+      {% else %}
+        <p class="warning-panel"><strong>Needs review.</strong> The CLI will refuse to apply this plan until every listed issue is resolved.</p>
+      {% endif %}
+    </section>
+
+    {% for account in plan.accounts %}
+      <section class="plan-account" aria-labelledby="plan-account-{{ account.rent_account_id }}">
+        <div class="section-heading-row">
+          <h2 id="plan-account-{{ account.rent_account_id }}">{{ account.unit_label }} — <a href="{{ url_for('web.rent_account_detail', rent_account_id=account.rent_account_id) }}">{{ account.account_name }}</a></h2>
+          <span>Account {{ account.rent_account_id }}</span>
+        </div>
+
+        <h3>Proposed allocations</h3>
+        {% if account.payments %}
+          <div class="panel-list">
+            {% for payment in account.payments %}
+              <article class="detail-card planned-payment">
+                <h3><a href="{{ url_for('web.payment_detail', payment_event_id=payment.payment_event_id) }}">Payment {{ payment.payment_event_id }}</a></h3>
+                <dl class="fact-grid compact-facts">
+                  <div><dt>Date</dt><dd>{{ payment.occurred_on }}</dd></div>
+                  <div><dt>Amount</dt><dd>{{ payment.amount_cents|money }}</dd></div>
+                  <div><dt>Remaining before plan</dt><dd>{{ payment.remaining_before_cents|money }}</dd></div>
+                </dl>
+                {% if payment.allocations %}
+                  <ul class="allocation-links">
+                    {% for allocation in payment.allocations %}
+                      <li>→ <a href="{{ url_for('web.rent_account_detail', rent_account_id=account.rent_account_id) }}#obligation-{{ allocation.rent_obligation_id }}">{{ allocation.obligation_period|month_heading }} obligation #{{ allocation.rent_obligation_id }}</a>: <strong>{{ allocation.amount_cents|money }}</strong></li>
+                    {% endfor %}
+                  </ul>
+                {% else %}
+                  <p class="empty-state">No link proposed for this payment.</p>
+                {% endif %}
+              </article>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="empty-state">No payment links are proposed for this account.</p>
+        {% endif %}
+
+        <h3 class="subsection-heading">Projected obligation state</h3>
+        {% if account.projected_obligations %}
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Period</th><th>Obligation</th><th class="money">Owed</th><th class="money">Projected paid</th><th class="money">Left</th><th>Status</th></tr></thead>
+              <tbody>
+                {% for obligation in account.projected_obligations %}
+                  <tr>
+                    <td>{{ obligation.period|month_heading }}</td>
+                    <td><a href="{{ url_for('web.rent_account_detail', rent_account_id=account.rent_account_id) }}#obligation-{{ obligation.rent_obligation_id }}">#{{ obligation.rent_obligation_id }}</a></td>
+                    <td class="money">{{ obligation.owed_cents|money }}</td>
+                    <td class="money">{{ obligation.allocated_cents|money }}</td>
+                    <td class="money">{{ obligation.remaining_cents|money }}</td>
+                    <td>{% if obligation.status %}<span class="status status-{{ obligation.status.value|lower }}">{{ obligation.status.value }}</span>{% else %}INVALID{% endif %}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% endif %}
+
+        {% if account.issues %}
+          <div class="issue-list">
+            <h3>Needs review</h3>
+            {% for issue in account.issues %}
+              <article class="warning-panel"><strong>{{ issue.code }}</strong><p>{{ issue.message }}</p></article>
+            {% endfor %}
+          </div>
+        {% endif %}
+      </section>
+    {% endfor %}
+
+    {% if plan.global_issues %}
+      <section class="issue-list" aria-labelledby="global-issues-heading">
+        <h2 id="global-issues-heading">Needs review</h2>
+        {% for issue in plan.global_issues %}
+          <article class="warning-panel"><strong>{{ issue.code }}</strong><p>{{ issue.message }}</p></article>
+        {% endfor %}
+      </section>
+    {% endif %}
+    {% if not plan.accounts and not plan.global_issues %}
+      <p class="empty-state">No eligible obligations or payment links exist in this range.</p>
+    {% endif %}
+  {% else %}
+    <p class="empty-state">Choose an inclusive From and To month to build a read-only preview.</p>
+  {% endif %}
+{% endblock %}

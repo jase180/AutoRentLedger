@@ -46,7 +46,7 @@
           <tbody>
             {% for payment in payments.records %}
               <tr>
-                <td>{{ payment.payment_event_id }}</td>
+                <td><a href="{{ url_for('web.payment_detail', payment_event_id=payment.payment_event_id) }}">{{ payment.payment_event_id }}</a></td>
                 <td>{{ payment.occurred_on if payment.occurred_on else "Unknown" }}</td>
                 <td>{{ payment.sender_name }}</td>
                 <td>{{ payment.provider }}</td>

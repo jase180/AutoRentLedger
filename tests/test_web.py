@@ -7,6 +7,7 @@ import pytest
 from flask import session
 from werkzeug.security import generate_password_hash
 
+from autorentledger.allocation_planning import build_allocation_plan
 from autorentledger.cli import (
     DEFAULT_WEB_HOST,
     DEFAULT_WEB_PORT,
@@ -17,16 +18,27 @@ from autorentledger.cli import (
 )
 from autorentledger.email import EmailMessageSummary
 from autorentledger.email.gmail import GmailSource
+from autorentledger.gmail_payments import void_gmail_payment
 from autorentledger.identity import normalize_alias
+from autorentledger.manual_payments import (
+    correct_manual_payment,
+    create_manual_payment,
+    void_manual_payment,
+)
 from autorentledger.obligations import create_obligation
 from autorentledger.parsing import PaymentNotification
+from autorentledger.reconciliation import reconcile_all
 from autorentledger.schedules import create_rent_schedule
 from autorentledger.storage import (
+    SQLiteAllocationPlanningRepository,
     SQLiteAllocationRepository,
+    SQLiteGmailPaymentRepository,
+    SQLiteManualPaymentRepository,
     SQLiteObligationRepository,
     SQLitePayerRepository,
     SQLitePaymentEventRepository,
     SQLiteRawEmailRepository,
+    SQLiteReconciliationRepository,
     SQLiteRentalRepository,
     SQLiteRentScheduleRepository,
 )
@@ -313,17 +325,29 @@ def test_app_factory_is_side_effect_free_and_registers_auth_and_ledger_routes(tm
     assert {rule.rule for rule in app.url_map.iter_rules()} == {
         "/",
         "/attention",
+        "/allocation-plan",
         "/login",
         "/logout",
         "/obligations",
         "/overview",
         "/payments",
+        "/payments/<int:payment_event_id>",
+        "/rent-accounts/<int:rent_account_id>",
         "/static/<path:filename>",
     }
     rules = {rule.rule: rule.methods for rule in app.url_map.iter_rules()}
     assert rules["/login"] <= {"GET", "HEAD", "POST", "OPTIONS"}
     assert rules["/logout"] <= {"POST", "OPTIONS"}
-    for path in ("/", "/overview", "/attention", "/payments", "/obligations"):
+    for path in (
+        "/",
+        "/overview",
+        "/attention",
+        "/payments",
+        "/obligations",
+        "/allocation-plan",
+        "/payments/<int:payment_event_id>",
+        "/rent-accounts/<int:rent_account_id>",
+    ):
         assert rules[path] <= {"GET", "HEAD", "OPTIONS"}
 
     missing_path = tmp_path / "not-created.sqlite3"
@@ -356,6 +380,9 @@ def test_login_is_public_and_protected_routes_preserve_safe_next(tmp_path, monke
         "/attention",
         "/payments?unallocated=1",
         "/obligations?period=2026-09",
+        "/allocation-plan?from=2026-09&to=2026-10",
+        "/payments/1",
+        "/rent-accounts/1",
     )
     for path in protected_paths:
         response = client.get(path)
@@ -463,6 +490,9 @@ def test_authentication_and_all_authenticated_views_never_mutate_database(tmp_pa
         "/attention",
         "/payments",
         "/obligations?period=2026-09",
+        "/allocation-plan?from=2026-09&to=2026-10",
+        "/payments/1",
+        "/rent-accounts/1",
     ):
         assert client.get(path).status_code in {200, 302}
     assert client.post("/logout").status_code == 302
@@ -1417,6 +1447,7 @@ def test_all_web_pages_share_final_navigation(tmp_path):
         "/attention": "Attention",
         "/payments": "Payments",
         "/obligations?period=2026-09": "Obligations",
+        "/allocation-plan": "Allocation Plan",
     }
     for path, active in paths.items():
         output = client.get(path).get_data(as_text=True)
@@ -1480,3 +1511,275 @@ def test_web_cli_defaults_loopback_allowlist_and_safe_server_options(
     ):
         assert main(["web", "--host", host]) == 1
         assert WEB_LOOPBACK_ERROR in capsys.readouterr().out
+
+
+def test_allocation_plan_renders_canonical_links_issues_and_is_read_only(tmp_path):
+    database_path, raws, payments, payers, rentals, obligations, _ = create_fixture(
+        tmp_path
+    )
+    account = add_account(rentals, "Plan Unit", "Plan Household")
+    payer = add_alias(payers, "Plan Payer", "PLAN SENDER")
+    rentals.add_payer(account.id, payer.id)
+    may = obligations.create(account.id, "2026-05", 70000, date(2026, 5, 1))
+    june = obligations.create(account.id, "2026-06", 60000, date(2026, 6, 1))
+    first = add_payment(raws, payments, 21, 50000, date(2026, 5, 3), "PLAN SENDER")
+    second = add_payment(raws, payments, 22, 80000, date(2026, 6, 3), "PLAN SENDER")
+    voided = add_payment(raws, payments, 23, 9000, date(2026, 6, 4), "PLAN SENDER")
+    unresolved = add_payment(
+        raws, payments, 24, 1000, date(2026, 6, 5), "UNRESOLVED PLAN SENDER"
+    )
+    void_gmail_payment(
+        SQLiteGmailPaymentRepository(database_path), voided.id, reason="Synthetic void"
+    )
+    before = database_snapshot(database_path)
+
+    assert web_composition.build_web_allocation_plan(
+        database_path, "2026-05", "2026-06"
+    ) == build_allocation_plan(
+        SQLiteAllocationPlanningRepository(database_path), "2026-05", "2026-06"
+    )
+    response = create_app(database_path).test_client().get(
+        "/allocation-plan?from=2026-05&to=2026-06"
+    )
+    output = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "Needs review" in output
+    assert "UNRESOLVED_SENDER" in output
+    assert f"Payment {unresolved.id} sender is unresolved." in output
+    assert f">Payment {first.id}</a>" in output
+    assert f">Payment {second.id}</a>" in output
+    assert f"obligation #{may.id}</a>: <strong>$500.00</strong>" in output
+    assert f"obligation #{may.id}</a>: <strong>$200.00</strong>" in output
+    assert f"obligation #{june.id}</a>: <strong>$600.00</strong>" in output
+    assert output.count(">PAID</span>") == 2
+    assert f">Payment {voided.id}</a>" not in output
+    assert "method=\"post\" action=\"/allocation-plan" not in output
+    assert ">Apply<" not in output
+    assert database_snapshot(database_path) == before
+    assert before[0] == CURRENT_SCHEMA_VERSION == 11
+
+
+def test_allocation_plan_validation_architecture_auth_and_methods(tmp_path, monkeypatch):
+    database_path = create_fixture(tmp_path)[0]
+    unauthenticated = create_web_app(database_path, TEST_AUTH_CONFIG).test_client()
+    assert unauthenticated.get("/allocation-plan?from=2026-05&to=2026-06").status_code == 302
+
+    client = create_app(database_path).test_client()
+    empty = client.get("/allocation-plan")
+    assert empty.status_code == 200
+    assert "Choose an inclusive From and To month" in empty.get_data(as_text=True)
+    for query in (
+        "from=banana&to=2026-06",
+        "from=2026-07&to=2026-06",
+        "from=2026-05&to=",
+    ):
+        invalid = client.get(f"/allocation-plan?{query}")
+        assert invalid.status_code == 400
+        assert "Invalid period range" in invalid.get_data(as_text=True)
+    assert client.post("/allocation-plan").status_code == 405
+    assert "SELECT " not in inspect.getsource(web_routes)
+    assert "SELECT " not in inspect.getsource(web_composition)
+
+    original_builder = web_composition.build_web_allocation_plan
+    calls = []
+
+    def recording_builder(path, period_from, period_to):
+        calls.append((path, period_from, period_to))
+        return original_builder(path, period_from, period_to)
+
+    monkeypatch.setattr(web_composition, "build_web_allocation_plan", recording_builder)
+    assert client.get("/allocation-plan?from=2026-05&to=2026-06").status_code == 200
+    assert calls == [(database_path, "2026-05", "2026-06")]
+
+
+def test_payment_details_render_gmail_manual_audits_allocations_and_privacy(tmp_path):
+    database_path, raws, payments, _, rentals, obligations, allocations = create_fixture(
+        tmp_path
+    )
+    account = add_account(
+        rentals,
+        "Detail <script>alert(1)</script>",
+        "Detail Household & <b>Example</b>",
+    )
+    obligation = obligations.create(
+        account.id, "2026-05", 100000, date(2026, 5, 1)
+    )
+    gmail = add_payment(
+        raws,
+        payments,
+        25,
+        100000,
+        date(2026, 5, 3),
+        "GMAIL <script>alert(2)</script>",
+        memo="PRIVATE_DETAIL_MEMO_SENTINEL",
+    )
+    allocations.create_checked(gmail.id, obligation.id, 60000)
+    gmail_voided = add_payment(
+        raws, payments, 26, 5000, date(2026, 5, 4), "VOIDED GMAIL SENDER"
+    )
+    void_gmail_payment(
+        SQLiteGmailPaymentRepository(database_path),
+        gmail_voided.id,
+        reason="Synthetic duplicate notification",
+    )
+    manual_repository = SQLiteManualPaymentRepository(database_path)
+    manual = create_manual_payment(
+        manual_repository,
+        "Manual & <b>Sender</b>",
+        "75.00",
+        "2026-05-05",
+        "Original synthetic note",
+    )
+    correct_manual_payment(
+        manual_repository,
+        manual.payment_event.id,
+        reason="Synthetic sender correction",
+        sender_name="Corrected <script>alert(3)</script>",
+    )
+    void_manual_payment(
+        manual_repository,
+        manual.payment_event.id,
+        reason="Synthetic manual void",
+    )
+    before = database_snapshot(database_path)
+    client = create_app(database_path).test_client()
+
+    gmail_response = client.get(f"/payments/{gmail.id}")
+    gmail_output = gmail_response.get_data(as_text=True)
+    assert gmail_response.status_code == 200
+    assert "Gmail evidence" in gmail_output
+    assert "$600.00" in gmail_output
+    assert "$400.00" in gmail_output
+    assert f'href="/rent-accounts/{account.id}#obligation-{obligation.id}"' in gmail_output
+    assert "&lt;script&gt;alert(2)&lt;/script&gt;" in gmail_output
+    assert "<script>alert(2)</script>" not in gmail_output
+
+    voided_output = client.get(f"/payments/{gmail_voided.id}").get_data(as_text=True)
+    assert "VOIDED" in voided_output
+    assert "Synthetic duplicate notification" in voided_output
+
+    manual_output = client.get(f"/payments/{manual.payment_event.id}").get_data(
+        as_text=True
+    )
+    assert "Manual evidence" in manual_output
+    assert "Original manual evidence" in manual_output
+    assert "Revision 1 — CORRECTION" in manual_output
+    assert "Revision 2 — VOID" in manual_output
+    assert "Synthetic sender correction" in manual_output
+    assert "Synthetic manual void" in manual_output
+    assert "&lt;script&gt;alert(3)&lt;/script&gt;" in manual_output
+    assert "<script>alert(3)</script>" not in manual_output
+    for sentinel in (
+        "PRIVATE_DETAIL_MEMO_SENTINEL",
+        "PRIVATE_SYNTHETIC_RAW_SENTINEL",
+        "PRIVATE_SYNTHETIC_GMAIL_ID_SENTINEL",
+        "PRIVATE_SYNTHETIC_OAUTH_CREDENTIAL_SENTINEL",
+        "PRIVATE_SYNTHETIC_OAUTH_TOKEN_SENTINEL",
+    ):
+        assert sentinel not in gmail_output
+        assert sentinel not in manual_output
+    assert client.get("/payments/999999").status_code == 404
+    assert client.post(f"/payments/{gmail.id}").status_code == 405
+    assert database_snapshot(database_path) == before
+
+
+def test_rent_account_detail_uses_canonical_reconciliation_and_cross_links(tmp_path):
+    database_path, raws, payments, payers, rentals, obligations, allocations = (
+        create_fixture(tmp_path)
+    )
+    account = add_account(
+        rentals,
+        "Account <script>alert(4)</script>",
+        "Account Household & <b>Example</b>",
+    )
+    first_payer = add_alias(payers, "First Payer", "FIRST ACCOUNT SENDER")
+    second_payer = add_alias(payers, "Second Payer", "SECOND ACCOUNT SENDER")
+    rentals.add_payer(account.id, first_payer.id)
+    rentals.add_payer(account.id, second_payer.id)
+    paid = obligations.create(account.id, "2026-05", 100000, date(2026, 5, 1))
+    partial = obligations.create(account.id, "2026-06", 100000, date(2026, 6, 1))
+    unpaid = obligations.create(account.id, "2026-07", 100000, date(2026, 7, 1))
+    first = add_payment(
+        raws, payments, 27, 60000, date(2026, 4, 30), "FIRST ACCOUNT SENDER"
+    )
+    second = add_payment(
+        raws, payments, 28, 80000, date(2026, 5, 15), "SECOND ACCOUNT SENDER"
+    )
+    allocations.create_checked(first.id, paid.id, 60000)
+    allocations.create_checked(second.id, paid.id, 40000)
+    allocations.create_checked(second.id, partial.id, 40000)
+    before = database_snapshot(database_path)
+
+    detail = web_composition.build_web_rent_account_detail(database_path, account.id)
+    assert [item.reconciliation for item in detail.obligations] == reconcile_all(
+        SQLiteReconciliationRepository(database_path)
+    )
+
+    response = create_app(database_path).test_client().get(
+        f"/rent-accounts/{account.id}"
+    )
+    output = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "First Payer" in output and "Second Payer" in output
+    assert output.index("MAY 2026") < output.index("JUNE 2026") < output.index("JULY 2026")
+    assert f'id="obligation-{paid.id}"' in output
+    assert f'id="obligation-{partial.id}"' in output
+    assert f'id="obligation-{unpaid.id}"' in output
+    assert ">PAID</span>" in output
+    assert ">PARTIAL</span>" in output
+    assert ">UNPAID</span>" in output
+    assert output.count(f'href="/payments/{first.id}"') == 1
+    assert output.count(f'href="/payments/{second.id}"') == 2
+    assert "$1,000.00" in output
+    assert "$400.00" in output
+    assert "$600.00" in output
+    assert "&lt;script&gt;alert(4)&lt;/script&gt;" in output
+    assert "<script>alert(4)</script>" not in output
+    client = create_app(database_path).test_client()
+    assert client.get("/rent-accounts/999999").status_code == 404
+    assert client.post(f"/rent-accounts/{account.id}").status_code == 405
+    assert database_snapshot(database_path) == before
+
+
+@pytest.mark.parametrize(
+    "path,builder",
+    (
+        ("/allocation-plan?from=2026-05&to=2026-06", "build_web_allocation_plan"),
+        ("/payments/1", "build_web_payment_detail"),
+        ("/rent-accounts/1", "build_web_rent_account_detail"),
+    ),
+)
+def test_operation_pages_fail_safely_without_creating_or_upgrading_database(
+    tmp_path, monkeypatch, path, builder
+):
+    missing = tmp_path / "missing-operations.sqlite3"
+    response = create_app(missing).test_client().get(path)
+    assert response.status_code == 503
+    assert "autorentledger db status" in response.get_data(as_text=True)
+    assert "autorentledger db upgrade" in response.get_data(as_text=True)
+    assert not missing.exists()
+
+    database_path = create_fixture(tmp_path)[0]
+    with sqlite3.connect(database_path) as connection:
+        connection.execute("PRAGMA user_version = 10")
+    before = database_snapshot(database_path)
+    assert create_app(database_path).test_client().get(path).status_code == 503
+    assert database_snapshot(database_path) == before
+
+    with sqlite3.connect(database_path) as connection:
+        connection.execute("PRAGMA user_version = 11")
+
+    def fail(*args):
+        raise RuntimeError("PRIVATE_OPERATION_ERROR_SENTINEL")
+
+    monkeypatch.setattr(web_composition, builder, fail)
+    before = database_snapshot(database_path)
+    failed = create_app(database_path).test_client().get(path)
+    assert failed.status_code == 500
+    output = failed.get_data(as_text=True)
+    assert "autorentledger db check" in output
+    assert "PRIVATE_OPERATION_ERROR_SENTINEL" not in output
+    assert "Traceback" not in output
+    assert database_snapshot(database_path) == before

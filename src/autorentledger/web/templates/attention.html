@@ -45,7 +45,7 @@
       <div class="review-list">
         {% for item in attention.unallocated_payments %}
           <article class="review-card">
-            <h3>Payment {{ item.reference_id }}</h3>
+            <h3><a href="{{ url_for('web.payment_detail', payment_event_id=item.reference_id) }}">Payment {{ item.reference_id }}</a></h3>
             <dl class="review-values">
               <div><dt>Remaining unallocated</dt><dd>{{ item.amount_cents|money }}</dd></div>
             </dl>

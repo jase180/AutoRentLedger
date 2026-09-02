@@ -19,6 +19,8 @@
             <a href="{{ url_for('web.payments') }}"{% if active_page == "payments" %} aria-current="page"{% endif %}>Payments</a>
             <span aria-hidden="true">|</span>
             <a href="{{ url_for('web.obligations') }}"{% if active_page == "obligations" %} aria-current="page"{% endif %}>Obligations</a>
+            <span aria-hidden="true">|</span>
+            <a href="{{ url_for('web.allocation_plan') }}"{% if active_page == "allocation-plan" %} aria-current="page"{% endif %}>Allocation Plan</a>
           </nav>
           <form class="logout-form" method="post" action="{{ url_for('auth.logout') }}">
             <button class="link-button" type="submit">Sign out</button>

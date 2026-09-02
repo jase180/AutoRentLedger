@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+
+{% block title %}Payment {{ detail.payment.payment_event_id }} | AutoRentLedger{% endblock %}
+
+{% block content %}
+  <section class="page-heading">
+    <div>
+      <p class="eyebrow">Normalized payment detail</p>
+      <h1>Payment {{ detail.payment.payment_event_id }}</h1>
+      <p class="section-note">{{ detail.source_type }} evidence · {% if detail.payment.voided_at %}VOIDED{% else %}ACTIVE{% endif %}</p>
+    </div>
+    <a class="back-link" href="{{ url_for('web.payments') }}">Back to payments</a>
+  </section>
+
+  <dl class="fact-grid">
+    <div><dt>Source</dt><dd>{{ detail.source_type }}</dd></div>
+    <div><dt>State</dt><dd>{% if detail.payment.voided_at %}<span class="status-badge">VOIDED</span>{% else %}ACTIVE{% endif %}</dd></div>
+    <div><dt>Date</dt><dd>{{ detail.payment.occurred_on if detail.payment.occurred_on else "Unknown" }}</dd></div>
+    <div><dt>Sender</dt><dd>{{ detail.payment.sender_name }}</dd></div>
+    <div><dt>Provider</dt><dd>{{ detail.payment.provider }}</dd></div>
+    <div><dt>Amount</dt><dd>{{ detail.payment.amount_cents|money }}</dd></div>
+    <div><dt>Allocated</dt><dd>{{ detail.payment.allocated_cents|money }}</dd></div>
+    <div><dt>Remaining</dt><dd>{{ detail.payment.unallocated_cents|money }}</dd></div>
+    <div><dt>Current payer</dt><dd>{% if detail.payment.payer_id is none %}Unresolved{% else %}{{ detail.payment.payer_display_name }} (payer {{ detail.payment.payer_id }}){% endif %}</dd></div>
+  </dl>
+
+  <section aria-labelledby="payment-allocations-heading">
+    <h2 id="payment-allocations-heading">Current allocations</h2>
+    {% if detail.allocations %}
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Allocation</th><th>Obligation</th><th>Period</th><th>Unit</th><th>Account</th><th class="money">Amount</th></tr></thead>
+          <tbody>
+            {% for allocation in detail.allocations %}
+              <tr>
+                <td>{{ allocation.allocation_id }}</td>
+                <td><a href="{{ url_for('web.rent_account_detail', rent_account_id=allocation.rent_account_id) }}#obligation-{{ allocation.rent_obligation_id }}">{{ allocation.rent_obligation_id }}</a></td>
+                <td>{{ allocation.period|month_heading }}</td>
+                <td>{{ allocation.unit_label }}</td>
+                <td><a href="{{ url_for('web.rent_account_detail', rent_account_id=allocation.rent_account_id) }}">{{ allocation.account_display_name }}</a></td>
+                <td class="money">{{ allocation.amount_cents|money }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="empty-state">No allocations.</p>
+    {% endif %}
+  </section>
+
+  <section aria-labelledby="payment-history-heading">
+    <h2 id="payment-history-heading">Audit history</h2>
+    {% if detail.gmail_history %}
+      <article class="detail-card">
+        <h3>Gmail-derived observation</h3>
+        <p>The normalized payment remains linked to immutable local Gmail evidence. Raw email content and Gmail message identity are not displayed.</p>
+        {% if detail.gmail_history.void %}
+          <dl class="fact-grid compact-facts">
+            <div><dt>Action</dt><dd>VOID</dd></div>
+            <div><dt>Reason</dt><dd>{{ detail.gmail_history.void.reason }}</dd></div>
+            <div><dt>Voided at</dt><dd>{{ detail.gmail_history.void.created_at }}</dd></div>
+          </dl>
+        {% else %}
+          <p class="empty-state">No Gmail void action.</p>
+        {% endif %}
+      </article>
+    {% else %}
+      <article class="detail-card">
+        <h3>Original manual evidence</h3>
+        <dl class="fact-grid compact-facts">
+          <div><dt>Date</dt><dd>{{ detail.manual_history.evidence.occurred_on }}</dd></div>
+          <div><dt>Sender</dt><dd>{{ detail.manual_history.evidence.sender_name }}</dd></div>
+          <div><dt>Amount</dt><dd>{{ detail.manual_history.evidence.amount_cents|money }}</dd></div>
+          <div><dt>Note</dt><dd>{{ detail.manual_history.evidence.note if detail.manual_history.evidence.note else "None" }}</dd></div>
+        </dl>
+      </article>
+      {% for revision in detail.manual_history.revisions %}
+        <article class="detail-card revision-card">
+          <h3>Revision {{ loop.index }} — {{ revision.revision_type|upper }}</h3>
+          <dl class="fact-grid compact-facts">
+            <div><dt>Reason</dt><dd>{{ revision.reason }}</dd></div>
+            <div><dt>Date</dt><dd>{{ revision.occurred_on }}</dd></div>
+            <div><dt>Sender</dt><dd>{{ revision.sender_name }}</dd></div>
+            <div><dt>Amount</dt><dd>{{ revision.amount_cents|money }}</dd></div>
+            <div><dt>Note</dt><dd>{{ revision.note if revision.note else "None" }}</dd></div>
+            <div><dt>Recorded at</dt><dd>{{ revision.created_at }}</dd></div>
+          </dl>
+        </article>
+      {% endfor %}
+      {% if not detail.manual_history.revisions %}<p class="empty-state">No manual revisions.</p>{% endif %}
+    {% endif %}
+  </section>
+{% endblock %}
