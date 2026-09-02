@@ -49,6 +49,12 @@ overviews are recomputed read models rather than persisted workflow state.
   obligation.
 - Actual obligations state what was owed. Schedules can explicitly generate missing obligations
   but never overwrite existing ones.
+- Rent obligation != late-fee charge. Explicit assessments live in `late_fee_charges`, linked to
+  an obligation for context only. Original assessment facts are retained; `late_fee_voids` records
+  the waiver/void reason and timestamp atomically with the charge's `voided_at` projection.
+  Fees are ACTIVE/VOIDED, not PAID/PARTIAL/UNPAID. They never change rent reconciliation or
+  planner balances and cannot receive payment allocations. No automatic assessment or legal
+  entitlement logic exists. The CLI owns assessment/void; account web detail is read-only.
 - Allocations are the only authoritative link between payment money and obligations. Their totals
   may exceed neither the source payment nor the destination obligation.
 - Exact aliases provide identity interpretation. No fuzzy, memo, or AI matching is authoritative.

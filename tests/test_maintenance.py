@@ -462,7 +462,7 @@ def test_cli_commands_are_private_schema_guarded_and_do_not_change_schema(tmp_pa
                 "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"
             )
         }
-    assert before_version == CURRENT_SCHEMA_VERSION == 11
+    assert before_version == CURRENT_SCHEMA_VERSION == 12
 
     assert main(["payer", "rename", str(payer.id), "Morgan Example", "--database", str(database_path)]) == 0
     assert main(["payer", "alias-remove", str(payer.id), "morgan unknown", "--database", str(database_path)]) == 1

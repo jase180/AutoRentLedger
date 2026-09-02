@@ -74,4 +74,30 @@
       <p class="empty-state">No obligations exist for this rent account.</p>
     {% endif %}
   </section>
+  <section aria-labelledby="late-fees-heading">
+    <h2 id="late-fees-heading">Late fees</h2>
+    <p class="section-note">Separate owner-assessed charges, not rent. ACTIVE and VOIDED are audit states, not payment status. Payments cannot be allocated to late fees yet.</p>
+    {% if detail.late_fees %}
+      <div class="panel-list">
+        {% for fee in detail.late_fees %}
+          <article class="detail-card" id="late-fee-{{ fee.charge.id }}">
+            <h3>Late fee #{{ fee.charge.id }} — {{ fee.period|month_heading }}</h3>
+            <p><a href="#obligation-{{ fee.charge.rent_obligation_id }}">Obligation {{ fee.charge.rent_obligation_id }}</a></p>
+            <dl class="fact-grid compact-facts">
+              <div><dt>Amount</dt><dd>{{ fee.charge.amount_cents|money }}</dd></div>
+              <div><dt>Assessed on</dt><dd>{{ fee.charge.assessed_on }}</dd></div>
+              <div><dt>Reason</dt><dd>{{ fee.charge.reason }}</dd></div>
+              <div><dt>State</dt><dd>{{ "VOIDED" if fee.charge.voided_at else "ACTIVE" }}</dd></div>
+            </dl>
+            {% if fee.void %}
+              <p>Void reason: {{ fee.void.reason }}</p>
+              <p>Voided at: {{ fee.void.created_at }}</p>
+            {% endif %}
+          </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="empty-state">No late fees.</p>
+    {% endif %}
+  </section>
 {% endblock %}

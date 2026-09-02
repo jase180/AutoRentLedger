@@ -297,7 +297,7 @@ def test_cli_report_is_read_only_private_safe_and_summarized(tmp_path, capsys):
     assert MEMO_SENTINEL not in output
     assert GMAIL_ID_SENTINEL not in output
     assert database_snapshot(database_path) == before
-    assert CURRENT_SCHEMA_VERSION == 11
+    assert CURRENT_SCHEMA_VERSION == 12
 
 
 def test_discovery_does_not_change_guided_setup_or_create_accounting(tmp_path):

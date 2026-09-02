@@ -91,7 +91,7 @@ def test_listing_composes_exact_aliases_allocations_dates_and_stable_order(tmp_p
     assert all(record.provider == "synthetic_provider" for record in records)
 
     with sqlite3.connect(database_path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 11
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 12
 
 
 def test_listing_identity_changes_dynamically_without_changing_payment(tmp_path):

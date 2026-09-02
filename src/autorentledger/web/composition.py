@@ -7,6 +7,7 @@ from pathlib import Path
 
 from autorentledger.allocation_planning import AllocationPlan, build_allocation_plan
 from autorentledger.gmail_payments import GmailPaymentHistory, get_gmail_payment_history
+from autorentledger.late_fees import list_late_fees
 from autorentledger.manual_payments import ManualPaymentHistory, get_manual_payment_history
 from autorentledger.overview import OwnerOverview, build_owner_overview
 from autorentledger.payment_listing import PaymentListRecord, list_payment_records
@@ -18,12 +19,14 @@ from autorentledger.reconciliation import (
 )
 from autorentledger.review import ReviewItem, ReviewKind, collect_review_items
 from autorentledger.storage import (
+    LateFeeHistory,
     PayerRecord,
     PaymentEventRecord,
     RentAccountSummary,
     SQLiteAllocationPlanningRepository,
     SQLiteAllocationRepository,
     SQLiteGmailPaymentRepository,
+    SQLiteLateFeeRepository,
     SQLiteManualPaymentRepository,
     SQLiteObligationRepository,
     SQLitePaymentEventRepository,
@@ -139,6 +142,7 @@ class RentAccountDetail:
     account: RentAccountSummary
     payers: tuple[PayerRecord, ...]
     obligations: tuple[RentAccountObligationDetail, ...]
+    late_fees: tuple[LateFeeHistory, ...]
 
 
 def build_web_owner_overview(database_path: Path, period: str) -> OwnerOverview:
@@ -316,7 +320,10 @@ def build_web_rent_account_detail(
         obligations.append(
             RentAccountObligationDetail(reconciliation, tuple(contributions))
         )
-    return RentAccountDetail(account, payers, tuple(obligations))
+    late_fees = list_late_fees(
+        SQLiteLateFeeRepository(database_path), account_id=rent_account_id
+    )
+    return RentAccountDetail(account, payers, tuple(obligations), late_fees)
 
 
 def _items_of_kind(

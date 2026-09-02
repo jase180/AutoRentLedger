@@ -11,7 +11,7 @@ from pathlib import Path
 
 from autorentledger.parsing.version import LEGACY_UNVERSIONED_PARSER_VERSION
 
-CURRENT_SCHEMA_VERSION = 11
+CURRENT_SCHEMA_VERSION = 12
 
 RAW_EMAILS_SQL = """
     CREATE TABLE IF NOT EXISTS raw_emails (
@@ -135,6 +135,31 @@ GMAIL_PAYMENT_VOIDS_SQL = """
     )
 """
 
+LATE_FEE_CHARGES_SQL = """
+    CREATE TABLE late_fee_charges (
+        id INTEGER PRIMARY KEY,
+        rent_obligation_id INTEGER NOT NULL,
+        amount_cents INTEGER NOT NULL CHECK(amount_cents > 0),
+        assessed_on TEXT NOT NULL,
+        reason TEXT NOT NULL CHECK(length(trim(reason)) > 0),
+        created_at TEXT NOT NULL,
+        voided_at TEXT,
+        FOREIGN KEY (rent_obligation_id)
+            REFERENCES rent_obligations(id) ON DELETE RESTRICT
+    )
+"""
+
+LATE_FEE_VOIDS_SQL = """
+    CREATE TABLE late_fee_voids (
+        id INTEGER PRIMARY KEY,
+        late_fee_charge_id INTEGER NOT NULL UNIQUE,
+        reason TEXT NOT NULL CHECK(length(trim(reason)) > 0),
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (late_fee_charge_id)
+            REFERENCES late_fee_charges(id) ON DELETE RESTRICT
+    )
+"""
+
 PAYERS_SQL = """
     CREATE TABLE IF NOT EXISTS payers (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -247,6 +272,11 @@ RENT_SCHEDULES_SQL = """
 """
 
 EXPECTED_COLUMNS: dict[str, frozenset[str]] = {
+    "late_fee_charges": frozenset(
+        {"id", "rent_obligation_id", "amount_cents", "assessed_on", "reason",
+         "created_at", "voided_at"}
+    ),
+    "late_fee_voids": frozenset({"id", "late_fee_charge_id", "reason", "created_at"}),
     "raw_emails": frozenset(
         {
             "id",
@@ -321,6 +351,10 @@ EXPECTED_COLUMNS: dict[str, frozenset[str]] = {
     ),
 }
 
+PRE_LATE_FEE_TABLES = frozenset(
+    set(EXPECTED_COLUMNS) - {"late_fee_charges", "late_fee_voids"}
+)
+
 TABLES_BY_VERSION: dict[int, frozenset[str]] = {
     0: frozenset(),
     1: frozenset({"raw_emails"}),
@@ -350,7 +384,7 @@ TABLES_BY_VERSION: dict[int, frozenset[str]] = {
         }
     ),
     6: frozenset(
-        set(EXPECTED_COLUMNS)
+        set(PRE_LATE_FEE_TABLES)
         - {
             "rent_schedules",
             "manual_payment_evidence",
@@ -359,7 +393,7 @@ TABLES_BY_VERSION: dict[int, frozenset[str]] = {
         }
     ),
     7: frozenset(
-        set(EXPECTED_COLUMNS)
+        set(PRE_LATE_FEE_TABLES)
         - {
             "manual_payment_evidence",
             "manual_payment_revisions",
@@ -367,7 +401,7 @@ TABLES_BY_VERSION: dict[int, frozenset[str]] = {
         }
     ),
     8: frozenset(
-        set(EXPECTED_COLUMNS)
+        set(PRE_LATE_FEE_TABLES)
         - {
             "manual_payment_evidence",
             "manual_payment_revisions",
@@ -375,10 +409,11 @@ TABLES_BY_VERSION: dict[int, frozenset[str]] = {
         }
     ),
     9: frozenset(
-        set(EXPECTED_COLUMNS) - {"manual_payment_revisions", "gmail_payment_voids"}
+        set(PRE_LATE_FEE_TABLES) - {"manual_payment_revisions", "gmail_payment_voids"}
     ),
-    10: frozenset(set(EXPECTED_COLUMNS) - {"gmail_payment_voids"}),
-    11: frozenset(EXPECTED_COLUMNS),
+    10: frozenset(set(PRE_LATE_FEE_TABLES) - {"gmail_payment_voids"}),
+    11: PRE_LATE_FEE_TABLES,
+    12: frozenset(EXPECTED_COLUMNS),
 }
 
 PAYMENT_EVENT_COLUMNS_V7 = frozenset(
@@ -532,6 +567,15 @@ def add_gmail_payment_voids(connection: sqlite3.Connection) -> None:
     connection.execute(GMAIL_PAYMENT_VOIDS_SQL)
 
 
+def add_late_fee_charges(connection: sqlite3.Connection) -> None:
+    """Add separate owner-assessed charges and append-only void audit records."""
+    connection.execute(LATE_FEE_CHARGES_SQL)
+    connection.execute(LATE_FEE_VOIDS_SQL)
+    connection.execute(
+        "CREATE INDEX late_fee_obligation_idx ON late_fee_charges(rent_obligation_id)"
+    )
+
+
 MIGRATIONS: dict[int, Migration] = {
     1: create_raw_email_schema,
     2: create_payment_event_v2_schema,
@@ -544,6 +588,7 @@ MIGRATIONS: dict[int, Migration] = {
     9: add_manual_payment_evidence,
     10: add_manual_payment_revisions,
     11: add_gmail_payment_voids,
+    12: add_late_fee_charges,
 }
 
 

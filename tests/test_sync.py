@@ -323,7 +323,7 @@ def test_sync_write_boundary_excludes_accounting_configuration_and_generation(tm
     assert len(result.actionable_suggestions) == 1
     assert table_snapshot(database_path, protected_tables) == before
     assert schema_snapshot(database_path) == before_schema
-    assert before_schema[0] == CURRENT_SCHEMA_VERSION == 11
+    assert before_schema[0] == CURRENT_SCHEMA_VERSION == 12
     assert obligations.get_for_account_period(account.id, "2026-10") is None
     assert allocations.list_summaries() == []
     assert not any("sync" in table for table in before_schema[1])

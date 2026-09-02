@@ -363,7 +363,7 @@ def test_v10_to_v11_migration_preserves_rows_and_is_transactional(tmp_path):
 
     result = upgrade_database(database_path)
 
-    assert (result.from_version, result.to_version) == (10, 11)
+    assert (result.from_version, result.to_version) == (10, 12)
     assert table_rows(database_path, "raw_emails") == raw_before
     assert table_rows(database_path, "payment_events") == payment_before
     assert table_rows(database_path, "manual_payment_evidence") == manual_evidence_before
@@ -372,7 +372,7 @@ def test_v10_to_v11_migration_preserves_rows_and_is_transactional(tmp_path):
     assert SQLitePaymentEventRepository(database_path).get(payment.id).raw_email_id == raw.id
     assert table_rows(database_path, "gmail_payment_voids") == []
     with sqlite3.connect(database_path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 11
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 12
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
 
     rollback_path = tmp_path / "v10-rollback.sqlite3"
@@ -396,7 +396,7 @@ def test_v10_to_v11_migration_preserves_rows_and_is_transactional(tmp_path):
         ).fetchone() is None
 
 
-def test_schema_is_v11_and_has_no_generic_payment_action_tables(tmp_path):
+def test_schema_is_current_and_has_no_generic_payment_action_tables(tmp_path):
     database_path = create_database(tmp_path)
     with sqlite3.connect(database_path) as connection:
         tables = {
@@ -405,7 +405,7 @@ def test_schema_is_v11_and_has_no_generic_payment_action_tables(tmp_path):
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             )
         }
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 11
-    assert CURRENT_SCHEMA_VERSION == 11
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 12
+    assert CURRENT_SCHEMA_VERSION == 12
     assert "gmail_payment_voids" in tables
     assert "payment_actions" not in tables

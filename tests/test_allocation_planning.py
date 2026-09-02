@@ -154,7 +154,7 @@ def test_cli_parser_preview_default_apply_and_period_validation(tmp_path, capsys
         capsys.readouterr()
 
 
-def test_preview_is_read_only_and_schema_stays_v11(tmp_path, capsys):
+def test_preview_is_read_only_and_schema_stays_current(tmp_path, capsys):
     database_path = create_database(tmp_path)
     account, _ = add_account(database_path, 1)
     add_obligation(database_path, account.id, "2026-05", 100000, date(2026, 5, 5))
@@ -178,7 +178,7 @@ def test_preview_is_read_only_and_schema_stays_v11(tmp_path, capsys):
     assert "Payment 1" in output
     assert "No allocations were created" in output
     assert snapshot(database_path) == before
-    assert before[0] == CURRENT_SCHEMA_VERSION == 11
+    assert before[0] == CURRENT_SCHEMA_VERSION == 12
 
 
 def test_two_payments_fill_one_obligation_and_payment_month_is_not_inferred(tmp_path):

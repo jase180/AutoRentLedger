@@ -988,6 +988,38 @@ CSV files are derived projections, not sources of truth. Obligation totals use o
 payment intake uses payment occurrence date and includes allocations from those payments even when
 they target another month.
 
+## Late fees
+
+Rent obligation != late-fee charge. M28A records an explicit owner assessment; it does not
+decide whether a fee is legally permitted, infer a fee from dates/status, or create fees
+automatically. Upgrade explicitly with `autorentledger db upgrade` before using schema v12.
+That command preserves a pre-upgrade backup; do not reset the database.
+
+Synthetic examples (IDs must be replaced with the intended local records):
+
+```powershell
+autorentledger late-fee assess `
+  --obligation 31 --amount 50.00 --assessed-on 2026-05-10 `
+  --reason "Rent unpaid after grace period"
+autorentledger late-fee list --period 2026-05
+autorentledger late-fee list --account 4 --active-only
+autorentledger late-fee history 7
+autorentledger late-fee void 7 --reason "Fee waived"
+```
+
+All commands accept `--database`. Listing is ordered by assessed date then fee ID and includes
+voided fees unless `--active-only` is supplied. An active fee with the same obligation, amount,
+and assessed date blocks a new assessment unless explicitly overridden with `--confirm-duplicate`.
+The reason is not a duplicate key; a voided matching assessment does not block a new one.
+
+Void appends an audit and marks the charge VOIDED in one transaction. Original amount, date,
+reason, and creation timestamp remain unchanged. There is no delete or unvoid command.
+
+Fees remain separate ACTIVE/VOIDED charges, not payment-allocation targets. They do not change
+rent owed/paid/remaining, PAID/PARTIAL/UNPAID reconciliation, or the historical allocation planner.
+A paid rent obligation and an active late fee may coexist. Account web detail shows assessments
+and void reasons separately; it cannot assess or void fees. No fee payment status is implied.
+
 ## Privacy and Git safety
 
 Never commit operational data or secrets:

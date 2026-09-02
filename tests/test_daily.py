@@ -540,5 +540,5 @@ def test_repeated_daily_runs_create_separate_backups_without_duplicate_evidence(
     assert SQLitePaymentEventRepository(database_path).count() == 1
     for table in protected_tables:
         assert before[1][table] == after[1][table]
-    assert after[2] == CURRENT_SCHEMA_VERSION == 11
+    assert after[2] == CURRENT_SCHEMA_VERSION == 12
     assert before[0] == after[0]

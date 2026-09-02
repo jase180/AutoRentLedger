@@ -317,7 +317,7 @@ pytest
 
 GitHub Actions runs the same checks on Python 3.11 for every push and pull request. Tests use
 synthetic local fixtures and require no Gmail credentials, network access, or operational database.
-The current SQLite schema version is 10.
+The current SQLite schema version is 12.
 
 The application uses Python, standard-library `sqlite3`, and a small service/repository structure
 under `src/autorentledger/`. Gmail remains behind an email-source adapter; domain and read-model
@@ -330,9 +330,20 @@ services do not depend on Google SDK objects.
 - [Architecture and maintenance notes](docs/ARCHITECTURE.md): source-of-truth boundaries,
   invariants, and dependency-update procedure.
 
+## Explicit late fees
+
+`autorentledger late-fee assess`, `late-fee void`, `late-fee history`, and `late-fee list`
+record and inspect owner-assessed charges separately from rent obligations. Assessments retain
+their original facts; waivers/voids append an audit record. Account web detail displays fees
+read-only. See [Late fees](docs/RUNBOOK.md#late-fees) for commands and duplicate protection.
+
+Rent obligation != late-fee charge. Fees do not change rent reconciliation or allocation plans,
+cannot receive payment allocations yet, and have only ACTIVE/VOIDED states. The app neither
+automatically assesses fees nor decides whether they are legally permitted.
+
 ## Explicit non-goals
 
 AutoRentLedger is not a lease manager, tenant balance system, general ledger, or full
-property-management platform. It does not model security deposits, late fees, credits, expenses,
+property-management platform. It does not model security deposits, automatic late-fee policies, credits, expenses,
 NOI, double-entry bookkeeping, or AI/fuzzy payment matching. It has no public/write-capable web UI,
 internal scheduler, background jobs, cloud backup, or automatic accounting policy.
