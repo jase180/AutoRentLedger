@@ -278,7 +278,7 @@ def test_cli_assess_duplicate_history_list_void_and_no_unvoid(ledger, capsys):
     assert "Voided at:" in output
     assert run("list", "--active-only") == 0
     output = capsys.readouterr().out
-    assert "ACTIVE" in output and "VOIDED" not in output
+    assert "UNPAID" in output and "VOIDED" not in output
     assert run("history", "999") == 1
     assert "does not exist" in capsys.readouterr().out
     with pytest.raises(SystemExit):
@@ -330,7 +330,7 @@ def test_web_fees_separate_escaped_authenticated_and_read_only(ledger):
     response = client.get(url)
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert "Late fees" in html and "ACTIVE" in html and "VOIDED" in html
+    assert "Late fees" in html and "UNPAID" in html and "VOIDED" in html
     assert "$1,350.00" in html and "$50.01" in html and "$25.00" in html
     assert "UNPAID" in html
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
@@ -385,17 +385,19 @@ def create_v11(path):
     )
 
 
-def test_v11_to_v12_only_adds_fee_tables_and_preserves_all_old_data(tmp_path):
+def test_v11_to_current_adds_fee_tables_and_preserves_all_old_data(tmp_path):
     path = tmp_path / "v11.sqlite3"
     create_v11(path)
     before = snapshot(path)
     result = upgrade_database(path)
     after = snapshot(path)
-    assert (result.from_version, result.to_version) == (11, 12)
-    assert after[0] == CURRENT_SCHEMA_VERSION == 12
+    assert (result.from_version, result.to_version) == (11, 13)
+    assert after[0] == CURRENT_SCHEMA_VERSION == 13
     assert all(entry in after[1] for entry in before[1])
     assert all(after[2][name] == rows for name, rows in before[2].items())
-    assert set(after[2]) - set(before[2]) == {"late_fee_charges", "late_fee_voids"}
+    assert set(after[2]) - set(before[2]) == {
+        "late_fee_charges", "late_fee_voids", "late_fee_allocations"
+    }
     with sqlite3.connect(path) as connection:
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
         for table, parent in [

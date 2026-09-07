@@ -76,7 +76,7 @@
   </section>
   <section aria-labelledby="late-fees-heading">
     <h2 id="late-fees-heading">Late fees</h2>
-    <p class="section-note">Separate owner-assessed charges, not rent. ACTIVE and VOIDED are audit states, not payment status. Payments cannot be allocated to late fees yet.</p>
+    <p class="section-note">Separate owner-assessed charges, not rent. Payment satisfaction is derived only from explicit late-fee allocations.</p>
     {% if detail.late_fees %}
       <div class="panel-list">
         {% for fee in detail.late_fees %}
@@ -85,10 +85,22 @@
             <p><a href="#obligation-{{ fee.charge.rent_obligation_id }}">Obligation {{ fee.charge.rent_obligation_id }}</a></p>
             <dl class="fact-grid compact-facts">
               <div><dt>Amount</dt><dd>{{ fee.charge.amount_cents|money }}</dd></div>
+              <div><dt>Allocated</dt><dd>{{ fee.allocated_cents|money }}</dd></div>
+              <div><dt>Remaining</dt><dd>{{ fee.remaining_cents|money }}</dd></div>
               <div><dt>Assessed on</dt><dd>{{ fee.charge.assessed_on }}</dd></div>
               <div><dt>Reason</dt><dd>{{ fee.charge.reason }}</dd></div>
-              <div><dt>State</dt><dd>{{ "VOIDED" if fee.charge.voided_at else "ACTIVE" }}</dd></div>
+              <div><dt>Status</dt><dd>{{ fee.status.value }}</dd></div>
             </dl>
+            <h3 class="subsection-heading">Contributing payments</h3>
+            {% if fee.allocations %}
+              <ul class="plain-list">
+                {% for allocation in fee.allocations %}
+                  <li>Allocation {{ allocation.id }} — payment <a href="{{ url_for('web.payment_detail', payment_event_id=allocation.payment_event_id) }}">{{ allocation.payment_event_id }}</a>: {{ allocation.amount_cents|money }}</li>
+                {% endfor %}
+              </ul>
+            {% else %}
+              <p class="empty-state">No contributing payments.</p>
+            {% endif %}
             {% if fee.void %}
               <p>Void reason: {{ fee.void.reason }}</p>
               <p>Voided at: {{ fee.void.created_at }}</p>

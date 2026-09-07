@@ -59,7 +59,8 @@ The important distinctions are:
 | Payer | The identity that sent money. A payer is not a rent account. |
 | Rent account | The household/account associated with a unit and eventual rent responsibility. |
 | Obligation | The authoritative fact that a specific account owed an amount for a month. |
-| Allocation | The explicit accounting link saying part of a payment satisfies an obligation. |
+| Rent allocation | The explicit accounting link saying part of a payment satisfies a rent obligation. |
+| Late-fee allocation | A separate explicit link saying part of a payment satisfies a late-fee charge. |
 
 Schedules are instructions for explicitly creating future obligations; they are not debt. Reports,
 review items, suggestions, and the owner overview are read-only projections of existing facts.
@@ -281,7 +282,8 @@ Observed evidence and historical accounting are intentionally protected:
   normalized payment projection. Voids deactivate the projection without deleting evidence or
   history; neither operation applies to Gmail-derived payments.
 - Existing obligations are never overwritten by schedules.
-- Allocations are created and removed explicitly; suggestions never apply themselves.
+- Rent and late-fee allocations are created and removed explicitly; suggestions never apply
+  themselves. Their combined total may not exceed the payment amount.
 - Reporting, review, reconciliation, suggestions, health checks, and overview are read-only.
 
 ## Database backup and recovery
@@ -317,7 +319,7 @@ pytest
 
 GitHub Actions runs the same checks on Python 3.11 for every push and pull request. Tests use
 synthetic local fixtures and require no Gmail credentials, network access, or operational database.
-The current SQLite schema version is 12.
+The current SQLite schema version is 13.
 
 The application uses Python, standard-library `sqlite3`, and a small service/repository structure
 under `src/autorentledger/`. Gmail remains behind an email-source adapter; domain and read-model
@@ -333,13 +335,17 @@ services do not depend on Google SDK objects.
 ## Explicit late fees
 
 `autorentledger late-fee assess`, `late-fee void`, `late-fee history`, and `late-fee list`
-record and inspect owner-assessed charges separately from rent obligations. Assessments retain
-their original facts; waivers/voids append an audit record. Account web detail displays fees
-read-only. See [Late fees](docs/RUNBOOK.md#late-fees) for commands and duplicate protection.
+record and inspect owner-assessed charges separately from rent obligations. Explicit
+`late-fee allocation add/remove` commands link payment money to those charges without changing
+rent allocations. Assessments retain their original facts; waivers/voids append an audit record.
+Payment and account web details display both allocation types read-only. See
+[Late fees](docs/RUNBOOK.md#late-fees) for commands and duplicate protection.
 
-Rent obligation != late-fee charge. Fees do not change rent reconciliation or allocation plans,
-cannot receive payment allocations yet, and have only ACTIVE/VOIDED states. The app neither
-automatically assesses fees nor decides whether they are legally permitted.
+Rent obligation != late-fee charge. Rent reconciliation and late-fee UNPAID/PARTIAL/PAID status
+remain separate. A voided charge has primary state VOIDED. Existing late-fee allocations reduce
+money available to the rent-only historical planner, but the planner never targets fees. The app
+neither automatically assesses nor allocates fees and does not decide whether they are legally
+permitted.
 
 ## Explicit non-goals
 

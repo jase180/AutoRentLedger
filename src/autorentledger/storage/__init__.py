@@ -1,6 +1,13 @@
 """Local persistence adapters."""
 
+from autorentledger.storage.late_fee_allocations import (
+    LateFeeAllocationRecord,
+    LateFeeAllocationSummary,
+    SQLiteLateFeeAllocationRepository,
+)
 from autorentledger.storage.late_fees import (
+    LateFeeAllocationConflictError,
+    LateFeeAllocationReference,
     LateFeeAlreadyVoidedError,
     LateFeeAuditInvariantError,
     LateFeeCharge,
@@ -8,6 +15,7 @@ from autorentledger.storage.late_fees import (
     LateFeeHistory,
     LateFeeNotFoundError,
     LateFeeObligationNotFoundError,
+    LateFeePaymentStatus,
     LateFeeVoid,
     SQLiteLateFeeRepository,
 )
@@ -132,6 +140,10 @@ __all__ = [
     "GmailPaymentVoidRecord",
     "GmailPaymentVoidStorageResult",
     "GmailPaymentVoidedStorageError",
+    "LateFeeAllocationConflictError",
+    "LateFeeAllocationRecord",
+    "LateFeeAllocationReference",
+    "LateFeeAllocationSummary",
     "LateFeeAlreadyVoidedError",
     "LateFeeAuditInvariantError",
     "LateFeeCharge",
@@ -139,6 +151,7 @@ __all__ = [
     "LateFeeHistory",
     "LateFeeNotFoundError",
     "LateFeeObligationNotFoundError",
+    "LateFeePaymentStatus",
     "LateFeeVoid",
     "MaintenanceAliasNotFoundError",
     "MaintenanceAliasOwnerError",
@@ -191,6 +204,7 @@ __all__ = [
     "SQLiteAllocationRepository",
     "SQLiteDiscoveryRepository",
     "SQLiteGmailPaymentRepository",
+    "SQLiteLateFeeAllocationRepository",
     "SQLiteLateFeeRepository",
     "SQLiteManualPaymentRepository",
     "SQLiteObligationRepository",

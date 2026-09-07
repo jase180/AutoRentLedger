@@ -23,6 +23,8 @@ class PaymentListRecord:
     payer_id: int | None
     payer_display_name: str | None
     allocated_cents: int
+    rent_allocated_cents: int
+    late_fee_allocated_cents: int
     unallocated_cents: int
     voided_at: str | None
 
@@ -62,6 +64,8 @@ def list_payment_records(
                 payer_id=alias.payer_id if alias else None,
                 payer_display_name=alias.payer_display_name if alias else None,
                 allocated_cents=source.allocated_cents,
+                rent_allocated_cents=source.rent_allocated_cents,
+                late_fee_allocated_cents=source.late_fee_allocated_cents,
                 unallocated_cents=unallocated_cents,
                 voided_at=source.voided_at,
             )

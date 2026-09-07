@@ -52,25 +52,30 @@ overviews are recomputed read models rather than persisted workflow state.
 - Rent obligation != late-fee charge. Explicit assessments live in `late_fee_charges`, linked to
   an obligation for context only. Original assessment facts are retained; `late_fee_voids` records
   the waiver/void reason and timestamp atomically with the charge's `voided_at` projection.
-  Fees are ACTIVE/VOIDED, not PAID/PARTIAL/UNPAID. They never change rent reconciliation or
-  planner balances and cannot receive payment allocations. No automatic assessment or legal
-  entitlement logic exists. The CLI owns assessment/void; account web detail is read-only.
-- Allocations are the only authoritative link between payment money and obligations. Their totals
-  may exceed neither the source payment nor the destination obligation.
+  Active fees derive UNPAID/PARTIAL/PAID only from explicit `late_fee_allocations`; voided fees
+  have primary state VOIDED. Fees never change rent reconciliation. No automatic assessment or
+  legal-entitlement logic exists. The CLI owns assessment, void, and allocation; web detail is
+  read-only.
+- `payment_allocations` links payment money to rent obligations. `late_fee_allocations` separately
+  links payment money to late-fee charges. Rent allocation plus late-fee allocation may not exceed
+  the source payment, and neither destination may receive more than its own remaining balance.
+  This is one combined payment-capacity invariant, not a polymorphic allocation model.
 - Exact aliases provide identity interpretation. No fuzzy, memo, or AI matching is authoritative.
 - Suggestions are derived, conservative, and non-authoritative; users apply allocations explicitly.
 - Historical allocation plans are ephemeral and review-first. They require exact identity and an
   unambiguous explicit account association, then simulate oldest-outstanding-first. Chronology is
   only a deterministic planning heuristic, never evidence of which rent month a payment satisfies.
+  The planner remains rent-only but subtracts existing late-fee allocations from payment capacity.
 - The CLI owns explicit mutations. The authenticated Flask UI remains read-only and loopback-only;
   allocation-plan and drill-down pages compose the canonical planner, audit, allocation, and
   reconciliation services used by terminal workflows.
 - `sync` and `daily` may refresh raw evidence and payment events only. They never create aliases,
   allocations, or obligations and never rebuild old payments automatically.
 - Parser rebuild is explicit, applies only to Gmail-derived events, and cannot reduce a payment
-  below its allocated total. Manual events are never reparsed.
-- Manual correction cannot reduce a payment below its allocated total, and void requires zero
-  allocations. Neither operation changes aliases, obligations, or allocation targets.
+  below its combined rent-and-fee allocated total. Manual events are never reparsed.
+- Manual correction cannot reduce a payment below its combined allocated total, and either payment
+  void path requires zero allocations of both kinds. A fee must likewise have zero fee allocations
+  before void. None of these operations changes aliases, obligations, or allocation targets.
 - Restore validates a current-schema candidate and never silently migrates it.
 
 ## Dependency maintenance

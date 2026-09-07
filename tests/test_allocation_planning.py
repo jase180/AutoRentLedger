@@ -178,7 +178,7 @@ def test_preview_is_read_only_and_schema_stays_current(tmp_path, capsys):
     assert "Payment 1" in output
     assert "No allocations were created" in output
     assert snapshot(database_path) == before
-    assert before[0] == CURRENT_SCHEMA_VERSION == 12
+    assert before[0] == CURRENT_SCHEMA_VERSION == 13
 
 
 def test_two_payments_fill_one_obligation_and_payment_month_is_not_inferred(tmp_path):

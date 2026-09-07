@@ -990,9 +990,9 @@ they target another month.
 
 ## Late fees
 
-Rent obligation != late-fee charge. M28A records an explicit owner assessment; it does not
+Rent obligation != late-fee charge. AutoRentLedger records an explicit owner assessment; it does not
 decide whether a fee is legally permitted, infer a fee from dates/status, or create fees
-automatically. Upgrade explicitly with `autorentledger db upgrade` before using schema v12.
+automatically. Upgrade explicitly with `autorentledger db upgrade` before using schema v13.
 That command preserves a pre-upgrade backup; do not reset the database.
 
 Synthetic examples (IDs must be replaced with the intended local records):
@@ -1004,6 +1004,9 @@ autorentledger late-fee assess `
 autorentledger late-fee list --period 2026-05
 autorentledger late-fee list --account 4 --active-only
 autorentledger late-fee history 7
+autorentledger late-fee allocation add `
+  --payment 12 --late-fee 7 --amount 50.00
+autorentledger late-fee allocation remove 9
 autorentledger late-fee void 7 --reason "Fee waived"
 ```
 
@@ -1013,12 +1016,16 @@ and assessed date blocks a new assessment unless explicitly overridden with `--c
 The reason is not a duplicate key; a voided matching assessment does not block a new one.
 
 Void appends an audit and marks the charge VOIDED in one transaction. Original amount, date,
-reason, and creation timestamp remain unchanged. There is no delete or unvoid command.
+reason, and creation timestamp remain unchanged. A fee with allocations must have those links
+removed explicitly before it can be voided. There is no delete or unvoid command.
 
-Fees remain separate ACTIVE/VOIDED charges, not payment-allocation targets. They do not change
-rent owed/paid/remaining, PAID/PARTIAL/UNPAID reconciliation, or the historical allocation planner.
-A paid rent obligation and an active late fee may coexist. Account web detail shows assessments
-and void reasons separately; it cannot assess or void fees. No fee payment status is implied.
+`payment_allocations` means payment to rent obligation. `late_fee_allocations` means payment to
+late-fee charge. Both links are explicit; excess payment money is never inferred to satisfy a fee.
+Their combined amount cannot exceed the payment amount. Active fees derive UNPAID, PARTIAL, or
+PAID from their own allocations, while a voided fee displays VOIDED. These statuses do not change
+rent owed/paid/remaining or rent reconciliation. The historical planner remains rent-only, though
+it subtracts fee allocations when determining remaining payment capacity. Payment and account web
+details display both allocation types separately and cannot create or remove either one.
 
 ## Privacy and Git safety
 

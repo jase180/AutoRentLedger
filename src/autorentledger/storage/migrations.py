@@ -11,7 +11,7 @@ from pathlib import Path
 
 from autorentledger.parsing.version import LEGACY_UNVERSIONED_PARSER_VERSION
 
-CURRENT_SCHEMA_VERSION = 12
+CURRENT_SCHEMA_VERSION = 13
 
 RAW_EMAILS_SQL = """
     CREATE TABLE IF NOT EXISTS raw_emails (
@@ -160,6 +160,21 @@ LATE_FEE_VOIDS_SQL = """
     )
 """
 
+LATE_FEE_ALLOCATIONS_SQL = """
+    CREATE TABLE late_fee_allocations (
+        id INTEGER PRIMARY KEY,
+        payment_event_id INTEGER NOT NULL,
+        late_fee_charge_id INTEGER NOT NULL,
+        amount_cents INTEGER NOT NULL CHECK(amount_cents > 0),
+        created_at TEXT NOT NULL,
+        UNIQUE(payment_event_id, late_fee_charge_id),
+        FOREIGN KEY(payment_event_id)
+            REFERENCES payment_events(id) ON DELETE RESTRICT,
+        FOREIGN KEY(late_fee_charge_id)
+            REFERENCES late_fee_charges(id) ON DELETE RESTRICT
+    )
+"""
+
 PAYERS_SQL = """
     CREATE TABLE IF NOT EXISTS payers (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -277,6 +292,9 @@ EXPECTED_COLUMNS: dict[str, frozenset[str]] = {
          "created_at", "voided_at"}
     ),
     "late_fee_voids": frozenset({"id", "late_fee_charge_id", "reason", "created_at"}),
+    "late_fee_allocations": frozenset(
+        {"id", "payment_event_id", "late_fee_charge_id", "amount_cents", "created_at"}
+    ),
     "raw_emails": frozenset(
         {
             "id",
@@ -352,7 +370,8 @@ EXPECTED_COLUMNS: dict[str, frozenset[str]] = {
 }
 
 PRE_LATE_FEE_TABLES = frozenset(
-    set(EXPECTED_COLUMNS) - {"late_fee_charges", "late_fee_voids"}
+    set(EXPECTED_COLUMNS)
+    - {"late_fee_charges", "late_fee_voids", "late_fee_allocations"}
 )
 
 TABLES_BY_VERSION: dict[int, frozenset[str]] = {
@@ -413,7 +432,8 @@ TABLES_BY_VERSION: dict[int, frozenset[str]] = {
     ),
     10: frozenset(set(PRE_LATE_FEE_TABLES) - {"gmail_payment_voids"}),
     11: PRE_LATE_FEE_TABLES,
-    12: frozenset(EXPECTED_COLUMNS),
+    12: frozenset(set(EXPECTED_COLUMNS) - {"late_fee_allocations"}),
+    13: frozenset(EXPECTED_COLUMNS),
 }
 
 PAYMENT_EVENT_COLUMNS_V7 = frozenset(
@@ -576,6 +596,15 @@ def add_late_fee_charges(connection: sqlite3.Connection) -> None:
     )
 
 
+def add_late_fee_allocations(connection: sqlite3.Connection) -> None:
+    """Add explicit payment-to-late-fee allocations without changing rent allocations."""
+    connection.execute(LATE_FEE_ALLOCATIONS_SQL)
+    connection.execute(
+        "CREATE INDEX late_fee_allocation_fee_idx "
+        "ON late_fee_allocations(late_fee_charge_id)"
+    )
+
+
 MIGRATIONS: dict[int, Migration] = {
     1: create_raw_email_schema,
     2: create_payment_event_v2_schema,
@@ -589,6 +618,7 @@ MIGRATIONS: dict[int, Migration] = {
     10: add_manual_payment_revisions,
     11: add_gmail_payment_voids,
     12: add_late_fee_charges,
+    13: add_late_fee_allocations,
 }
 
 

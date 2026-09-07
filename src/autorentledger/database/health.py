@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
+from autorentledger.storage.allocation_totals import combined_payment_allocated_sql
 from autorentledger.storage.migrations import DatabaseSchemaError, require_current_schema
 
 
@@ -116,15 +117,12 @@ def check_database(database_path: Path) -> DatabaseHealthResult:
 def _check_ledger(connection: sqlite3.Connection) -> tuple[DatabaseHealthIssue, ...]:
     issues: list[DatabaseHealthIssue] = []
     payments = connection.execute(
-        """
+        f"""
         SELECT
             payment_events.id,
             payment_events.amount_cents,
-            COALESCE(SUM(payment_allocations.amount_cents), 0) AS allocated_cents
+            {combined_payment_allocated_sql(connection)} AS allocated_cents
         FROM payment_events
-        LEFT JOIN payment_allocations
-            ON payment_allocations.payment_event_id = payment_events.id
-        GROUP BY payment_events.id, payment_events.amount_cents
         ORDER BY payment_events.id
         """
     ).fetchall()
@@ -156,6 +154,28 @@ def _check_ledger(connection: sqlite3.Connection) -> tuple[DatabaseHealthIssue, 
                 DatabaseHealthIssue(
                     DatabaseHealthCategory.LEDGER,
                     f"Obligation {obligation['id']} is allocated above its owed amount.",
+                )
+            )
+
+    late_fees = connection.execute(
+        """
+        SELECT
+            late_fee_charges.id,
+            late_fee_charges.amount_cents,
+            COALESCE(SUM(late_fee_allocations.amount_cents), 0) AS allocated_cents
+        FROM late_fee_charges
+        LEFT JOIN late_fee_allocations
+            ON late_fee_allocations.late_fee_charge_id = late_fee_charges.id
+        GROUP BY late_fee_charges.id, late_fee_charges.amount_cents
+        ORDER BY late_fee_charges.id
+        """
+    ).fetchall()
+    for fee in late_fees:
+        if int(fee["allocated_cents"]) > int(fee["amount_cents"]):
+            issues.append(
+                DatabaseHealthIssue(
+                    DatabaseHealthCategory.LEDGER,
+                    f"Late fee {fee['id']} is allocated above its charge amount.",
                 )
             )
     return tuple(issues)

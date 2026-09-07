@@ -16,6 +16,11 @@ from autorentledger.parsing.version import (
     CURRENT_PAYMENT_PARSER_VERSION,
     LEGACY_UNVERSIONED_PARSER_VERSION,
 )
+from autorentledger.storage.allocation_totals import (
+    combined_payment_allocated_cents,
+    combined_payment_allocated_sql,
+    late_fee_payment_allocated_sql,
+)
 from autorentledger.storage.migrations import (
     create_allocation_schema,
     create_obligation_schema,
@@ -160,6 +165,8 @@ class PaymentListingSourceRecord:
     sender_name: str
     amount_cents: int
     allocated_cents: int
+    rent_allocated_cents: int
+    late_fee_allocated_cents: int
     voided_at: str | None
 
 
@@ -816,13 +823,10 @@ class SQLitePaymentEventRepository:
                     payment_events.parsed_at,
                     payment_events.parser_version,
                     raw_emails.raw_mime,
-                    COALESCE(SUM(payment_allocations.amount_cents), 0) AS allocated_cents
+                    {combined_payment_allocated_sql(connection)} AS allocated_cents
                 FROM payment_events
                 LEFT JOIN raw_emails ON raw_emails.id = payment_events.raw_email_id
-                LEFT JOIN payment_allocations
-                    ON payment_allocations.payment_event_id = payment_events.id
                 {where_clause}
-                GROUP BY payment_events.id
                 ORDER BY payment_events.id
                 """,
                 parameters,
@@ -854,16 +858,7 @@ class SQLitePaymentEventRepository:
                 or str(current["parsed_at"]) != expected_parsed_at
             ):
                 raise PaymentRebuildConcurrentChangeError
-            allocated_cents = int(
-                connection.execute(
-                    """
-                    SELECT COALESCE(SUM(amount_cents), 0)
-                    FROM payment_allocations
-                    WHERE payment_event_id = ?
-                    """,
-                    (payment_event_id,),
-                ).fetchone()[0]
-            )
+            allocated_cents = combined_payment_allocated_cents(connection, payment_event_id)
             if notification.amount_cents < allocated_cents:
                 raise PaymentRebuildAllocationConflictStorageError(allocated_cents)
             connection.execute(
@@ -1034,16 +1029,7 @@ class SQLiteManualPaymentRepository:
                 and effective_note == current["memo"]
             ):
                 raise ManualPaymentNoChangeStorageError
-            allocated_cents = int(
-                connection.execute(
-                    """
-                    SELECT COALESCE(SUM(amount_cents), 0)
-                    FROM payment_allocations
-                    WHERE payment_event_id = ?
-                    """,
-                    (payment_event_id,),
-                ).fetchone()[0]
-            )
+            allocated_cents = combined_payment_allocated_cents(connection, payment_event_id)
             if effective_amount < allocated_cents:
                 raise ManualPaymentAllocationConflictStorageError(allocated_cents)
             matches = _matching_manual_payments(
@@ -1119,16 +1105,7 @@ class SQLiteManualPaymentRepository:
                 "SELECT * FROM payment_events WHERE id = ?", (payment_event_id,)
             ).fetchone()
             manual_evidence_id = _require_active_manual_payment(current)
-            allocated_cents = int(
-                connection.execute(
-                    """
-                    SELECT COALESCE(SUM(amount_cents), 0)
-                    FROM payment_allocations
-                    WHERE payment_event_id = ?
-                    """,
-                    (payment_event_id,),
-                ).fetchone()[0]
-            )
+            allocated_cents = combined_payment_allocated_cents(connection, payment_event_id)
             if allocated_cents:
                 raise ManualPaymentAllocationConflictStorageError(allocated_cents)
             cursor = connection.execute(
@@ -1242,16 +1219,7 @@ class SQLiteGmailPaymentRepository:
                 "SELECT * FROM payment_events WHERE id = ?", (payment_event_id,)
             ).fetchone()
             _require_active_gmail_payment(current)
-            allocated_cents = int(
-                connection.execute(
-                    """
-                    SELECT COALESCE(SUM(amount_cents), 0)
-                    FROM payment_allocations
-                    WHERE payment_event_id = ?
-                    """,
-                    (payment_event_id,),
-                ).fetchone()[0]
-            )
+            allocated_cents = combined_payment_allocated_cents(connection, payment_event_id)
             if allocated_cents:
                 raise GmailPaymentAllocationConflictStorageError(allocated_cents)
             cursor = connection.execute(
@@ -2481,7 +2449,15 @@ class SQLiteAllocationRepository:
         return [PaymentAllocationSummary(**dict(row)) for row in rows]
 
     def payment_balance(self, payment_event_id: int) -> AllocationBalance | None:
-        return self._balance("payment_events", "payment_event_id", payment_event_id)
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT amount_cents FROM payment_events WHERE id = ?", (payment_event_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            allocated = combined_payment_allocated_cents(connection, payment_event_id)
+        amount = int(row["amount_cents"])
+        return AllocationBalance(amount, allocated, amount - allocated)
 
     def obligation_balance(self, rent_obligation_id: int) -> AllocationBalance | None:
         return self._balance("rent_obligations", "rent_obligation_id", rent_obligation_id)
@@ -2560,9 +2536,7 @@ class SQLiteAllocationRepository:
         ).fetchone()
         if duplicate is not None:
             raise AllocationPairExistsError
-        payment_allocated = self._allocated_total(
-            connection, "payment_event_id", payment_event_id
-        )
+        payment_allocated = combined_payment_allocated_cents(connection, payment_event_id)
         payment_remaining = int(payment["amount_cents"]) - payment_allocated
         if amount_cents > payment_remaining:
             raise AllocationExceedsPaymentError(payment_remaining)
@@ -2677,18 +2651,15 @@ class SQLiteReportingRepository:
     ) -> list[PaymentIntakeSourceRecord]:
         with self._connect() as connection:
             rows = connection.execute(
-                """
+                f"""
                 SELECT
                     payment_events.id AS payment_event_id,
                     payment_events.amount_cents,
-                    COALESCE(SUM(payment_allocations.amount_cents), 0) AS allocated_cents
+                    {combined_payment_allocated_sql(connection)} AS allocated_cents
                 FROM payment_events
-                LEFT JOIN payment_allocations
-                    ON payment_allocations.payment_event_id = payment_events.id
                 WHERE payment_events.occurred_on >= ?
                     AND payment_events.occurred_on < ?
                     AND payment_events.voided_at IS NULL
-                GROUP BY payment_events.id, payment_events.amount_cents
                 ORDER BY payment_events.id
                 """,
                 (start_on, end_before),
@@ -2727,6 +2698,8 @@ class SQLitePaymentListingRepository:
                         payment_events.sender_name,
                         payment_events.amount_cents,
                         0 AS allocated_cents,
+                        0 AS rent_allocated_cents,
+                        0 AS late_fee_allocated_cents,
                         payment_events.voided_at
                     FROM payment_events
                     ORDER BY payment_events.id
@@ -2734,25 +2707,20 @@ class SQLitePaymentListingRepository:
                 ).fetchall()
                 return [PaymentListingSourceRecord(**dict(row)) for row in rows]
             rows = connection.execute(
-                """
+                f"""
                 SELECT
                     payment_events.id AS payment_event_id,
                     payment_events.occurred_on,
                     payment_events.provider,
                     payment_events.sender_name,
                     payment_events.amount_cents,
-                    COALESCE(SUM(payment_allocations.amount_cents), 0) AS allocated_cents,
+                    {combined_payment_allocated_sql(connection)} AS allocated_cents,
+                    COALESCE((SELECT SUM(amount_cents) FROM payment_allocations
+                              WHERE payment_event_id = payment_events.id), 0)
+                        AS rent_allocated_cents,
+                    {late_fee_payment_allocated_sql(connection)} AS late_fee_allocated_cents,
                     payment_events.voided_at
                 FROM payment_events
-                LEFT JOIN payment_allocations
-                    ON payment_allocations.payment_event_id = payment_events.id
-                GROUP BY
-                    payment_events.id,
-                    payment_events.occurred_on,
-                    payment_events.provider,
-                    payment_events.sender_name,
-                    payment_events.amount_cents,
-                    payment_events.voided_at
                 ORDER BY payment_events.id
                 """
             ).fetchall()
@@ -2815,16 +2783,13 @@ class SQLiteReviewRepository:
     def list_payment_allocation_totals(self) -> list[UnallocatedPaymentSourceRecord]:
         with self._connect() as connection:
             rows = connection.execute(
-                """
+                f"""
                 SELECT
                     payment_events.id AS payment_event_id,
                     payment_events.amount_cents,
-                    COALESCE(SUM(payment_allocations.amount_cents), 0) AS allocated_cents
+                    {combined_payment_allocated_sql(connection)} AS allocated_cents
                 FROM payment_events
-                LEFT JOIN payment_allocations
-                    ON payment_allocations.payment_event_id = payment_events.id
                 WHERE payment_events.voided_at IS NULL
-                GROUP BY payment_events.id, payment_events.amount_cents
                 ORDER BY payment_events.id
                 """
             ).fetchall()
@@ -2931,22 +2896,16 @@ class SQLiteSuggestionRepository:
             parameters = (payment_event_id,)
         with self._connect() as connection:
             rows = connection.execute(
-                """
+                f"""
                 SELECT
                     payment_events.id AS payment_event_id,
                     payment_events.sender_name,
                     payment_events.amount_cents,
-                    COALESCE(SUM(payment_allocations.amount_cents), 0) AS allocated_cents
+                    {combined_payment_allocated_sql(connection)} AS allocated_cents
                 FROM payment_events
-                LEFT JOIN payment_allocations
-                    ON payment_allocations.payment_event_id = payment_events.id
                 """
                 + where_clause
                 + """
-                GROUP BY
-                    payment_events.id,
-                    payment_events.sender_name,
-                    payment_events.amount_cents
                 ORDER BY payment_events.id
                 """,
                 parameters,
@@ -3004,22 +2963,15 @@ class SQLiteAllocationPlanningRepository:
     def list_payment_sources(self) -> list[AllocationPlanningPaymentSourceRecord]:
         with self._connect() as connection:
             rows = connection.execute(
-                """
+                f"""
                 SELECT
                     payment_events.id AS payment_event_id,
                     payment_events.sender_name,
                     payment_events.amount_cents,
                     payment_events.occurred_on,
-                    COALESCE(SUM(payment_allocations.amount_cents), 0) AS allocated_cents
+                    {combined_payment_allocated_sql(connection)} AS allocated_cents
                 FROM payment_events
-                LEFT JOIN payment_allocations
-                    ON payment_allocations.payment_event_id = payment_events.id
                 WHERE payment_events.voided_at IS NULL
-                GROUP BY
-                    payment_events.id,
-                    payment_events.sender_name,
-                    payment_events.amount_cents,
-                    payment_events.occurred_on
                 ORDER BY
                     payment_events.occurred_on IS NULL,
                     payment_events.occurred_on,

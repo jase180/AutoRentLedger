@@ -5,6 +5,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import StrEnum
 from pathlib import Path
 
 
@@ -18,6 +19,16 @@ class LateFeeObligationNotFoundError(ValueError):
 
 class LateFeeAlreadyVoidedError(ValueError):
     pass
+
+
+class LateFeeAllocationConflictError(ValueError):
+    def __init__(self, fee_id: int, allocated_cents: int) -> None:
+        self.allocated_cents = allocated_cents
+        dollars, remainder = divmod(allocated_cents, 100)
+        super().__init__(
+            f"Late fee {fee_id} has ${dollars:,}.{remainder:02d} allocated. "
+            "Remove its late-fee allocations before voiding it."
+        )
 
 
 class LateFeeDuplicateError(ValueError):
@@ -53,6 +64,21 @@ class LateFeeVoid:
     created_at: str
 
 
+class LateFeePaymentStatus(StrEnum):
+    UNPAID = "UNPAID"
+    PARTIAL = "PARTIAL"
+    PAID = "PAID"
+    VOIDED = "VOIDED"
+
+
+@dataclass(frozen=True)
+class LateFeeAllocationReference:
+    id: int
+    payment_event_id: int
+    amount_cents: int
+    created_at: str
+
+
 @dataclass(frozen=True)
 class LateFeeHistory:
     charge: LateFeeCharge
@@ -61,6 +87,10 @@ class LateFeeHistory:
     rent_account_id: int
     account_display_name: str
     unit_label: str
+    allocated_cents: int
+    remaining_cents: int
+    status: LateFeePaymentStatus
+    allocations: tuple[LateFeeAllocationReference, ...]
 
 
 class SQLiteLateFeeRepository:
@@ -127,6 +157,8 @@ class SQLiteLateFeeRepository:
             history = self._history(connection, fee_id)
             if history.charge.voided_at is not None:
                 raise LateFeeAlreadyVoidedError(f"Late fee {fee_id} is already voided.")
+            if history.allocated_cents:
+                raise LateFeeAllocationConflictError(fee_id, history.allocated_cents)
             timestamp = datetime.now(UTC).isoformat()
             connection.execute(
                 """INSERT INTO late_fee_voids (late_fee_charge_id, reason, created_at)
@@ -202,6 +234,34 @@ class SQLiteLateFeeRepository:
             void is not None and charge.voided_at != void.created_at
         ):
             raise LateFeeAuditInvariantError("Late-fee audit state is inconsistent.")
+        has_allocations = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' "
+            "AND name = 'late_fee_allocations'"
+        ).fetchone()
+        allocation_rows = (
+            connection.execute(
+                "SELECT id, payment_event_id, amount_cents, created_at "
+                "FROM late_fee_allocations WHERE late_fee_charge_id = ? ORDER BY id",
+                (fee_id,),
+            ).fetchall()
+            if has_allocations is not None
+            else ()
+        )
+        allocations = tuple(
+            LateFeeAllocationReference(**dict(allocation)) for allocation in allocation_rows
+        )
+        allocated = sum(allocation.amount_cents for allocation in allocations)
+        remaining = charge.amount_cents - allocated
+        if allocated < 0 or remaining < 0:
+            raise LateFeeAuditInvariantError("Late-fee allocation state is inconsistent.")
+        if charge.voided_at is not None:
+            status = LateFeePaymentStatus.VOIDED
+        elif allocated == 0:
+            status = LateFeePaymentStatus.UNPAID
+        elif remaining == 0:
+            status = LateFeePaymentStatus.PAID
+        else:
+            status = LateFeePaymentStatus.PARTIAL
         return LateFeeHistory(
             charge,
             void,
@@ -209,4 +269,8 @@ class SQLiteLateFeeRepository:
             row["rent_account_id"],
             row["account_display_name"],
             row["unit_label"],
+            allocated,
+            remaining,
+            status,
+            allocations,
         )

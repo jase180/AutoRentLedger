@@ -19,6 +19,7 @@ from autorentledger.reconciliation import (
 )
 from autorentledger.review import ReviewItem, ReviewKind, collect_review_items
 from autorentledger.storage import (
+    LateFeeAllocationSummary,
     LateFeeHistory,
     PayerRecord,
     PaymentEventRecord,
@@ -26,6 +27,7 @@ from autorentledger.storage import (
     SQLiteAllocationPlanningRepository,
     SQLiteAllocationRepository,
     SQLiteGmailPaymentRepository,
+    SQLiteLateFeeAllocationRepository,
     SQLiteLateFeeRepository,
     SQLiteManualPaymentRepository,
     SQLiteObligationRepository,
@@ -114,6 +116,7 @@ class PaymentDetail:
     payment: PaymentListRecord
     event: PaymentEventRecord
     allocations: tuple[PaymentAllocationDetail, ...]
+    late_fee_allocations: tuple[LateFeeAllocationSummary, ...]
     gmail_history: GmailPaymentHistory | None
     manual_history: ManualPaymentHistory | None
 
@@ -273,6 +276,9 @@ def build_web_payment_detail(
         payment,
         event,
         tuple(allocation_details),
+        SQLiteLateFeeAllocationRepository(database_path).list_summaries(
+            payment_event_id=payment_event_id
+        ),
         gmail_history,
         manual_history,
     )

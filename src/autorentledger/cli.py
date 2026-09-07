@@ -58,6 +58,11 @@ from autorentledger.gmail_payments import (
 )
 from autorentledger.identity import normalize_alias, unresolved_senders
 from autorentledger.ingestion import ingest_raw_emails
+from autorentledger.late_fee_allocations import (
+    LateFeeAllocationValidationError,
+    create_late_fee_allocation,
+    remove_late_fee_allocation,
+)
 from autorentledger.late_fees import (
     LateFeeValidationError,
     assess_late_fee,
@@ -140,7 +145,9 @@ from autorentledger.schedules import (
     generate_obligations,
     plan_obligation_generation,
 )
+from autorentledger.storage.late_fee_allocations import SQLiteLateFeeAllocationRepository
 from autorentledger.storage.late_fees import (
+    LateFeeAllocationConflictError,
     LateFeeAlreadyVoidedError,
     LateFeeAuditInvariantError,
     LateFeeDuplicateError,
@@ -336,7 +343,22 @@ def build_parser() -> argparse.ArgumentParser:
     fee_list.add_argument("--period")
     fee_list.add_argument("--account", type=int)
     fee_list.add_argument("--active-only", action="store_true")
-    for fee_parser in (assess, fee_void, fee_history, fee_list):
+    fee_allocation = fee_commands.add_parser(
+        "allocation", help="explicitly allocate payment money to a late fee"
+    )
+    fee_allocation_commands = fee_allocation.add_subparsers(
+        dest="late_fee_allocation_command", required=True
+    )
+    fee_allocation_add = fee_allocation_commands.add_parser("add")
+    fee_allocation_add.add_argument("--payment", type=int, required=True)
+    fee_allocation_add.add_argument("--late-fee", type=int, required=True)
+    fee_allocation_add.add_argument("--amount", required=True)
+    fee_allocation_remove = fee_allocation_commands.add_parser("remove")
+    fee_allocation_remove.add_argument("allocation_id", type=int)
+    for fee_parser in (
+        assess, fee_void, fee_history, fee_list,
+        fee_allocation_add, fee_allocation_remove,
+    ):
         fee_parser.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
 
     setup = subparsers.add_parser("setup", help="preview or apply guided setup workflows")
@@ -1019,22 +1041,39 @@ def run_late_fee_command(args: argparse.Namespace) -> int:
                 repository, period=args.period, account_id=args.account,
                 active_only=args.active_only,
             )
-            print("ID | Period | Unit | Account | Amount | Assessed | State")
+            print("ID | Period | Unit | Account | Amount | Allocated | Remaining | Status")
             for fee in fees:
                 charge = fee.charge
-                state = "VOIDED" if charge.voided_at else "ACTIVE"
                 print(
                     f"{charge.id} | {fee.period} | {fee.unit_label} | "
                     f"{fee.account_display_name} | {_format_currency(charge.amount_cents)} | "
-                    f"{charge.assessed_on} | {state}"
+                    f"{_format_currency(fee.allocated_cents)} | "
+                    f"{_format_currency(fee.remaining_cents)} | {fee.status.value}"
                 )
             if not fees:
                 print("No late fees found.")
+        elif args.late_fee_command == "allocation":
+            allocations = SQLiteLateFeeAllocationRepository(args.database)
+            if args.late_fee_allocation_command == "add":
+                allocation = create_late_fee_allocation(
+                    allocations, args.payment, args.late_fee, args.amount
+                )
+                print(f"Created late-fee allocation {allocation.id}")
+                print(f"Payment: {allocation.payment_event_id}")
+                print(f"Late fee: {allocation.late_fee_charge_id}")
+                print(f"Amount: {_format_currency(allocation.amount_cents)}")
+            else:
+                allocation = remove_late_fee_allocation(allocations, args.allocation_id)
+                print(f"Removed late-fee allocation {allocation.id}")
+                print(f"Payment: {allocation.payment_event_id}")
+                print(f"Late fee: {allocation.late_fee_charge_id}")
+                print(f"Amount: {_format_currency(allocation.amount_cents)}")
         else:
             raise AssertionError(f"Unhandled late-fee command: {args.late_fee_command}")
     except (
         LateFeeValidationError, LateFeeNotFoundError, LateFeeObligationNotFoundError,
         LateFeeAlreadyVoidedError, LateFeeDuplicateError,
+        LateFeeAllocationConflictError, LateFeeAllocationValidationError,
     ) as error:
         print(error)
         return 1
@@ -1056,6 +1095,17 @@ def _print_late_fee_history(history: LateFeeHistory) -> None:
     print(f"Reason: {charge.reason}")
     print(f"Created at: {charge.created_at}")
     print(f"State: {'VOIDED' if charge.voided_at else 'ACTIVE'}")
+    print(f"Allocated: {_format_currency(history.allocated_cents)}")
+    print(f"Remaining: {_format_currency(history.remaining_cents)}")
+    print(f"Status: {history.status.value}")
+    print("Allocations:")
+    for allocation in history.allocations:
+        print(
+            f"  {allocation.id}: payment {allocation.payment_event_id} "
+            f"{_format_currency(allocation.amount_cents)}"
+        )
+    if not history.allocations:
+        print("  None")
     if history.void:
         print(f"Void reason: {history.void.reason}")
         print(f"Voided at: {history.void.created_at}")

@@ -25,7 +25,7 @@
   </dl>
 
   <section aria-labelledby="payment-allocations-heading">
-    <h2 id="payment-allocations-heading">Current allocations</h2>
+    <h2 id="payment-allocations-heading">Rent allocations</h2>
     {% if detail.allocations %}
       <div class="table-wrap">
         <table>
@@ -45,7 +45,32 @@
         </table>
       </div>
     {% else %}
-      <p class="empty-state">No allocations.</p>
+      <p class="empty-state">No rent allocations.</p>
+    {% endif %}
+  </section>
+
+  <section aria-labelledby="payment-fee-allocations-heading">
+    <h2 id="payment-fee-allocations-heading">Late-fee allocations</h2>
+    {% if detail.late_fee_allocations %}
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Allocation</th><th>Late fee</th><th>Period</th><th>Unit</th><th>Account</th><th class="money">Amount</th></tr></thead>
+          <tbody>
+            {% for allocation in detail.late_fee_allocations %}
+              <tr>
+                <td>{{ allocation.id }}</td>
+                <td><a href="{{ url_for('web.rent_account_detail', rent_account_id=allocation.rent_account_id) }}#late-fee-{{ allocation.late_fee_charge_id }}">{{ allocation.late_fee_charge_id }}</a></td>
+                <td>{{ allocation.period|month_heading }}</td>
+                <td>{{ allocation.unit_label }}</td>
+                <td><a href="{{ url_for('web.rent_account_detail', rent_account_id=allocation.rent_account_id) }}">{{ allocation.account_display_name }}</a></td>
+                <td class="money">{{ allocation.amount_cents|money }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="empty-state">No late-fee allocations.</p>
     {% endif %}
   </section>
 
