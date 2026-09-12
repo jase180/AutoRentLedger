@@ -47,8 +47,10 @@ overviews are recomputed read models rather than persisted workflow state.
   deactivates the same normalized payment event without changing its ID, parsed facts, or raw email.
 - A payer is not a rent account, a payment is not an allocation, and a schedule is not an
   obligation.
-- Actual obligations state what was owed. Schedules can explicitly generate missing obligations
-  but never overwrite existing ones.
+- Actual obligations state what was owed. Schedules describe recurring terms and can generate a
+  missing obligation, but never count as debt or overwrite an existing obligation. `daily` invokes
+  the same canonical generator for the host-local current month only; manual generation remains
+  available for explicit historical or future periods.
 - Rent obligation != late-fee charge. Explicit assessments live in `late_fee_charges`, linked to
   an obligation for context only. Original assessment facts are retained; `late_fee_voids` records
   the waiver/void reason and timestamp atomically with the charge's `voided_at` projection.
@@ -69,8 +71,9 @@ overviews are recomputed read models rather than persisted workflow state.
 - The CLI owns explicit mutations. The authenticated Flask UI remains read-only and loopback-only;
   allocation-plan and drill-down pages compose the canonical planner, audit, allocation, and
   reconciliation services used by terminal workflows.
-- `sync` and `daily` may refresh raw evidence and payment events only. They never create aliases,
-  allocations, or obligations and never rebuild old payments automatically.
+- `sync` refreshes raw evidence and payment events only. After a verified backup and successful
+  sync, `daily` also ensures current-month rent obligations, then recomputes review/suggestions.
+  Neither operation creates aliases, allocations, or late fees, and neither rebuilds old payments.
 - Parser rebuild is explicit, applies only to Gmail-derived events, and cannot reduce a payment
   below its combined rent-and-fee allocated total. Manual events are never reparsed.
 - Manual correction cannot reduce a payment below its combined allocated total, and either payment

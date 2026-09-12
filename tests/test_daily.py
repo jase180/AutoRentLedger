@@ -1,5 +1,5 @@
 import sqlite3
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from email.message import EmailMessage
 from email.policy import SMTP
 from pathlib import Path
@@ -10,7 +10,9 @@ from autorentledger.cli import DEFAULT_DATABASE, DEFAULT_QUERY, build_parser, ma
 from autorentledger.daily import (
     DailyBackupError,
     DailyGmailAccessError,
+    DailyObligationError,
     DailyOperationResult,
+    DailyProjectionError,
     DailyRetentionError,
     DailySyncError,
     GmailAccessError,
@@ -23,8 +25,9 @@ from autorentledger.ingestion import IngestionResult
 from autorentledger.operations import SyncResult, SyncReviewSummary, run_sync
 from autorentledger.processing import ProcessingResult
 from autorentledger.retention import BackupRetentionResult
-from autorentledger.schedules import create_rent_schedule
+from autorentledger.schedules import ObligationGenerationPlan, create_rent_schedule
 from autorentledger.storage import (
+    SQLiteObligationRepository,
     SQLitePayerRepository,
     SQLitePaymentEventRepository,
     SQLiteRawEmailRepository,
@@ -113,6 +116,7 @@ def test_daily_parser_defaults_and_custom_operational_paths():
     assert defaults.credentials == Path("credentials.json")
     assert defaults.token == Path("token.json")
     assert defaults.keep_backups == 30
+    assert not defaults.skip_obligations
     assert defaults.query == DEFAULT_QUERY
     assert defaults.max_results == 100
 
@@ -133,6 +137,7 @@ def test_daily_parser_defaults_and_custom_operational_paths():
             "25",
             "--keep-backups",
             "12",
+            "--skip-obligations",
         ]
     )
     assert custom.database == Path("local.sqlite3")
@@ -142,6 +147,7 @@ def test_daily_parser_defaults_and_custom_operational_paths():
     assert custom.query == "subject:synthetic"
     assert custom.max_results == 25
     assert custom.keep_backups == 12
+    assert custom.skip_obligations
 
     for invalid in ("0", "-1", "banana", "1.5"):
         with pytest.raises(SystemExit):
@@ -168,6 +174,16 @@ def test_daily_operation_checks_schema_then_backs_up_then_syncs(tmp_path):
         calls.append(("retention", directory, keep, current))
         return BackupRetentionResult(kept_count=1, deleted_count=0)
 
+    generation = ObligationGenerationPlan("2026-08", ())
+
+    def obligation_operation(period):
+        calls.append(("obligations", period))
+        return generation
+
+    def projection_operation(result):
+        calls.append(("attention",))
+        return result
+
     now = datetime(2026, 8, 27, 19, 36, tzinfo=UTC)
     result = run_daily_operation(
         database_path,
@@ -177,16 +193,28 @@ def test_daily_operation_checks_schema_then_backs_up_then_syncs(tmp_path):
         schema_checker=schema_checker,
         backup_operation=backup_operation,
         retention_operation=retention_operation,
+        obligation_operation=obligation_operation,
+        projection_operation=projection_operation,
+        today=date(2026, 8, 27),
     )
 
     assert result == DailyOperationResult(
         backup_path,
         sync_result(),
         BackupRetentionResult(kept_count=1, deleted_count=0),
+        generation,
     )
-    assert [call[0] for call in calls] == ["schema", "backup", "sync", "retention"]
+    assert [call[0] for call in calls] == [
+        "schema",
+        "backup",
+        "sync",
+        "obligations",
+        "attention",
+        "retention",
+    ]
     assert calls[1][2].name == "autorentledger-daily-2026-08-27T193600Z.db"
-    assert calls[3][1:] == (tmp_path / "backups", 30, backup_path)
+    assert calls[3][1] == "2026-08"
+    assert calls[5][1:] == (tmp_path / "backups", 30, backup_path)
 
 
 def test_backup_failure_prevents_sync():
@@ -276,6 +304,8 @@ def test_retention_failure_happens_after_sync_and_preserves_current_backup(tmp_p
             schema_checker=lambda path: None,
             backup_operation=backup_operation,
             retention_operation=fail_retention,
+            obligation_operation=lambda period: ObligationGenerationPlan(period, ()),
+            projection_operation=lambda result: result,
         )
     assert calls == ["backup", "sync", "retention"]
     assert error.value.backup_path.exists()
@@ -293,13 +323,17 @@ def test_daily_cli_forwards_sync_inputs_after_backup(monkeypatch, capsys):
         captured["sync"] = (actual_source, database, query, max_results)
         return sync_result()
 
-    def execute_daily(database, backup_dir, sync_operation, *, keep_backups):
+    def execute_daily(
+        database, backup_dir, sync_operation, *, keep_backups, skip_obligations
+    ):
         captured["daily"] = (database, backup_dir)
         captured["keep_backups"] = keep_backups
+        captured["skip_obligations"] = skip_obligations
         return DailyOperationResult(
             backup_dir / "verified.db",
             sync_operation(),
             BackupRetentionResult(kept_count=7, deleted_count=2),
+            ObligationGenerationPlan("2026-09", ()),
         )
 
     monkeypatch.setattr(GmailSource, "authenticate", staticmethod(authenticate))
@@ -327,6 +361,7 @@ def test_daily_cli_forwards_sync_inputs_after_backup(monkeypatch, capsys):
     ) == 0
     assert captured["daily"] == (Path("synthetic.sqlite3"), Path("synthetic-backups"))
     assert captured["keep_backups"] == 7
+    assert not captured["skip_obligations"]
     assert captured["auth"] == (
         Path("synthetic-credentials.json"),
         Path("synthetic-token.json"),
@@ -342,6 +377,7 @@ def test_daily_cli_forwards_sync_inputs_after_backup(monkeypatch, capsys):
     assert "New emails: 1" in output
     assert "New payments: 1" in output
     assert "Parse failures: 1" in output
+    assert "OBLIGATIONS\nPeriod: 2026-09\nCreated: 0\nExisting: 0\nIssues: 0" in output
     assert "RETENTION\nKept: 7\nDeleted: 2" in output
     assert "STATUS\nClear" in output
 
@@ -351,7 +387,9 @@ def test_attention_and_suggestions_are_successful_operational_results(
 ):
     suggestion = object()
 
-    def execute_daily(database, backup_dir, sync_operation, *, keep_backups):
+    def execute_daily(
+        database, backup_dir, sync_operation, *, keep_backups, skip_obligations
+    ):
         return DailyOperationResult(
             backup_dir / "verified.db",
             sync_result(attention=True, suggestions=(suggestion,)),
@@ -367,7 +405,9 @@ def test_attention_and_suggestions_are_successful_operational_results(
 
 
 def test_daily_failures_are_safe_and_have_distinct_stage_output(monkeypatch, capsys):
-    def fail_backup(database, backup_dir, sync_operation, *, keep_backups):
+    def fail_backup(
+        database, backup_dir, sync_operation, *, keep_backups, skip_obligations
+    ):
         raise DailyBackupError("PRIVATE_SYNTHETIC_RAW_SENTINEL")
 
     monkeypatch.setattr("autorentledger.cli.run_daily_operation", fail_backup)
@@ -377,7 +417,9 @@ def test_daily_failures_are_safe_and_have_distinct_stage_output(monkeypatch, cap
     assert "Sync was not attempted." in output
     assert "PRIVATE_SYNTHETIC_RAW_SENTINEL" not in output
 
-    def fail_sync(database, backup_dir, sync_operation, *, keep_backups):
+    def fail_sync(
+        database, backup_dir, sync_operation, *, keep_backups, skip_obligations
+    ):
         raise DailySyncError(backup_dir / "verified.db")
 
     monkeypatch.setattr("autorentledger.cli.run_daily_operation", fail_sync)
@@ -386,7 +428,33 @@ def test_daily_failures_are_safe_and_have_distinct_stage_output(monkeypatch, cap
     assert "Daily failed during sync." in output
     assert "Backup was created successfully" in output
 
-    def fail_retention(database, backup_dir, sync_operation, *, keep_backups):
+    def fail_obligations(
+        database, backup_dir, sync_operation, *, keep_backups, skip_obligations
+    ):
+        raise DailyObligationError(backup_dir / "verified.db", "2026-09")
+
+    monkeypatch.setattr("autorentledger.cli.run_daily_operation", fail_obligations)
+    assert main(["daily"]) == 1
+    output = capsys.readouterr().out
+    assert "Daily failed during obligation generation." in output
+    assert "Period: 2026-09" in output
+    assert "Sync completed successfully." in output
+    assert "obligations generate --period 2026-09 --dry-run" in output
+
+    def fail_projection(
+        database, backup_dir, sync_operation, *, keep_backups, skip_obligations
+    ):
+        raise DailyProjectionError(backup_dir / "verified.db", "2026-09")
+
+    monkeypatch.setattr("autorentledger.cli.run_daily_operation", fail_projection)
+    assert main(["daily"]) == 1
+    output = capsys.readouterr().out
+    assert "failed while refreshing attention" in output
+    assert "autorentledger db check" in output
+
+    def fail_retention(
+        database, backup_dir, sync_operation, *, keep_backups, skip_obligations
+    ):
         raise DailyRetentionError(backup_dir / "verified.db")
 
     monkeypatch.setattr("autorentledger.cli.run_daily_operation", fail_retention)
@@ -520,12 +588,15 @@ def test_repeated_daily_runs_create_separate_backups_without_duplicate_evidence(
         "rent_accounts",
         "rent_account_payers",
         "rent_schedules",
-        "rent_obligations",
         "payment_allocations",
     )
     before = database_snapshot(database_path)
-    first = run_daily_operation(database_path, backup_directory, sync_operation)
-    second = run_daily_operation(database_path, backup_directory, sync_operation)
+    first = run_daily_operation(
+        database_path, backup_directory, sync_operation, today=date(2026, 9, 1)
+    )
+    second = run_daily_operation(
+        database_path, backup_directory, sync_operation, today=date(2026, 9, 2)
+    )
     after = database_snapshot(database_path)
 
     assert first.sync_result.ingestion.inserted == 1
@@ -538,6 +609,11 @@ def test_repeated_daily_runs_create_separate_backups_without_duplicate_evidence(
     assert second.retention == BackupRetentionResult(kept_count=2, deleted_count=0)
     assert SQLiteRawEmailRepository(database_path).count() == 1
     assert SQLitePaymentEventRepository(database_path).count() == 1
+    assert first.obligation_generation.create_count == 1
+    assert second.obligation_generation.create_count == 0
+    assert second.obligation_generation.skip_count == 1
+    assert second.sync_result.review.unpaid_obligations == 1
+    assert SQLiteObligationRepository(database_path).count() == 1
     for table in protected_tables:
         assert before[1][table] == after[1][table]
     assert after[2] == CURRENT_SCHEMA_VERSION == 13

@@ -2318,9 +2318,11 @@ class SQLiteRentScheduleRepository:
                 AND rent_obligations.period = ?
             WHERE rent_schedules.active_from <= ?
                 AND (rent_schedules.active_to IS NULL OR rent_schedules.active_to >= ?)
+                AND (rent_accounts.active_from IS NULL OR rent_accounts.active_from <= ?)
+                AND (rent_accounts.active_to IS NULL OR rent_accounts.active_to >= ?)
             ORDER BY rent_schedules.rent_account_id, rent_schedules.id
             """,
-            (period, month_end, month_start),
+            (period, month_end, month_start, month_end, month_start),
         ).fetchall()
         return [ObligationGenerationSourceRecord(**dict(row)) for row in rows]
 

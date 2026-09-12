@@ -110,10 +110,11 @@ autorentledger daily
 ```
 
 The command requires the current schema, creates and verifies a timestamped backup under
-`backups/`, and only then authenticates to Gmail and runs the existing sync pipeline. It prints
-sync, current-attention, and actionable-suggestion counts. An attention item or suggestion makes
-the final `STATUS` section say `Needs attention` but still exits `0`; only an operational failure
-exits `1`.
+`backups/`, authenticates to Gmail and runs the existing sync pipeline, ensures obligations for
+the host-local current month from applicable schedules, and then refreshes attention and
+suggestions. Its output reports created versus existing obligations explicitly. An attention item
+or suggestion makes the final `STATUS` section say `Needs attention` but still exits `0`; only an
+operational failure exits `1`.
 
 Useful options mirror `sync`, with backup-directory and retention options:
 
@@ -128,19 +129,28 @@ autorentledger daily `
   --token token.json
 ```
 
-If backup creation fails, Gmail authentication, sync, and retention are not attempted. If sync
-fails, the verified pre-run backup remains available and retention does not run. After a fully
-successful sync, retention keeps the newest 30 files matching the dedicated daily-backup naming
-pattern by default. `--keep-backups` accepts another positive integer. Unrelated files, manual
-backup names, subdirectories, and symlinks are not eligible. A retention failure exits `1` but does
-not undo the completed sync or remove the current verified backup.
+Use `--skip-obligations` only when a recovery or diagnostic run deliberately needs evidence sync
+without current-month obligation generation. It is not persisted.
 
-Repeated runs are safe because existing Gmail evidence and payment events are idempotent. Exit `0`
-means the operation, including retention, completed; `Needs attention` is still an exit-`0` ledger
-status. Exit `1` means readiness, backup, Gmail access, sync, or retention failed.
+If backup creation fails, Gmail authentication, sync, generation, and retention are not attempted.
+If sync fails, the verified pre-run backup remains available and generation/retention do not run.
+If obligation generation fails, committed sync evidence remains, the monthly generator rolls back
+its own target-period inserts, and retention does not run. After the complete workflow succeeds,
+retention keeps the newest 30 files matching the dedicated daily-backup naming pattern by default.
+`--keep-backups` accepts another positive integer. Unrelated files, manual backup names,
+subdirectories, and symlinks are not eligible. A retention failure exits `1` but does not undo the
+completed sync/generation or remove the current verified backup.
 
-`daily` does not create allocations or aliases, generate obligations, rebuild payments, or change
-payers, rent accounts, or schedules. It does not install or configure a schedule.
+Repeated runs are safe because Gmail evidence/payment ingestion and account-period obligation
+creation are idempotent. On month rollover, the first successful daily run creates only that new
+month; it does not pre-create future months. Exit `0` means the operation, including retention,
+completed; `Needs attention` is still an exit-`0` ledger status. Exit `1` means readiness, backup,
+Gmail access, sync, obligation generation, attention refresh, or retention failed.
+
+`daily` creates only missing current-month rent obligations from applicable schedules. It does not
+create allocations, aliases, or late fees; rebuild payments; or change payers, rent accounts, or
+schedules. A schedule remains recurring terms, while the generated obligation is durable monthly
+debt. `daily` does not install or configure an OS schedule.
 
 ### Windows Task Scheduler example
 
@@ -226,7 +236,7 @@ Do not use router port forwarding, Tailscale Funnel, or direct `0.0.0.0` binding
 
 ## Monthly setup
 
-At the beginning of a month:
+For explicit historical/current/future generation when needed:
 
 ```powershell
 autorentledger obligations generate --period 2026-09 --dry-run
@@ -234,9 +244,10 @@ autorentledger obligations generate --period 2026-09
 autorentledger overview --period 2026-09
 ```
 
-Always inspect the dry-run first. Generation is explicit and transactional. It creates obligations
-only from schedules applicable to that month and skips an account/month when any obligation already
-exists. Running generation again is idempotent.
+Always inspect the dry-run first for manual generation. The same canonical transactional generator
+is used by `daily` for the current month. It creates obligations only from schedules and accounts
+applicable to that month and skips an account/month when any obligation already exists. Running
+generation again is idempotent. Conflicting applicable schedules fail rather than being guessed.
 
 A schedule that overlaps any part of the requested month creates a full monthly obligation; there
 is no proration. Changing or ending a schedule never changes an obligation that already exists.

@@ -60,6 +60,27 @@ def run_sync(
     ingestion = ingest_raw_emails(source, raw_repository, query, max_results)
     processing = process_raw_emails(raw_repository, payment_repository)
 
+    return refresh_sync_projections(
+        SyncResult(
+            ingestion,
+            processing,
+            SyncReviewSummary(0, 0, 0, 0, 0),
+            (),
+        ),
+        reconciliation_repository,
+        review_repository,
+        suggestion_repository,
+    )
+
+
+def refresh_sync_projections(
+    result: SyncResult,
+    reconciliation_repository: SQLiteReconciliationRepository,
+    review_repository: SQLiteReviewRepository,
+    suggestion_repository: SQLiteSuggestionRepository,
+) -> SyncResult:
+    """Refresh derived review and suggestion output after durable workflow steps."""
+
     review_items = collect_review_items(reconciliation_repository, review_repository)
     review_counts = Counter(item.kind for item in review_items)
     review = SyncReviewSummary(
@@ -85,4 +106,4 @@ def run_sync(
         for result in suggestion_results
         if (suggestion := result.suggestion) is not None
     )
-    return SyncResult(ingestion, processing, review, suggestions)
+    return SyncResult(result.ingestion, result.processing, review, suggestions)

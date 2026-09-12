@@ -137,17 +137,19 @@ autorentledger sync
 autorentledger overview --period 2026-09
 ```
 
-For one externally scheduled run with a verified pre-sync backup:
+For one externally scheduled run with a verified pre-run backup:
 
 ```powershell
 autorentledger daily
 ```
 
-`daily` performs one run only. It retains the newest 30 recognizable daily backups by default;
-change that positive limit with `--keep-backups`. Windows Task Scheduler, cron, or another external
-scheduler decides when it runs; AutoRentLedger contains no scheduler or daemon.
+`daily` performs one run only: backup, sync, ensure current-month obligations from applicable
+schedules, refresh attention, then retain the newest 30 recognizable daily backups. Change the
+positive retention limit with `--keep-backups`. Windows Task Scheduler, cron, or another external
+scheduler decides when it runs; AutoRentLedger contains no scheduler or daemon. Repeated runs are
+idempotent, and only the host-local current month is generated.
 
-At the beginning of a month, preview and explicitly create scheduled obligations first:
+Historical or future obligation generation remains available explicitly:
 
 ```powershell
 autorentledger obligations generate --period 2026-09 --dry-run
@@ -155,8 +157,10 @@ autorentledger obligations generate --period 2026-09
 autorentledger overview --period 2026-09
 ```
 
-`sync` may add raw emails and new payment events. It does not generate obligations, create
-allocations, rebuild old payment events, or change identity/rental configuration.
+`sync` alone may add raw emails and new payment events but does not generate obligations. `daily`
+adds only current-month obligation generation; it never creates allocations or late fees, rebuilds
+old payments, or changes identity/rental configuration. Use `--skip-obligations` only as a
+one-run recovery/debugging escape hatch.
 
 ### Discover historical payment evidence
 
@@ -223,7 +227,7 @@ LAN, Tailscale-IP, and public binding. See the runbook for private Tailscale Ser
 | Task | Command |
 | --- | --- |
 | Refresh evidence and current attention | `autorentledger sync` |
-| Create a verified backup, sync, and summarize attention | `autorentledger daily` |
+| Back up, sync, ensure current obligations, and summarize attention | `autorentledger daily` |
 | Open the local read-only browser view | `autorentledger web` |
 | Inventory historical payment evidence before setup | `autorentledger discovery payments` |
 | Preview one guided tenancy setup | `autorentledger setup tenancy ...` |

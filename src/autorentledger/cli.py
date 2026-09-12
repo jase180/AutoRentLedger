@@ -25,7 +25,9 @@ from autorentledger.allocations import (
 from autorentledger.daily import (
     DailyBackupError,
     DailyGmailAccessError,
+    DailyObligationError,
     DailyOperationResult,
+    DailyProjectionError,
     DailyRetentionError,
     DailySyncError,
     GmailAccessError,
@@ -259,6 +261,11 @@ def build_parser() -> argparse.ArgumentParser:
     daily.add_argument("--token", type=Path, default=Path("token.json"))
     daily.add_argument("--backup-dir", type=Path, default=Path("backups"))
     daily.add_argument("--keep-backups", type=_positive_integer, default=30)
+    daily.add_argument(
+        "--skip-obligations",
+        action="store_true",
+        help="skip current-month obligation generation for this run",
+    )
 
     parse = subparsers.add_parser("parse", help="parse locally stored raw emails")
     parse.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
@@ -677,6 +684,7 @@ def run_daily_command(
     query: str,
     max_results: int,
     keep_backups: int,
+    skip_obligations: bool,
 ) -> int:
     def sync_operation() -> SyncResult:
         try:
@@ -691,6 +699,7 @@ def run_daily_command(
             backup_directory,
             sync_operation,
             keep_backups=keep_backups,
+            skip_obligations=skip_obligations,
         )
     except DatabaseSchemaError as error:
         print("Daily failed during database readiness.")
@@ -709,6 +718,22 @@ def run_daily_command(
     except DailySyncError as error:
         print("Daily failed during sync.")
         print(f"Backup was created successfully: {error.backup_path}")
+        return 1
+    except DailyObligationError as error:
+        print("Daily failed during obligation generation.")
+        print(f"Period: {error.period}")
+        print(f"Backup was created successfully: {error.backup_path}")
+        print("Sync completed successfully.")
+        print(
+            "Inspect with: autorentledger obligations generate "
+            f"--period {error.period} --dry-run"
+        )
+        return 1
+    except DailyProjectionError as error:
+        print("Daily failed while refreshing attention after obligation generation.")
+        print(f"Period: {error.period}")
+        print(f"Backup was created successfully: {error.backup_path}")
+        print("Run: autorentledger db check")
         return 1
     except DailyRetentionError as error:
         print("Daily completed, but backup retention failed.")
@@ -730,6 +755,15 @@ def _print_daily_result(result: DailyOperationResult) -> None:
     print(f"New emails: {sync.ingestion.inserted}")
     print(f"New payments: {sync.processing.created}")
     print(f"Parse failures: {sync.processing.parse_failures}")
+    print("OBLIGATIONS")
+    if result.obligation_generation is None:
+        print("Skipped")
+    else:
+        generation = result.obligation_generation
+        print(f"Period: {generation.period}")
+        print(f"Created: {generation.create_count}")
+        print(f"Existing: {generation.skip_count}")
+        print("Issues: 0")
     print("ATTENTION")
     print(f"Unresolved payers: {sync.review.unresolved_payers}")
     print(f"Unallocated payments: {sync.review.unallocated_payments}")
@@ -2379,6 +2413,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.query,
             args.max_results,
             args.keep_backups,
+            args.skip_obligations,
         )
     if args.command not in {"search", "web"}:
         try:
