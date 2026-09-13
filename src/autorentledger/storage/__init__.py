@@ -1,5 +1,40 @@
 """Local persistence adapters."""
 
+from autorentledger.storage.allocation_planning import (
+    AllocationPlanningObligationSourceRecord,
+    AllocationPlanningPaymentSourceRecord,
+    SQLiteAllocationPlanningRepository,
+)
+from autorentledger.storage.allocations import (
+    AllocationBalance,
+    AllocationExceedsObligationError,
+    AllocationExceedsPaymentError,
+    AllocationObligationNotFoundError,
+    AllocationPairExistsError,
+    AllocationPaymentNotFoundError,
+    AllocationPaymentVoidedError,
+    PaymentAllocationRecord,
+    PaymentAllocationSummary,
+    SQLiteAllocationRepository,
+)
+from autorentledger.storage.discovery import (
+    DiscoveryAliasSourceRecord,
+    DiscoveryPaymentSourceRecord,
+    DiscoveryUnparsedSourceRecord,
+    SQLiteDiscoveryRepository,
+)
+from autorentledger.storage.gmail_payments import (
+    GmailPaymentAllocationConflictStorageError,
+    GmailPaymentAuditInvariantStorageError,
+    GmailPaymentHistoryStorageResult,
+    GmailPaymentManualDerivedStorageError,
+    GmailPaymentNotFoundStorageError,
+    GmailPaymentVoidedStorageError,
+    GmailPaymentVoidRecord,
+    GmailPaymentVoidStorageResult,
+    SQLiteGmailPaymentRepository,
+)
+from autorentledger.storage.identity import PayerAliasRecord, PayerRecord, SQLitePayerRepository
 from autorentledger.storage.late_fee_allocations import (
     LateFeeAllocationRecord,
     LateFeeAllocationSummary,
@@ -19,27 +54,7 @@ from autorentledger.storage.late_fees import (
     LateFeeVoid,
     SQLiteLateFeeRepository,
 )
-from autorentledger.storage.sqlite import (
-    AllocationBalance,
-    AllocationExceedsObligationError,
-    AllocationExceedsPaymentError,
-    AllocationObligationNotFoundError,
-    AllocationPairExistsError,
-    AllocationPaymentNotFoundError,
-    AllocationPaymentVoidedError,
-    AllocationPlanningObligationSourceRecord,
-    AllocationPlanningPaymentSourceRecord,
-    DiscoveryAliasSourceRecord,
-    DiscoveryPaymentSourceRecord,
-    DiscoveryUnparsedSourceRecord,
-    GmailPaymentAllocationConflictStorageError,
-    GmailPaymentAuditInvariantStorageError,
-    GmailPaymentHistoryStorageResult,
-    GmailPaymentManualDerivedStorageError,
-    GmailPaymentNotFoundStorageError,
-    GmailPaymentVoidedStorageError,
-    GmailPaymentVoidRecord,
-    GmailPaymentVoidStorageResult,
+from autorentledger.storage.maintenance_errors import (
     MaintenanceAliasNotFoundError,
     MaintenanceAliasOwnerError,
     MaintenanceAssociationNotFoundError,
@@ -49,6 +64,8 @@ from autorentledger.storage.sqlite import (
     MaintenanceScheduleConflictError,
     MaintenanceScheduleNotFoundError,
     MaintenanceScheduleOutsideAccountRangeError,
+)
+from autorentledger.storage.manual_payments import (
     ManualPaymentAllocationConflictStorageError,
     ManualPaymentCreationStorageResult,
     ManualPaymentDuplicateRecord,
@@ -61,52 +78,39 @@ from autorentledger.storage.sqlite import (
     ManualPaymentRevisionRecord,
     ManualPaymentRevisionStorageResult,
     ManualPaymentVoidedStorageError,
-    ObligationGenerationSourceRecord,
-    PayerAliasRecord,
-    PayerRecord,
-    PaymentAllocationRecord,
-    PaymentAllocationSummary,
-    PaymentEventRecord,
-    PaymentIntakeSourceRecord,
+    SQLiteManualPaymentRepository,
+)
+from autorentledger.storage.obligations import (
+    RentObligationRecord,
+    RentObligationSummary,
+    SQLiteObligationRepository,
+)
+from autorentledger.storage.payment_listing import (
     PaymentListingAliasRecord,
     PaymentListingSourceRecord,
+    SQLitePaymentListingRepository,
+)
+from autorentledger.storage.payments import (
+    PaymentEventRecord,
     PaymentRebuildAllocationConflictStorageError,
     PaymentRebuildConcurrentChangeError,
     PaymentRebuildNotFoundStorageError,
     PaymentRebuildSourceRecord,
     PaymentSenderCount,
     RawEmailRecord,
+    SQLitePaymentEventRepository,
+    SQLiteRawEmailRepository,
+)
+from autorentledger.storage.reconciliation import (
     ReconciliationSourceRecord,
+    SQLiteReconciliationRepository,
+)
+from autorentledger.storage.rentals import (
     RentAccountPayerRecord,
     RentAccountRecord,
     RentAccountSummary,
-    RentObligationRecord,
-    RentObligationSummary,
-    RentScheduleAccountNotFoundError,
-    RentScheduleOutsideAccountRangeError,
-    RentScheduleOverlapStorageError,
-    RentScheduleRecord,
-    RentScheduleSummary,
-    SQLiteAllocationPlanningRepository,
-    SQLiteAllocationRepository,
-    SQLiteDiscoveryRepository,
-    SQLiteGmailPaymentRepository,
-    SQLiteManualPaymentRepository,
-    SQLiteObligationRepository,
-    SQLitePayerRepository,
-    SQLitePaymentEventRepository,
-    SQLitePaymentListingRepository,
-    SQLiteRawEmailRepository,
-    SQLiteReconciliationRepository,
     SQLiteRentalRepository,
-    SQLiteRentScheduleRepository,
-    SQLiteReportingRepository,
-    SQLiteReviewRepository,
-    SQLiteSuggestionRepository,
     SQLiteTenancySetupRepository,
-    SuggestionAccountSourceRecord,
-    SuggestionAliasSourceRecord,
-    SuggestionPaymentSourceRecord,
     TenancySetupAliasConflictStorageError,
     TenancySetupAliasInput,
     TenancySetupAliasStorageResult,
@@ -114,9 +118,28 @@ from autorentledger.storage.sqlite import (
     TenancySetupStorageResult,
     TenancySetupUnitLabelConflictStorageError,
     TenancySetupUnitNotFoundStorageError,
-    UnallocatedPaymentSourceRecord,
     UnitRecord,
+)
+from autorentledger.storage.reporting import PaymentIntakeSourceRecord, SQLiteReportingRepository
+from autorentledger.storage.review import (
+    SQLiteReviewRepository,
+    UnallocatedPaymentSourceRecord,
     UnparsedEmailSourceRecord,
+)
+from autorentledger.storage.schedules import (
+    ObligationGenerationSourceRecord,
+    RentScheduleAccountNotFoundError,
+    RentScheduleOutsideAccountRangeError,
+    RentScheduleOverlapStorageError,
+    RentScheduleRecord,
+    RentScheduleSummary,
+    SQLiteRentScheduleRepository,
+)
+from autorentledger.storage.suggestions import (
+    SQLiteSuggestionRepository,
+    SuggestionAccountSourceRecord,
+    SuggestionAliasSourceRecord,
+    SuggestionPaymentSourceRecord,
 )
 
 __all__ = [

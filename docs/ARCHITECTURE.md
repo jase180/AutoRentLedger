@@ -36,6 +36,18 @@ source decides its payer, rent account, or obligation meaning. Each payment even
 source: a raw email or a manual evidence row. Reports, review items, suggestions, and owner
 overviews are recomputed read models rather than persisted workflow state.
 
+## Storage organization
+
+SQLite persistence adapters are grouped by existing domain concern under
+`src/autorentledger/storage/`: payments and evidence, manual and Gmail audit history, identity,
+rentals and tenancy setup, obligations, schedules, allocations, reconciliation, reporting,
+review, discovery, suggestions, and allocation planning. `storage/db.py` contains only the shared
+connection setup for row access, foreign-key enforcement, and read-only URI handling.
+
+`storage/__init__.py` remains the compatibility facade for established imports. Schema lifecycle
+and historical upgrades remain centralized in `storage/migrations.py`; repository modules must not
+duplicate schema definitions or move authoritative write checks outside their transactions.
+
 ## Invariants to preserve
 
 - Evidence origin is not accounting meaning. Raw MIME stays immutable; manual evidence records a

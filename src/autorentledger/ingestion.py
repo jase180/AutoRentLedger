@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 
 from autorentledger.email.source import EmailSource
-from autorentledger.storage.sqlite import SQLiteRawEmailRepository
+from autorentledger.storage import SQLiteRawEmailRepository
 
 
 @dataclass(frozen=True)
