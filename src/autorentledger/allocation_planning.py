@@ -12,6 +12,7 @@ from autorentledger.reconciliation import (
     ReconciliationStatus,
     derive_reconciliation_status,
 )
+from autorentledger.rental_context import UnitContext, UnitContextProjection
 from autorentledger.storage import (
     AllocationExceedsObligationError,
     AllocationExceedsPaymentError,
@@ -79,10 +80,10 @@ class AllocationPlanIssue:
 
 
 @dataclass(frozen=True)
-class AccountAllocationPlan:
+class AccountAllocationPlan(UnitContextProjection):
     rent_account_id: int
     account_name: str
-    unit_label: str
+    unit: UnitContext
     payments: tuple[PlannedPayment, ...]
     projected_obligations: tuple[ProjectedObligation, ...]
     issues: tuple[AllocationPlanIssue, ...]
@@ -127,12 +128,12 @@ def build_allocation_plan(
         source.normalized_alias: source for source in repository.list_alias_sources()
     }
     accounts_by_payer: dict[int, list[int]] = {}
-    account_details: dict[int, tuple[str, str]] = {}
+    account_details: dict[int, tuple[str, UnitContext]] = {}
     for source in repository.list_account_sources():
         accounts_by_payer.setdefault(source.payer_id, []).append(source.rent_account_id)
         account_details[source.rent_account_id] = (
             source.account_display_name,
-            source.unit_label,
+            source.unit,
         )
     obligations_by_account: dict[int, list[AllocationPlanningObligationSourceRecord]] = {}
     global_issues: list[AllocationPlanIssue] = []
@@ -141,7 +142,7 @@ def build_allocation_plan(
         obligations_by_account.setdefault(obligation.rent_account_id, []).append(obligation)
         account_details.setdefault(
             obligation.rent_account_id,
-            (obligation.account_display_name, obligation.unit_label),
+            (obligation.account_display_name, obligation.unit),
         )
         if obligation.allocated_cents > obligation.owed_cents:
             issue = AllocationPlanIssue(
@@ -285,7 +286,7 @@ def apply_allocation_plan(
 
 def _build_account_plan(
     account_id: int,
-    details: tuple[str, str],
+    details: tuple[str, UnitContext],
     obligation_sources: list[AllocationPlanningObligationSourceRecord],
     payment_sources: list[tuple[AllocationPlanningPaymentSourceRecord, date]],
     existing_pairs: set[tuple[int, int]],
@@ -368,11 +369,11 @@ def _build_account_plan(
         _projected_obligation(source, planned_by_obligation[source.obligation_id])
         for source in obligations
     )
-    account_name, unit_label = details
+    account_name, unit = details
     return AccountAllocationPlan(
         account_id,
         account_name,
-        unit_label,
+        unit,
         tuple(planned_payments),
         projected,
         tuple(issues),

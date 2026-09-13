@@ -12,6 +12,7 @@ from autorentledger.obligations import (
     parse_currency_cents,
     parse_monthly_period,
 )
+from autorentledger.rental_context import UnitContext, UnitContextProjection
 from autorentledger.storage import (
     ObligationGenerationSourceRecord,
     RentScheduleAccountNotFoundError,
@@ -44,11 +45,11 @@ class GenerationAction(StrEnum):
 
 
 @dataclass(frozen=True)
-class ObligationGenerationItem:
+class ObligationGenerationItem(UnitContextProjection):
     action: GenerationAction
     schedule_id: int
     rent_account_id: int
-    unit_label: str
+    unit: UnitContext
     account_display_name: str
     period: str
     amount_cents: int
@@ -169,7 +170,7 @@ def _build_plan(
                 action=GenerationAction.SKIP if exists else GenerationAction.CREATE,
                 schedule_id=source.schedule_id,
                 rent_account_id=source.rent_account_id,
-                unit_label=source.unit_label,
+                unit=source.unit,
                 account_display_name=source.account_display_name,
                 period=period.value,
                 amount_cents=source.amount_cents,

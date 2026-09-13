@@ -8,6 +8,8 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 
+from autorentledger.rental_context import UnitContext, UnitContextProjection
+
 
 class LateFeeNotFoundError(ValueError):
     pass
@@ -80,13 +82,13 @@ class LateFeeAllocationReference:
 
 
 @dataclass(frozen=True)
-class LateFeeHistory:
+class LateFeeHistory(UnitContextProjection):
     charge: LateFeeCharge
     void: LateFeeVoid | None
     period: str
     rent_account_id: int
     account_display_name: str
-    unit_label: str
+    unit: UnitContext
     allocated_cents: int
     remaining_cents: int
     status: LateFeePaymentStatus
@@ -207,6 +209,7 @@ class SQLiteLateFeeRepository:
     def _history(connection: sqlite3.Connection, fee_id: int) -> LateFeeHistory:
         row = connection.execute(
             """SELECT charge.*, obligation.period, obligation.rent_account_id,
+                      account.unit_id,
                       account.display_name AS account_display_name, unit.label AS unit_label
                FROM late_fee_charges AS charge
                JOIN rent_obligations AS obligation ON obligation.id = charge.rent_obligation_id
@@ -263,14 +266,14 @@ class SQLiteLateFeeRepository:
         else:
             status = LateFeePaymentStatus.PARTIAL
         return LateFeeHistory(
-            charge,
-            void,
-            row["period"],
-            row["rent_account_id"],
-            row["account_display_name"],
-            row["unit_label"],
-            allocated,
-            remaining,
-            status,
-            allocations,
+            charge=charge,
+            void=void,
+            period=row["period"],
+            rent_account_id=row["rent_account_id"],
+            account_display_name=row["account_display_name"],
+            unit=UnitContext(row["unit_id"], row["unit_label"]),
+            allocated_cents=allocated,
+            remaining_cents=remaining,
+            status=status,
+            allocations=allocations,
         )

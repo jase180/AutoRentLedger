@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
 
+from autorentledger.rental_context import UnitContext, UnitContextProjection, extract_unit_context
 from autorentledger.storage.db import open_connection, open_read_only_connection
 from autorentledger.storage.maintenance_errors import (
     MaintenanceDateRangeError,
@@ -31,10 +32,10 @@ class RentScheduleRecord:
 
 
 @dataclass(frozen=True)
-class RentScheduleSummary:
+class RentScheduleSummary(UnitContextProjection):
     id: int
     rent_account_id: int
-    unit_label: str
+    unit: UnitContext
     account_display_name: str
     amount_cents: int
     due_day: int
@@ -44,14 +45,24 @@ class RentScheduleSummary:
 
 
 @dataclass(frozen=True)
-class ObligationGenerationSourceRecord:
+class ObligationGenerationSourceRecord(UnitContextProjection):
     schedule_id: int
     rent_account_id: int
-    unit_label: str
+    unit: UnitContext
     account_display_name: str
     amount_cents: int
     due_day: int
     existing_obligation_id: int | None
+
+
+def _rent_schedule_summary(row: sqlite3.Row) -> RentScheduleSummary:
+    values = dict(row)
+    return RentScheduleSummary(unit=extract_unit_context(values), **values)
+
+
+def _obligation_generation_source(row: sqlite3.Row) -> ObligationGenerationSourceRecord:
+    values = dict(row)
+    return ObligationGenerationSourceRecord(unit=extract_unit_context(values), **values)
 
 
 class RentScheduleAccountNotFoundError(Exception):
@@ -199,6 +210,7 @@ class SQLiteRentScheduleRepository:
                 SELECT
                     rent_schedules.id,
                     rent_schedules.rent_account_id,
+                    rent_accounts.unit_id,
                     units.label AS unit_label,
                     rent_accounts.display_name AS account_display_name,
                     rent_schedules.amount_cents,
@@ -214,7 +226,7 @@ class SQLiteRentScheduleRepository:
                 + " ORDER BY rent_schedules.id",
                 parameters,
             ).fetchall()
-        return [RentScheduleSummary(**dict(row)) for row in rows]
+        return [_rent_schedule_summary(row) for row in rows]
 
     def end_checked(
         self, schedule_id: int, active_to: date
@@ -309,6 +321,7 @@ class SQLiteRentScheduleRepository:
             SELECT
                 rent_schedules.id AS schedule_id,
                 rent_schedules.rent_account_id,
+                rent_accounts.unit_id,
                 units.label AS unit_label,
                 rent_accounts.display_name AS account_display_name,
                 rent_schedules.amount_cents,
@@ -328,7 +341,7 @@ class SQLiteRentScheduleRepository:
             """,
             (period, month_end, month_start, month_end, month_start),
         ).fetchall()
-        return [ObligationGenerationSourceRecord(**dict(row)) for row in rows]
+        return [_obligation_generation_source(row) for row in rows]
 
     def _insert_generated_obligation(
         self,

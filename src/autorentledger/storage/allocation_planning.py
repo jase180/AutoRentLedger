@@ -6,6 +6,7 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
+from autorentledger.rental_context import UnitContext, UnitContextProjection, extract_unit_context
 from autorentledger.storage.allocation_totals import (
     combined_payment_allocated_sql,
 )
@@ -27,10 +28,10 @@ class AllocationPlanningPaymentSourceRecord:
 
 
 @dataclass(frozen=True)
-class AllocationPlanningObligationSourceRecord:
+class AllocationPlanningObligationSourceRecord(UnitContextProjection):
     obligation_id: int
     rent_account_id: int
-    unit_label: str
+    unit: UnitContext
     account_display_name: str
     period: str
     due_date: str
@@ -76,6 +77,7 @@ class SQLiteAllocationPlanningRepository:
                 SELECT
                     rent_obligations.id AS obligation_id,
                     rent_obligations.rent_account_id,
+                    rent_accounts.unit_id,
                     units.label AS unit_label,
                     rent_accounts.display_name AS account_display_name,
                     rent_obligations.period,
@@ -92,6 +94,7 @@ class SQLiteAllocationPlanningRepository:
                 GROUP BY
                     rent_obligations.id,
                     rent_obligations.rent_account_id,
+                    rent_accounts.unit_id,
                     units.label,
                     rent_accounts.display_name,
                     rent_obligations.period,
@@ -101,7 +104,7 @@ class SQLiteAllocationPlanningRepository:
                 """,
                 (period_from, period_to),
             ).fetchall()
-        return [AllocationPlanningObligationSourceRecord(**dict(row)) for row in rows]
+        return [_allocation_planning_obligation(row) for row in rows]
 
     def list_alias_sources(self) -> list[SuggestionAliasSourceRecord]:
         return SQLiteSuggestionRepository(self.database_path).list_alias_sources()
@@ -119,3 +122,10 @@ class SQLiteAllocationPlanningRepository:
                 """
             ).fetchall()
         return {(int(row[0]), int(row[1])) for row in rows}
+
+
+def _allocation_planning_obligation(
+    row: sqlite3.Row,
+) -> AllocationPlanningObligationSourceRecord:
+    values = dict(row)
+    return AllocationPlanningObligationSourceRecord(unit=extract_unit_context(values), **values)

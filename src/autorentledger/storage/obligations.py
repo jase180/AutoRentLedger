@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
 
+from autorentledger.rental_context import UnitContext, UnitContextProjection, extract_unit_context
 from autorentledger.storage.db import open_connection
 from autorentledger.storage.migrations import (
     create_obligation_schema,
@@ -24,11 +25,10 @@ class RentObligationRecord:
 
 
 @dataclass(frozen=True)
-class RentObligationSummary:
+class RentObligationSummary(UnitContextProjection):
     id: int
     rent_account_id: int
-    unit_id: int
-    unit_label: str
+    unit: UnitContext
     account_display_name: str
     period: str
     amount_cents: int
@@ -105,7 +105,7 @@ class SQLiteObligationRepository:
                 self._summary_query("WHERE rent_obligations.id = ?"),
                 (obligation_id,),
             ).fetchone()
-        return RentObligationSummary(**dict(row)) if row else None
+        return _rent_obligation_summary(row) if row else None
 
     def list_summaries(self, rent_account_id: int | None = None) -> list[RentObligationSummary]:
         where_clause = ""
@@ -118,7 +118,7 @@ class SQLiteObligationRepository:
                 self._summary_query(where_clause) + " ORDER BY rent_obligations.id",
                 parameters,
             ).fetchall()
-        return [RentObligationSummary(**dict(row)) for row in rows]
+        return [_rent_obligation_summary(row) for row in rows]
 
     def count(self) -> int:
         with self._connect() as connection:
@@ -143,3 +143,8 @@ class SQLiteObligationRepository:
             JOIN units ON units.id = rent_accounts.unit_id
             {where_clause}
         """
+
+
+def _rent_obligation_summary(row: sqlite3.Row) -> RentObligationSummary:
+    values = dict(row)
+    return RentObligationSummary(unit=extract_unit_context(values), **values)

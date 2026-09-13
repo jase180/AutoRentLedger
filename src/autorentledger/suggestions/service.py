@@ -8,6 +8,7 @@ from enum import StrEnum
 
 from autorentledger.identity import normalize_alias
 from autorentledger.reconciliation import ReconciliationRecord, reconcile_all
+from autorentledger.rental_context import UnitContext, UnitContextProjection
 from autorentledger.storage import (
     SQLiteReconciliationRepository,
     SQLiteSuggestionRepository,
@@ -36,13 +37,13 @@ class SuggestionPaymentNotFoundError(ValueError):
 
 
 @dataclass(frozen=True)
-class AllocationSuggestion:
+class AllocationSuggestion(UnitContextProjection):
     payment_event_id: int
     sender_name: str
     payer_id: int
     payer_display_name: str
     rent_account_id: int
-    unit_label: str
+    unit: UnitContext
     account_display_name: str
     rent_obligation_id: int
     period: str
@@ -158,7 +159,7 @@ def find_allocation_suggestions(
             payer_id=payer_id,
             payer_display_name=payer_display_name,
             rent_account_id=account.rent_account_id,
-            unit_label=account.unit_label,
+            unit=account.unit,
             account_display_name=account.account_display_name,
             rent_obligation_id=obligation.obligation_id,
             period=obligation.period,

@@ -6,6 +6,7 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
+from autorentledger.rental_context import UnitContext, UnitContextProjection, extract_unit_context
 from autorentledger.storage.allocation_totals import (
     combined_payment_allocated_sql,
 )
@@ -28,10 +29,10 @@ class SuggestionAliasSourceRecord:
 
 
 @dataclass(frozen=True)
-class SuggestionAccountSourceRecord:
+class SuggestionAccountSourceRecord(UnitContextProjection):
     payer_id: int
     rent_account_id: int
-    unit_label: str
+    unit: UnitContext
     account_display_name: str
 
 
@@ -92,6 +93,7 @@ class SQLiteSuggestionRepository:
                 SELECT
                     rent_account_payers.payer_id,
                     rent_accounts.id AS rent_account_id,
+                    rent_accounts.unit_id,
                     units.label AS unit_label,
                     rent_accounts.display_name AS account_display_name
                 FROM rent_account_payers
@@ -101,4 +103,9 @@ class SQLiteSuggestionRepository:
                 ORDER BY rent_account_payers.payer_id, rent_accounts.id
                 """
             ).fetchall()
-        return [SuggestionAccountSourceRecord(**dict(row)) for row in rows]
+        return [_suggestion_account_source(row) for row in rows]
+
+
+def _suggestion_account_source(row: sqlite3.Row) -> SuggestionAccountSourceRecord:
+    values = dict(row)
+    return SuggestionAccountSourceRecord(unit=extract_unit_context(values), **values)

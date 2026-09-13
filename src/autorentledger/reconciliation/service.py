@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from autorentledger.obligations import parse_monthly_period
+from autorentledger.rental_context import UnitContext, UnitContextProjection
 from autorentledger.storage import (
     ReconciliationSourceRecord,
     SQLiteReconciliationRepository,
@@ -21,11 +22,10 @@ class ReconciliationInvariantError(RuntimeError):
 
 
 @dataclass(frozen=True)
-class ReconciliationRecord:
+class ReconciliationRecord(UnitContextProjection):
     obligation_id: int
     rent_account_id: int
-    unit_id: int
-    unit_label: str
+    unit: UnitContext
     account_display_name: str
     period: str
     due_date: str
@@ -78,8 +78,7 @@ def _derive(source: ReconciliationSourceRecord) -> ReconciliationRecord:
     return ReconciliationRecord(
         obligation_id=source.obligation_id,
         rent_account_id=source.rent_account_id,
-        unit_id=source.unit_id,
-        unit_label=source.unit_label,
+        unit=source.unit,
         account_display_name=source.account_display_name,
         period=source.period,
         due_date=source.due_date,

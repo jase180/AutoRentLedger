@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from autorentledger.rental_context import UnitContext, UnitContextProjection, extract_unit_context
 from autorentledger.storage.allocation_totals import combined_payment_allocated_cents
 
 
@@ -56,14 +57,14 @@ class LateFeeAllocationRecord:
 
 
 @dataclass(frozen=True)
-class LateFeeAllocationSummary:
+class LateFeeAllocationSummary(UnitContextProjection):
     id: int
     payment_event_id: int
     late_fee_charge_id: int
     rent_obligation_id: int
     rent_account_id: int
     period: str
-    unit_label: str
+    unit: UnitContext
     account_display_name: str
     amount_cents: int
     created_at: str
@@ -158,6 +159,7 @@ class SQLiteLateFeeAllocationRepository:
             rows = connection.execute(
                 """SELECT allocation.*, fee.rent_obligation_id,
                           obligation.rent_account_id, obligation.period,
+                          account.unit_id,
                           unit.label AS unit_label,
                           account.display_name AS account_display_name
                    FROM late_fee_allocations AS allocation
@@ -167,4 +169,8 @@ class SQLiteLateFeeAllocationRepository:
                    JOIN units AS unit ON unit.id = account.unit_id"""
                 + where + " ORDER BY allocation.id", values,
             ).fetchall()
-        return tuple(LateFeeAllocationSummary(**dict(row)) for row in rows)
+        summaries = []
+        for row in rows:
+            values = dict(row)
+            summaries.append(LateFeeAllocationSummary(unit=extract_unit_context(values), **values))
+        return tuple(summaries)

@@ -48,6 +48,13 @@ connection setup for row access, foreign-key enforcement, and read-only URI hand
 and historical upgrades remain centralized in `storage/migrations.py`; repository modules must not
 duplicate schema definitions or move authoritative write checks outside their transactions.
 
+`UnitRecord` is the persisted unit entity and retains the v13 fields `id`, `label`, and
+`created_at`. `UnitContext` is the reusable read-model identity (`unit_id` and `unit_label`) used
+when account, obligation, allocation, schedule, planning, reconciliation, suggestion, and late-fee
+queries project a unit. Compatibility accessors preserve existing output while giving future rental
+hierarchy work one explicit seam to extend; it does not change current unit semantics or global
+label uniqueness.
+
 ## Presentation and orchestration organization
 
 CLI parser registration and handlers are grouped by domain under `src/autorentledger/cli/`, behind

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
 
+from autorentledger.rental_context import UnitContext, UnitContextProjection, extract_unit_context
 from autorentledger.storage.db import open_connection, open_read_only_connection
 from autorentledger.storage.identity import PayerAliasRecord, PayerRecord
 from autorentledger.storage.maintenance_errors import (
@@ -40,14 +41,18 @@ class RentAccountRecord:
 
 
 @dataclass(frozen=True)
-class RentAccountSummary:
+class RentAccountSummary(UnitContextProjection):
     id: int
-    unit_id: int
-    unit_label: str
+    unit: UnitContext
     display_name: str
     active_from: str | None
     active_to: str | None
     created_at: str
+
+
+def _rent_account_summary(row: sqlite3.Row) -> RentAccountSummary:
+    values = dict(row)
+    return RentAccountSummary(unit=extract_unit_context(values), **values)
 
 
 @dataclass(frozen=True)
@@ -396,7 +401,7 @@ class SQLiteRentalRepository:
                 """,
                 (account_id,),
             ).fetchone()
-        return RentAccountSummary(**dict(row)) if row else None
+        return _rent_account_summary(row) if row else None
 
     def list_rent_accounts(self) -> list[RentAccountSummary]:
         with self._connect() as connection:
@@ -415,7 +420,7 @@ class SQLiteRentalRepository:
                 ORDER BY rent_accounts.id
                 """
             ).fetchall()
-        return [RentAccountSummary(**dict(row)) for row in rows]
+        return [_rent_account_summary(row) for row in rows]
 
     def add_payer(self, account_id: int, payer_id: int) -> RentAccountPayerRecord:
         created_at = datetime.now(UTC).isoformat()
@@ -475,7 +480,7 @@ class SQLiteRentalRepository:
                 """,
                 (payer_id,),
             ).fetchall()
-        return [RentAccountSummary(**dict(row)) for row in rows]
+        return [_rent_account_summary(row) for row in rows]
 
     def rename_rent_account_checked(
         self, account_id: int, display_name: str

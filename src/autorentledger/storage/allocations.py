@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from autorentledger.rental_context import UnitContext, UnitContextProjection, extract_unit_context
 from autorentledger.storage.allocation_totals import (
     combined_payment_allocated_cents,
 )
@@ -26,12 +27,12 @@ class PaymentAllocationRecord:
 
 
 @dataclass(frozen=True)
-class PaymentAllocationSummary:
+class PaymentAllocationSummary(UnitContextProjection):
     id: int
     payment_event_id: int
     rent_obligation_id: int
     period: str
-    unit_label: str
+    unit: UnitContext
     amount_cents: int
     created_at: str
 
@@ -41,6 +42,11 @@ class AllocationBalance:
     source_amount_cents: int
     allocated_cents: int
     remaining_cents: int
+
+
+def _payment_allocation_summary(row: sqlite3.Row) -> PaymentAllocationSummary:
+    values = dict(row)
+    return PaymentAllocationSummary(unit=extract_unit_context(values), **values)
 
 
 class AllocationStorageError(Exception):
@@ -154,6 +160,7 @@ class SQLiteAllocationRepository:
                     payment_allocations.payment_event_id,
                     payment_allocations.rent_obligation_id,
                     rent_obligations.period,
+                    rent_accounts.unit_id,
                     units.label AS unit_label,
                     payment_allocations.amount_cents,
                     payment_allocations.created_at
@@ -168,7 +175,7 @@ class SQLiteAllocationRepository:
                 + " ORDER BY payment_allocations.id",
                 parameters,
             ).fetchall()
-        return [PaymentAllocationSummary(**dict(row)) for row in rows]
+        return [_payment_allocation_summary(row) for row in rows]
 
     def payment_balance(self, payment_event_id: int) -> AllocationBalance | None:
         with self._connect() as connection:

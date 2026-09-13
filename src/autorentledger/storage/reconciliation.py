@@ -6,15 +6,15 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
+from autorentledger.rental_context import UnitContext, UnitContextProjection, extract_unit_context
 from autorentledger.storage.db import open_read_only_connection
 
 
 @dataclass(frozen=True)
-class ReconciliationSourceRecord:
+class ReconciliationSourceRecord(UnitContextProjection):
     obligation_id: int
     rent_account_id: int
-    unit_id: int
-    unit_label: str
+    unit: UnitContext
     account_display_name: str
     period: str
     due_date: str
@@ -38,14 +38,14 @@ class SQLiteReconciliationRepository:
                 + " ORDER BY rent_obligations.id",
                 (period,),
             ).fetchall()
-        return [ReconciliationSourceRecord(**dict(row)) for row in rows]
+        return [_reconciliation_source(row) for row in rows]
 
     def list_sources(self) -> list[ReconciliationSourceRecord]:
         with self._connect() as connection:
             rows = connection.execute(
                 self._source_query("") + " ORDER BY rent_obligations.id"
             ).fetchall()
-        return [ReconciliationSourceRecord(**dict(row)) for row in rows]
+        return [_reconciliation_source(row) for row in rows]
 
     def get_source(self, obligation_id: int) -> ReconciliationSourceRecord | None:
         with self._connect() as connection:
@@ -53,7 +53,7 @@ class SQLiteReconciliationRepository:
                 self._source_query("WHERE rent_obligations.id = ?"),
                 (obligation_id,),
             ).fetchone()
-        return ReconciliationSourceRecord(**dict(row)) if row else None
+        return _reconciliation_source(row) if row else None
 
     @staticmethod
     def _source_query(where_clause: str) -> str:
@@ -84,3 +84,8 @@ class SQLiteReconciliationRepository:
                 rent_obligations.due_date,
                 rent_obligations.amount_cents
         """
+
+
+def _reconciliation_source(row: sqlite3.Row) -> ReconciliationSourceRecord:
+    values = dict(row)
+    return ReconciliationSourceRecord(unit=extract_unit_context(values), **values)
