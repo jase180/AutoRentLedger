@@ -48,6 +48,18 @@ connection setup for row access, foreign-key enforcement, and read-only URI hand
 and historical upgrades remain centralized in `storage/migrations.py`; repository modules must not
 duplicate schema definitions or move authoritative write checks outside their transactions.
 
+## Presentation and orchestration organization
+
+CLI parser registration and handlers are grouped by domain under `src/autorentledger/cli/`, behind
+the stable `autorentledger.cli:main` entrypoint and compatibility facade. The top-level parser is
+assembled explicitly; command modules continue to delegate business rules and writes to the
+existing services and repositories.
+
+Web read composition and route registration are grouped by screen under
+`src/autorentledger/web/composition/` and `src/autorentledger/web/routes/`. Focused route modules
+register on the same `web` blueprint, preserving established URLs and endpoint names. Routes stay
+thin and authenticated, and the web surface remains inspection-only.
+
 ## Invariants to preserve
 
 - Evidence origin is not accounting meaning. Raw MIME stays immutable; manual evidence records a
