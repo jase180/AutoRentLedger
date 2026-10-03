@@ -103,7 +103,7 @@ def test_daily_creates_current_month_once_and_refreshes_attention(tmp_path):
     with sqlite3.connect(database_path) as connection:
         assert connection.execute("SELECT COUNT(*) FROM payment_allocations").fetchone()[0] == 0
         assert connection.execute("SELECT COUNT(*) FROM late_fee_charges").fetchone()[0] == 0
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION == 14
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION == 15
 
 
 def test_daily_month_rollover_creates_only_each_current_month(tmp_path):

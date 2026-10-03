@@ -11,7 +11,7 @@ from pathlib import Path
 
 from autorentledger.parsing.version import LEGACY_UNVERSIONED_PARSER_VERSION
 
-CURRENT_SCHEMA_VERSION = 14
+CURRENT_SCHEMA_VERSION = 15
 
 RAW_EMAILS_SQL = """
     CREATE TABLE IF NOT EXISTS raw_emails (
@@ -225,6 +225,39 @@ UNITS_SQL = """
     )
 """
 
+PROPERTY_EXPENSES_SQL = """
+    CREATE TABLE property_expenses (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        property_id INTEGER NOT NULL,
+        unit_id INTEGER,
+        occurred_on TEXT NOT NULL,
+        amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+        category TEXT NOT NULL,
+        vendor TEXT,
+        note TEXT,
+        created_at TEXT NOT NULL,
+        voided_at TEXT,
+        FOREIGN KEY (property_id)
+            REFERENCES properties(id)
+            ON DELETE RESTRICT,
+        FOREIGN KEY (unit_id)
+            REFERENCES units(id)
+            ON DELETE RESTRICT
+    )
+"""
+
+PROPERTY_EXPENSE_VOIDS_SQL = """
+    CREATE TABLE property_expense_voids (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        property_expense_id INTEGER NOT NULL UNIQUE,
+        reason TEXT NOT NULL CHECK (length(trim(reason)) > 0),
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (property_expense_id)
+            REFERENCES property_expenses(id)
+            ON DELETE RESTRICT
+    )
+"""
+
 RENT_ACCOUNTS_SQL = """
     CREATE TABLE IF NOT EXISTS rent_accounts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -308,6 +341,23 @@ RENT_SCHEDULES_SQL = """
 """
 
 EXPECTED_COLUMNS: dict[str, frozenset[str]] = {
+    "property_expenses": frozenset(
+        {
+            "id",
+            "property_id",
+            "unit_id",
+            "occurred_on",
+            "amount_cents",
+            "category",
+            "vendor",
+            "note",
+            "created_at",
+            "voided_at",
+        }
+    ),
+    "property_expense_voids": frozenset(
+        {"id", "property_expense_id", "reason", "created_at"}
+    ),
     "late_fee_charges": frozenset(
         {"id", "rent_obligation_id", "amount_cents", "assessed_on", "reason",
          "created_at", "voided_at"}
@@ -391,9 +441,17 @@ EXPECTED_COLUMNS: dict[str, frozenset[str]] = {
     ),
 }
 
+EXPENSE_TABLES = frozenset({"property_expenses", "property_expense_voids"})
+
 PRE_LATE_FEE_TABLES = frozenset(
     set(EXPECTED_COLUMNS)
-    - {"properties", "late_fee_charges", "late_fee_voids", "late_fee_allocations"}
+    - {
+        "properties",
+        "late_fee_charges",
+        "late_fee_voids",
+        "late_fee_allocations",
+        *EXPENSE_TABLES,
+    }
 )
 
 TABLES_BY_VERSION: dict[int, frozenset[str]] = {
@@ -454,9 +512,12 @@ TABLES_BY_VERSION: dict[int, frozenset[str]] = {
     ),
     10: frozenset(set(PRE_LATE_FEE_TABLES) - {"gmail_payment_voids"}),
     11: PRE_LATE_FEE_TABLES,
-    12: frozenset(set(EXPECTED_COLUMNS) - {"properties", "late_fee_allocations"}),
-    13: frozenset(set(EXPECTED_COLUMNS) - {"properties"}),
-    14: frozenset(EXPECTED_COLUMNS),
+    12: frozenset(
+        set(EXPECTED_COLUMNS) - {"properties", "late_fee_allocations", *EXPENSE_TABLES}
+    ),
+    13: frozenset(set(EXPECTED_COLUMNS) - {"properties", *EXPENSE_TABLES}),
+    14: frozenset(set(EXPECTED_COLUMNS) - EXPENSE_TABLES),
+    15: frozenset(EXPECTED_COLUMNS),
 }
 
 PAYMENT_EVENT_COLUMNS_V7 = frozenset(
@@ -667,6 +728,20 @@ def add_properties(connection: sqlite3.Connection) -> None:
     connection.execute("PRAGMA legacy_alter_table = OFF")
 
 
+def add_property_expenses(connection: sqlite3.Connection) -> None:
+    """Add explicit Property expenses and append-only void audit records."""
+    connection.execute(PROPERTY_EXPENSES_SQL)
+    connection.execute(PROPERTY_EXPENSE_VOIDS_SQL)
+    connection.execute(
+        "CREATE INDEX property_expense_property_date_idx "
+        "ON property_expenses(property_id, occurred_on)"
+    )
+    connection.execute(
+        "CREATE INDEX property_expense_unit_date_idx "
+        "ON property_expenses(unit_id, occurred_on) WHERE unit_id IS NOT NULL"
+    )
+
+
 MIGRATIONS: dict[int, Migration] = {
     1: create_raw_email_schema,
     2: create_payment_event_v2_schema,
@@ -682,6 +757,7 @@ MIGRATIONS: dict[int, Migration] = {
     12: add_late_fee_charges,
     13: add_late_fee_allocations,
     14: add_properties,
+    15: add_property_expenses,
 }
 
 
@@ -871,8 +947,10 @@ def _validate_schema_matches_version(
             f"unexpected: {unexpected}."
         )
     _validate_known_table_columns(connection, known_tables, version)
-    if version == 14:
+    if version >= 14:
         _validate_v14_constraints(connection)
+    if version >= 15:
+        _validate_v15_constraints(connection)
 
 
 def _validate_v14_constraints(connection: sqlite3.Connection) -> None:
@@ -906,6 +984,38 @@ def _validate_v14_constraints(connection: sqlite3.Connection) -> None:
     if ("property_id", "label") not in unique_indexes or ("label",) in unique_indexes:
         raise LegacySchemaDetectionError(
             "Table units must uniquely constrain (property_id, label), not label globally."
+        )
+
+
+def _validate_v15_constraints(connection: sqlite3.Connection) -> None:
+    expense_foreign_keys = connection.execute(
+        "PRAGMA foreign_key_list(property_expenses)"
+    ).fetchall()
+    expected_expense_links = {
+        ("property_id", "properties", "id", "RESTRICT"),
+        ("unit_id", "units", "id", "RESTRICT"),
+    }
+    actual_expense_links = {
+        (str(row[3]), str(row[2]), str(row[4]), str(row[6]).upper())
+        for row in expense_foreign_keys
+    }
+    if not expected_expense_links <= actual_expense_links:
+        raise LegacySchemaDetectionError(
+            "Table property_expenses must reference properties and units ON DELETE RESTRICT."
+        )
+    void_foreign_keys = connection.execute(
+        "PRAGMA foreign_key_list(property_expense_voids)"
+    ).fetchall()
+    if not any(
+        str(row[2]) == "property_expenses"
+        and str(row[3]) == "property_expense_id"
+        and str(row[4]) == "id"
+        and str(row[6]).upper() == "RESTRICT"
+        for row in void_foreign_keys
+    ):
+        raise LegacySchemaDetectionError(
+            "Table property_expense_voids.property_expense_id must reference "
+            "property_expenses(id) ON DELETE RESTRICT."
         )
 
 

@@ -58,6 +58,7 @@ The important distinctions are:
 | Payment event | A normalized payment observation with exactly one evidence source. It is not a tenant. |
 | Payer | The identity that sent money. A payer is not a rent account. |
 | Property | The rental property that contains one or more units; unit labels are unique only within a Property. |
+| Property expense | An explicit owner-recorded cash outflow for one Property, optionally attributed to one of its Units. |
 | Rent account | The household/account associated with a unit and eventual rent responsibility. |
 | Obligation | The authoritative fact that a specific account owed an amount for a month. |
 | Rent allocation | The explicit accounting link saying part of a payment satisfies a rent obligation. |
@@ -349,7 +350,23 @@ pytest
 
 GitHub Actions runs the same checks on Python 3.11 for every push and pull request. Tests use
 synthetic local fixtures and require no Gmail credentials, network access, or operational database.
-The current SQLite schema version is 14.
+The current SQLite schema version is 15.
+
+## Property expenses
+
+Record expenses explicitly; AutoRentLedger does not infer them from bank activity:
+
+```powershell
+autorentledger expense add --property 1 --unit 2 --date 2026-10-03 --amount 425.00 --category repairs_maintenance --vendor "Example Plumbing" --note "Synthetic repair"
+autorentledger expenses
+autorentledger expense show 1
+autorentledger expense void 1 --reason "Entered twice"
+```
+
+Expense categories are controlled and discoverable through `expense categories` or the
+`--category` CLI choices. Voiding is audited and retains the original row. The web **Expenses**
+page is read-only, and expenses are deliberately excluded from rent Overview and monthly-report
+totals until a separate property cash-reporting milestone defines those semantics.
 
 The application uses Python, standard-library `sqlite3`, and a small service/repository structure
 under `src/autorentledger/`. Gmail remains behind an email-source adapter; domain and read-model
@@ -380,6 +397,7 @@ permitted.
 ## Explicit non-goals
 
 AutoRentLedger is not a lease manager, tenant balance system, general ledger, or full
-property-management platform. It does not model security deposits, automatic late-fee policies, credits, expenses,
-NOI, double-entry bookkeeping, or AI/fuzzy payment matching. It has no public/write-capable web UI,
+property-management platform. It does not model security deposits, automatic late-fee policies,
+credits, expense inference/imports, NOI, double-entry bookkeeping, or AI/fuzzy payment matching.
+It has no public/write-capable web UI,
 internal scheduler, background jobs, cloud backup, or automatic accounting policy.

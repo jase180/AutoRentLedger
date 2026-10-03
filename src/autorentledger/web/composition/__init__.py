@@ -5,6 +5,11 @@
 from autorentledger.web.composition.allocation_plan import build_web_allocation_plan
 from autorentledger.web.composition.attention import AttentionPage, build_web_attention
 from autorentledger.web.composition.common import WebDetailNotFoundError
+from autorentledger.web.composition.expenses import (
+    ExpensesPage,
+    build_web_expense_detail,
+    build_web_expenses,
+)
 from autorentledger.web.composition.obligations import ObligationsPage, build_web_obligations
 from autorentledger.web.composition.overview import build_web_owner_overview
 from autorentledger.web.composition.payments import (

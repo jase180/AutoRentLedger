@@ -1021,6 +1021,48 @@ they target another month. Terminal rows use `Property Name / Unit Label`; CSV r
 `property_id`, `property_name`, `unit_id`, and `unit_label` columns. Property names are joined live,
 so a Property rename appears on the next read without rewriting accounting history.
 
+## Property expenses
+
+Expenses are explicit owner-recorded outflows; AutoRentLedger does not read bank transactions or
+infer vendors, categories, or expenses. Property intent is always explicit, even when a Unit is
+provided:
+
+```powershell
+autorentledger expense add `
+  --property 1 `
+  --unit 2 `
+  --date 2026-10-03 `
+  --amount 425.00 `
+  --category repairs_maintenance `
+  --vendor "Example Plumbing" `
+  --note "Synthetic repair"
+```
+
+List active expenses, apply simple filters, or include audited voids:
+
+```powershell
+autorentledger expenses
+autorentledger expenses --property 1 --from 2026-10-01 --to 2026-10-31
+autorentledger expenses --category utilities
+autorentledger expenses --include-voided
+```
+
+Inspect one expense and void a mistaken entry without deleting its original facts:
+
+```powershell
+autorentledger expense show 1
+autorentledger expense void 1 --reason "Entered twice"
+```
+
+Use `autorentledger expense categories` to list the controlled values. They are Repairs &
+Maintenance, Utilities, Insurance, Property Tax, Management, Cleaning, Landscaping / Snow, Pest
+Control, Legal / Professional, Capital Improvement, Supplies, and Other. Capital Improvement is
+intentionally separate from Repairs & Maintenance. Vendor and note are optional descriptive text;
+there is no vendor registry, receipt storage, automatic categorization, or tax logic.
+
+The browser **Expenses** page and expense detail are read-only. Expenses do not change `daily`,
+rent reconciliation, Overview totals, or the monthly rent report.
+
 ## Late fees
 
 Rent obligation != late-fee charge. AutoRentLedger records an explicit owner assessment; it does not

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from flask import Flask
 
+from autorentledger.expenses import expense_category_label
 from autorentledger.web.auth import WebAuthConfig, auth_blueprint
 from autorentledger.web.routes import web_blueprint
 
@@ -41,6 +42,7 @@ def create_app(database_path: Path, auth_config: WebAuthConfig) -> Flask:
     app.jinja_env.filters["money"] = _format_money
     app.jinja_env.filters["month_heading"] = _format_month_heading
     app.jinja_env.filters["short_date"] = _format_short_date
+    app.jinja_env.filters["expense_category"] = expense_category_label
     app.jinja_env.globals["collection_percentage"] = _collection_percentage
     app.jinja_env.globals["bounded_percentage"] = _bounded_percentage
     app.register_blueprint(auth_blueprint)

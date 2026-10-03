@@ -20,6 +20,7 @@ from autorentledger.storage.migrations import (
     CURRENT_SCHEMA_VERSION,
     EXPECTED_COLUMNS,
     MIGRATIONS,
+    TABLES_BY_VERSION,
     LegacySchemaDetectionError,
     MigrationError,
     create_payment_event_v2_schema,
@@ -161,7 +162,7 @@ def test_v7_to_current_adds_legacy_provenance_and_preserves_ledger_rows(tmp_path
 
     result = upgrade_database(database_path)
 
-    assert (result.from_version, result.to_version) == (7, 14)
+    assert (result.from_version, result.to_version) == (7, CURRENT_SCHEMA_VERSION)
     assert snapshot_tables(database_path, preserved) == preserved
     migrated_unit = SQLiteRentalRepository(database_path).get_unit(unit.id)
     assert migrated_unit is not None
@@ -204,7 +205,7 @@ def test_v8_to_current_preserves_gmail_payments_allocations_and_foreign_keys(tmp
 
     result = upgrade_database(database_path)
 
-    assert (result.from_version, result.to_version) == (8, 14)
+    assert (result.from_version, result.to_version) == (8, CURRENT_SCHEMA_VERSION)
     after_payment = SQLitePaymentEventRepository(database_path).get(payment.id)
     assert after_payment is not None
     assert before_payment is not None
@@ -231,7 +232,7 @@ def test_v8_to_current_preserves_gmail_payments_allocations_and_foreign_keys(tmp
     assert SQLiteAllocationRepository(database_path).get(allocation.id) == allocation
     assert SQLiteRawEmailRepository(database_path).get(raw.gmail_message_id).raw_mime == raw_bytes
     with sqlite3.connect(database_path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 14
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
         assert connection.execute(
             "SELECT COUNT(*) FROM manual_payment_evidence"
@@ -279,7 +280,7 @@ def test_v9_to_v10_adds_manual_audit_state_without_changing_existing_rows(tmp_pa
 
     result = upgrade_database(database_path)
 
-    assert (result.from_version, result.to_version) == (9, 14)
+    assert (result.from_version, result.to_version) == (9, CURRENT_SCHEMA_VERSION)
     assert snapshot_tables(database_path, before) == before
     payment = SQLitePaymentEventRepository(database_path).get(42)
     assert payment is not None
@@ -289,7 +290,7 @@ def test_v9_to_v10_adds_manual_audit_state_without_changing_existing_rows(tmp_pa
     assert payment.voided_at is None
     assert SQLiteAllocationRepository(database_path).get(allocation.id) == allocation
     with sqlite3.connect(database_path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 14
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
         assert connection.execute(
             "SELECT COUNT(*) FROM manual_payment_revisions"
@@ -642,7 +643,7 @@ def test_v13_to_v14_preserves_accounting_and_materializes_one_default_property(t
 
     result = upgrade_database(database_path)
 
-    assert (result.from_version, result.to_version) == (13, 14)
+    assert (result.from_version, result.to_version) == (13, CURRENT_SCHEMA_VERSION)
     assert snapshot_tables(database_path, preserved_tables) == before
     properties = SQLitePropertyRepository(database_path).list_properties()
     assert len(properties) == 1
@@ -736,4 +737,105 @@ def test_schema_validation_rejects_malformed_v14_unit_constraints(tmp_path):
         connection.execute("PRAGMA user_version = 14")
 
     with pytest.raises(LegacySchemaDetectionError, match="reference properties"):
+        get_schema_status(database_path)
+
+
+def test_v14_to_v15_adds_expense_tables_without_changing_existing_rows(tmp_path):
+    database_path = tmp_path / "v14-expenses.sqlite3"
+    with sqlite3.connect(database_path) as connection:
+        for version in range(1, 15):
+            MIGRATIONS[version](connection)
+        connection.execute("PRAGMA user_version = 14")
+    properties = SQLitePropertyRepository(database_path)
+    property_record = properties.create_property("Property A")
+    rentals = SQLiteRentalRepository(database_path)
+    unit = rentals.create_unit(property_record.id, "2F")
+    account = rentals.create_rent_account(unit.id, "Synthetic Household", None, None)
+    obligation = SQLiteObligationRepository(database_path).create(
+        account.id, "2026-10", 145_000, date(2026, 10, 1)
+    )
+    preserved_tables = tuple(TABLES_BY_VERSION[14])
+    before = snapshot_tables(database_path, preserved_tables)
+
+    result = upgrade_database(database_path)
+
+    assert (result.from_version, result.to_version) == (14, 15)
+    assert snapshot_tables(database_path, preserved_tables) == before
+    assert obligation.id == 1
+    assert {"property_expenses", "property_expense_voids"} <= table_names(database_path)
+    with sqlite3.connect(database_path) as connection:
+        expense_foreign_keys = connection.execute(
+            "PRAGMA foreign_key_list(property_expenses)"
+        ).fetchall()
+        assert {
+            (row[3], row[2], row[4], row[6].upper()) for row in expense_foreign_keys
+        } >= {
+            ("property_id", "properties", "id", "RESTRICT"),
+            ("unit_id", "units", "id", "RESTRICT"),
+        }
+        void_foreign_keys = connection.execute(
+            "PRAGMA foreign_key_list(property_expense_voids)"
+        ).fetchall()
+        assert (
+            "property_expense_id",
+            "property_expenses",
+            "id",
+            "RESTRICT",
+        ) in {(row[3], row[2], row[4], row[6].upper()) for row in void_foreign_keys}
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+        assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+
+
+def test_v15_migration_failure_is_atomic(tmp_path):
+    database_path = tmp_path / "v14-expense-failure.sqlite3"
+    with sqlite3.connect(database_path) as connection:
+        for version in range(1, 15):
+            MIGRATIONS[version](connection)
+        connection.execute("PRAGMA user_version = 14")
+
+    def fail_after_expense_tables(connection):
+        MIGRATIONS[15](connection)
+        raise sqlite3.OperationalError("synthetic v15 migration failure")
+
+    with pytest.raises(MigrationError, match="synthetic v15 migration failure"):
+        upgrade_database(
+            database_path, migrations={**MIGRATIONS, 15: fail_after_expense_tables}
+        )
+
+    with sqlite3.connect(database_path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 14
+        assert connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE name = 'property_expenses'"
+        ).fetchone() is None
+        assert connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE name = 'property_expense_voids'"
+        ).fetchone() is None
+
+
+def test_schema_validation_rejects_malformed_v15_expense_columns(tmp_path):
+    database_path = tmp_path / "malformed-v15.sqlite3"
+    with sqlite3.connect(database_path) as connection:
+        for version in range(1, 15):
+            MIGRATIONS[version](connection)
+        connection.execute(
+            """CREATE TABLE property_expenses (
+                   id INTEGER PRIMARY KEY, property_id INTEGER NOT NULL, unit_id INTEGER,
+                   occurred_on TEXT NOT NULL, amount_cents INTEGER NOT NULL,
+                   category TEXT NOT NULL, vendor TEXT, created_at TEXT NOT NULL,
+                   voided_at TEXT,
+                   FOREIGN KEY(property_id) REFERENCES properties(id) ON DELETE RESTRICT,
+                   FOREIGN KEY(unit_id) REFERENCES units(id) ON DELETE RESTRICT
+               )"""
+        )
+        connection.execute(
+            """CREATE TABLE property_expense_voids (
+                   id INTEGER PRIMARY KEY, property_expense_id INTEGER NOT NULL UNIQUE,
+                   reason TEXT NOT NULL, created_at TEXT NOT NULL,
+                   FOREIGN KEY(property_expense_id)
+                       REFERENCES property_expenses(id) ON DELETE RESTRICT
+               )"""
+        )
+        connection.execute("PRAGMA user_version = 15")
+
+    with pytest.raises(LegacySchemaDetectionError, match="property_expenses"):
         get_schema_status(database_path)

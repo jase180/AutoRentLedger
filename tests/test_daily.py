@@ -617,5 +617,5 @@ def test_repeated_daily_runs_create_separate_backups_without_duplicate_evidence(
     assert SQLiteObligationRepository(database_path).count() == 1
     for table in protected_tables:
         assert before[1][table] == after[1][table]
-    assert after[2] == CURRENT_SCHEMA_VERSION == 14
+    assert after[2] == CURRENT_SCHEMA_VERSION == 15
     assert before[0] == after[0]

@@ -50,7 +50,7 @@ def test_ensure_monthly_rent_is_idempotent_and_month_scoped(tmp_path):
     assert october.amount_cents == 130000
     assert october.due_date == "2026-10-01"
     assert obligations.get_for_account_period(account.id, "2026-11") is None
-    assert CURRENT_SCHEMA_VERSION == 14
+    assert CURRENT_SCHEMA_VERSION == 15
 
 
 def test_rent_change_preserves_prior_obligation_and_changes_future_month(tmp_path):

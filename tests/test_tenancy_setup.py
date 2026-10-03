@@ -368,7 +368,7 @@ def test_apply_creates_existing_primitives_only_and_reports_ids(tmp_path, capsys
         schedule = connection.execute("SELECT * FROM rent_schedules").fetchone()
         assert schedule[4:6] == ("2026-05-01", "2027-04-30")
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 14
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
 
 
 def test_new_payer_display_name_collision_does_not_reuse(tmp_path):
@@ -456,7 +456,7 @@ def test_exact_alias_resolution_and_primitive_commands_remain_available(tmp_path
     assert main(
         ["payer", "add", "Another Synthetic Payer", "--database", str(database_path)]
     ) == 0
-    assert CURRENT_SCHEMA_VERSION == 14
+    assert CURRENT_SCHEMA_VERSION == 15
 
 
 def test_new_unit_setup_requires_existing_property_and_scopes_label(tmp_path):

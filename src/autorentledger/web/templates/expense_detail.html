@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}Expense {{ expense.id }} | AutoRentLedger{% endblock %}
+
+{% block content %}
+  <section class="page-heading">
+    <div>
+      <p class="eyebrow">Property expense {{ expense.id }}</p>
+      <h1>{{ expense.property_unit_display }}</h1>
+      <p class="section-note">Explicit owner-recorded expense · {{ expense.status }}</p>
+    </div>
+    <a class="back-link" href="{{ url_for('web.expenses') }}">Back to expenses</a>
+  </section>
+  <dl class="fact-grid">
+    <div><dt>Date</dt><dd>{{ expense.occurred_on }}</dd></div>
+    <div><dt>Property</dt><dd>{{ expense.property_name }}</dd></div>
+    <div><dt>Unit</dt><dd>{{ expense.unit_label or "-" }}</dd></div>
+    <div><dt>Category</dt><dd>{{ expense.category|expense_category }}</dd></div>
+    <div><dt>Vendor</dt><dd>{{ expense.vendor or "-" }}</dd></div>
+    <div><dt>Amount</dt><dd>{{ expense.amount_cents|money }}</dd></div>
+    <div><dt>Note</dt><dd>{{ expense.note or "-" }}</dd></div>
+    <div><dt>Status</dt><dd>{{ expense.status }}</dd></div>
+    <div><dt>Created at</dt><dd>{{ expense.created_at }}</dd></div>
+    {% if expense.voided_at %}
+      <div><dt>Void reason</dt><dd>{{ expense.void_reason }}</dd></div>
+      <div><dt>Voided at</dt><dd>{{ expense.void_created_at }}</dd></div>
+    {% endif %}
+  </dl>
+{% endblock %}

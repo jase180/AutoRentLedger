@@ -359,8 +359,8 @@ def test_v12_to_v13_migration_preserves_existing_rows_and_rolls_back(tmp_path):
     legacy_unit_rows = before[1].pop("units")
     result = upgrade_database(path)
     after = snapshot(path)
-    assert (result.from_version, result.to_version) == (12, 14)
-    assert after[0] == CURRENT_SCHEMA_VERSION == 14
+    assert (result.from_version, result.to_version) == (12, CURRENT_SCHEMA_VERSION)
+    assert after[0] == CURRENT_SCHEMA_VERSION == 15
     assert all(after[1][name] == rows for name, rows in before[1].items())
     assert [
         (row[0], row[2], row[3]) for row in after[1]["units"]

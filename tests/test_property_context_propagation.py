@@ -189,7 +189,7 @@ def test_duplicate_unit_labels_remain_distinct_across_major_read_models(tmp_path
         ("Property A", "2F"),
         ("Property B", "2F"),
     }
-    assert CURRENT_SCHEMA_VERSION == 14
+    assert CURRENT_SCHEMA_VERSION == 15
 
 
 def test_property_rename_flows_through_reads_without_accounting_changes(tmp_path):

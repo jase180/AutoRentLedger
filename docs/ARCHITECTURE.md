@@ -70,6 +70,24 @@ path carries Property context and renders `Property Name / Unit Label` where amb
 Property names remain live joined presentation metadata; Property IDs do not change the meaning of
 rent accounts, obligations, payments, or allocations and are not copied into accounting tables.
 
+The expense hierarchy is separate from rent accounting:
+
+```text
+Property -> Expense
+             `-> optional Unit from the same Property
+```
+
+Expenses are explicit owner-recorded cash outflows. They are not inferred from bank activity.
+`property_expenses` stores stable original facts and an optional Unit reference;
+`property_expense_voids` records one append-only void reason while the original expense remains.
+Property and Unit names are joined dynamically for reads. Expense rows never alter obligations,
+payments, allocations, reconciliation, or the rent-focused Overview and monthly report.
+
+Expense categories are controlled machine values: `repairs_maintenance`, `utilities`, `insurance`,
+`property_tax`, `management`, `cleaning`, `landscaping_snow`, `pest_control`,
+`legal_professional`, `capital_improvement`, `supplies`, and `other`. Capital improvements remain
+distinct from repairs and maintenance; no depreciation or tax interpretation is performed.
+
 ## Presentation and orchestration organization
 
 CLI parser registration and handlers are grouped by domain under `src/autorentledger/cli/`, behind

@@ -25,6 +25,13 @@ from autorentledger.cli.database import (
     run_database_upgrade,
 )
 from autorentledger.cli.discovery import run_payment_discovery
+from autorentledger.cli.expenses import (
+    run_expense_add,
+    run_expense_categories,
+    run_expense_listing,
+    run_expense_show,
+    run_expense_void,
+)
 from autorentledger.cli.late_fees import run_late_fee_command
 from autorentledger.cli.main import build_parser, main
 from autorentledger.cli.obligations import (

@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block title %}Expenses | AutoRentLedger{% endblock %}
+
+{% block content %}
+  <section class="page-heading">
+    <div>
+      <p class="eyebrow">Explicit owner-recorded outflows</p>
+      <h1>Expenses</h1>
+      <p class="section-note">Read-only expense history. Expenses do not change rent or payment accounting.</p>
+    </div>
+  </section>
+
+  <nav class="filter-nav" aria-label="Expense filters">
+    <a href="{{ url_for('web.expenses') }}"{% if not expenses.include_voided %} aria-current="page"{% endif %}>Active</a>
+    <a href="{{ url_for('web.expenses', include_voided=1) }}"{% if expenses.include_voided %} aria-current="page"{% endif %}>Include voided</a>
+  </nav>
+
+  {% if expenses.records %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Date</th><th>Property / Unit</th><th>Category</th><th>Vendor</th><th class="money">Amount</th><th>Status</th></tr></thead>
+        <tbody>
+          {% for expense in expenses.records %}
+            <tr>
+              <td><a href="{{ url_for('web.expense_detail', expense_id=expense.id) }}">{{ expense.occurred_on }}</a></td>
+              <td>{{ expense.property_unit_display }}</td>
+              <td>{{ expense.category|expense_category }}</td>
+              <td>{{ expense.vendor or "-" }}</td>
+              <td class="money">{{ expense.amount_cents|money }}</td>
+              <td><span class="status-badge">{{ expense.status }}</span></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty-state">No expenses found.</p>
+  {% endif %}
+{% endblock %}

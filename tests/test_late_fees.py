@@ -398,8 +398,8 @@ def test_v11_to_current_adds_fee_tables_and_preserves_all_old_data(tmp_path):
     before[2].pop("sqlite_sequence", None)
     result = upgrade_database(path)
     after = snapshot(path)
-    assert (result.from_version, result.to_version) == (11, 14)
-    assert after[0] == CURRENT_SCHEMA_VERSION == 14
+    assert (result.from_version, result.to_version) == (11, CURRENT_SCHEMA_VERSION)
+    assert after[0] == CURRENT_SCHEMA_VERSION == 15
     assert all(after[2][name] == rows for name, rows in before[2].items())
     assert [
         (row[0], row[2], row[3]) for row in after[2]["units"]
@@ -407,7 +407,8 @@ def test_v11_to_current_adds_fee_tables_and_preserves_all_old_data(tmp_path):
         (row[0], row[1], row[2]) for row in legacy_unit_rows
     ]
     assert set(after[2]) - set(before[2]) == {
-        "sqlite_sequence", "properties", "units", "late_fee_charges", "late_fee_voids", "late_fee_allocations"
+            "sqlite_sequence", "properties", "units", "late_fee_charges", "late_fee_voids",
+            "late_fee_allocations", "property_expenses", "property_expense_voids"
     }
     with sqlite3.connect(path) as connection:
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []

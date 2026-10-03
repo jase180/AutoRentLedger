@@ -9,6 +9,7 @@ from autorentledger.cli import (
     allocations,
     database,
     discovery,
+    expenses,
     identity_rentals,
     late_fees,
     obligations,
@@ -36,6 +37,13 @@ from autorentledger.cli.database import (
     run_database_upgrade,
 )
 from autorentledger.cli.discovery import run_payment_discovery
+from autorentledger.cli.expenses import (
+    run_expense_add,
+    run_expense_categories,
+    run_expense_listing,
+    run_expense_show,
+    run_expense_void,
+)
 from autorentledger.cli.late_fees import run_late_fee_command
 from autorentledger.cli.obligations import (
     run_obligation_add,
@@ -104,6 +112,7 @@ def build_parser() -> argparse.ArgumentParser:
     late_fees.register_commands(subparsers)
     tenancy.register_commands(subparsers)
     discovery.register_commands(subparsers)
+    expenses.register_commands(subparsers)
     identity_rentals.register_commands(subparsers)
     obligations.register_commands(subparsers)
     allocations.register_commands(subparsers)
@@ -208,6 +217,35 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise AssertionError(f"Unhandled payment command: {args.payment_command}")
     if args.command == "late-fee":
         return run_late_fee_command(args)
+    if args.command == "expense":
+        if args.expense_command == "add":
+            return run_expense_add(
+                args.database,
+                property_id=args.property,
+                unit_id=args.unit,
+                occurred_on=args.occurred_on,
+                amount=args.amount,
+                category=args.category,
+                vendor=args.vendor,
+                note=args.note,
+            )
+        if args.expense_command == "show":
+            return run_expense_show(args.database, args.expense_id)
+        if args.expense_command == "void":
+            return run_expense_void(args.database, args.expense_id, args.reason)
+        if args.expense_command == "categories":
+            return run_expense_categories()
+        raise AssertionError(f"Unhandled expense command: {args.expense_command}")
+    if args.command == "expenses":
+        return run_expense_listing(
+            args.database,
+            property_id=args.property,
+            unit_id=args.unit,
+            occurred_from=args.occurred_from,
+            occurred_to=args.occurred_to,
+            category=args.category,
+            include_voided=args.include_voided,
+        )
     if args.command == "setup":
         if args.setup_command == "tenancy":
             return run_tenancy_setup(
