@@ -1,4 +1,5 @@
 from dataclasses import replace
+from datetime import date
 
 import pytest
 
@@ -13,6 +14,7 @@ from autorentledger.overview import (
     render_owner_overview_terminal,
 )
 from autorentledger.reconciliation import ReconciliationStatus
+from autorentledger.rental_context import UnitContext
 from autorentledger.suggestions import SuggestionReason
 
 
@@ -100,18 +102,24 @@ def test_account_table_is_complete_ordered_and_money_is_compact():
         OverviewAccountRow(
             rent_obligation_id=index,
             rent_account_id=index,
-            unit_label=f"Unit {index}",
+            unit=UnitContext(index, f"Unit {index}"),
             account_display_name=(
                 "A deliberately long synthetic household name"
                 if index == 2
                 else f"Synthetic Household {index}"
             ),
+            payer_names=(f"Payer {index}",),
             period="2026-09",
             due_date="2026-09-01",
             owed_cents=145000 + index,
             allocated_cents=(145000 + index if index == 1 else 67500 if index == 2 else 0),
             remaining_cents=(0 if index == 1 else 77502 if index == 2 else 145003),
             status=statuses[index - 1],
+            last_payment_event_id=(42 if index == 1 else 43 if index == 2 else None),
+            last_payment_date=(date(2026, 9, 1) if index == 1 else None),
+            last_payment_rent_cents=(
+                145001 if index == 1 else 67500 if index == 2 else None
+            ),
         )
         for index in range(1, 4)
     )
@@ -126,6 +134,9 @@ def test_account_table_is_complete_ordered_and_money_is_compact():
     assert "Unit" in output and "Account" in output and "Owed" in output
     assert output.index("Unit 1") < output.index("Unit 2") < output.index("Unit 3")
     assert "A deliberately long synthetic household name" in output
+    assert "Payer 1" in output
+    assert "Sep 1 $1,450.01" in output
+    assert "Date unknown $675" in output
     assert "$1,450.01" in output
     assert "$675" in output
     assert "PAID" in output

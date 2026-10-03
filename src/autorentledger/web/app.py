@@ -40,6 +40,7 @@ def create_app(database_path: Path, auth_config: WebAuthConfig) -> Flask:
     )
     app.jinja_env.filters["money"] = _format_money
     app.jinja_env.filters["month_heading"] = _format_month_heading
+    app.jinja_env.filters["short_date"] = _format_short_date
     app.jinja_env.globals["collection_percentage"] = _collection_percentage
     app.jinja_env.globals["bounded_percentage"] = _bounded_percentage
     app.register_blueprint(auth_blueprint)
@@ -56,6 +57,11 @@ def _format_money(cents: int) -> str:
 def _format_month_heading(period: str) -> str:
     year, month = period.split("-")
     return f"{_MONTH_NAMES[int(month) - 1]} {year}"
+
+
+def _format_short_date(value: date | str) -> str:
+    parsed = value if isinstance(value, date) else date.fromisoformat(value)
+    return f"{parsed.strftime('%b')} {parsed.day}"
 
 
 def _collection_percentage(allocated_cents: int, owed_cents: int) -> float | None:

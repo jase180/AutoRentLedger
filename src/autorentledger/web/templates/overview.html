@@ -51,16 +51,27 @@
     </div>
     {% if overview.accounts %}
       <div class="table-wrap">
-        <table>
-          <thead><tr><th>Unit</th><th>Account</th><th class="money">Owed</th><th class="money">Paid</th><th class="money">Left</th><th>Status</th></tr></thead>
+        <table class="rent-status-table">
+          <thead><tr><th>Unit</th><th>Renter / Account</th><th class="money">Rent</th><th class="money">Paid</th><th class="money">Balance</th><th>Last payment</th><th>Status</th></tr></thead>
           <tbody>
             {% for account in overview.accounts %}
-              <tr>
+              <tr class="{% if account.status.value == 'PAID' %}account-row-paid{% else %}account-row-open{% endif %}">
                 <td>{{ account.unit_label }}</td>
-                <td><a href="{{ url_for('web.rent_account_detail', rent_account_id=account.rent_account_id) }}#obligation-{{ account.rent_obligation_id }}">{{ account.account_display_name }}</a></td>
-                <td class="money">{{ account.owed_cents|money }}</td>
+                <td>
+                  <a href="{{ url_for('web.rent_account_detail', rent_account_id=account.rent_account_id) }}#obligation-{{ account.rent_obligation_id }}">{{ account.account_display_name }}</a>
+                  <span class="table-secondary">{% if account.payer_names %}{{ account.payer_names|join(', ') }}{% else %}No linked payer{% endif %}</span>
+                </td>
+                <td class="money">{{ account.owed_cents|money }}<span class="table-secondary">Due {{ account.due_date|short_date }}</span></td>
                 <td class="money">{{ account.allocated_cents|money }}</td>
                 <td class="money">{{ account.remaining_cents|money }}</td>
+                <td>
+                  {% if account.last_payment_event_id is not none %}
+                    <a href="{{ url_for('web.payment_detail', payment_event_id=account.last_payment_event_id) }}">{% if account.last_payment_date %}{{ account.last_payment_date|short_date }}{% else %}Date unknown{% endif %}</a>
+                    · {{ account.last_payment_rent_cents|money }}
+                  {% else %}
+                    <span class="muted">—</span>
+                  {% endif %}
+                </td>
                 <td><span class="status status-{{ account.status.value|lower }}">{{ account.status.value }}</span></td>
               </tr>
             {% endfor %}

@@ -8,6 +8,8 @@ from autorentledger.cli import main, run_overview
 from autorentledger.email import EmailMessageSummary
 from autorentledger.email.gmail import GmailSource
 from autorentledger.identity import normalize_alias
+from autorentledger.late_fee_allocations import create_late_fee_allocation
+from autorentledger.late_fees import assess_late_fee
 from autorentledger.maintenance import (
     end_rent_schedule,
     remove_rent_account_payer,
@@ -25,7 +27,10 @@ from autorentledger.schedules import (
 )
 from autorentledger.storage import (
     SQLiteAllocationRepository,
+    SQLiteLateFeeAllocationRepository,
+    SQLiteLateFeeRepository,
     SQLiteObligationRepository,
+    SQLiteOverviewRepository,
     SQLitePayerRepository,
     SQLitePaymentEventRepository,
     SQLiteRawEmailRepository,
@@ -62,6 +67,7 @@ def build(database_path, period="2026-09"):
         SQLiteReviewRepository(database_path),
         SQLiteSuggestionRepository(database_path),
         SQLiteRentScheduleRepository(database_path),
+        SQLiteOverviewRepository(database_path),
         period,
     )
 
@@ -199,6 +205,108 @@ def test_monthly_rent_rows_and_cross_period_payment_intake_are_canonical(tmp_pat
         overview.payment_intake.allocated_from_in_month_payments_cents
         + overview.payment_intake.unallocated_from_in_month_payments_cents
     )
+
+
+def test_account_identity_and_latest_rent_contribution_are_explicit(tmp_path):
+    (
+        database_path, raws, payments, payers, rentals, obligations, allocations, _,
+    ) = create_fixture(tmp_path)
+    account = add_account(rentals, "Unit A", "Example Household")
+    no_payer_account = add_account(rentals, "Unit B", "Unlinked Household")
+    other_account = add_account(rentals, "Unit C", "Other Household")
+    payer_two = payers.create_payer("Payer Two")
+    payer_one = payers.create_payer("Payer One")
+    rentals.add_payer(account.id, payer_two.id)
+    rentals.add_payer(account.id, payer_one.id)
+    may = obligations.create(account.id, "2026-05", 50000, date(2026, 5, 1))
+    june = obligations.create(account.id, "2026-06", 50000, date(2026, 6, 1))
+    october = obligations.create(account.id, "2026-10", 100000, date(2026, 10, 5))
+    obligations.create(no_payer_account.id, "2026-10", 90000, date(2026, 10, 1))
+    other_obligation = obligations.create(
+        other_account.id, "2026-10", 80000, date(2026, 10, 1)
+    )
+    other_payer = payers.create_payer("Other Payer")
+    rentals.add_payer(other_account.id, other_payer.id)
+
+    historical = add_payment(raws, payments, 1, 120000, date(2026, 9, 1))
+    allocations.create_checked(historical.id, may.id, 30000)
+    allocations.create_checked(historical.id, june.id, 40000)
+    fee = assess_late_fee(
+        SQLiteLateFeeRepository(database_path),
+        may.id,
+        "100.00",
+        "2026-05-10",
+        "Synthetic late-fee assessment",
+    )
+    create_late_fee_allocation(
+        SQLiteLateFeeAllocationRepository(database_path),
+        historical.id,
+        fee.charge.id,
+        "100.00",
+    )
+    same_day_later_id = add_payment(raws, payments, 2, 10000, date(2026, 9, 1))
+    allocations.create_checked(same_day_later_id.id, may.id, 10000)
+    undated = add_payment(raws, payments, 3, 10000, None)
+    allocations.create_checked(undated.id, june.id, 10000)
+    other_payment = add_payment(raws, payments, 4, 10000, date(2026, 9, 20))
+    allocations.create_checked(other_payment.id, other_obligation.id, 10000)
+
+    overview = build(database_path, "2026-10")
+    row = next(item for item in overview.accounts if item.rent_account_id == account.id)
+    assert row.payer_names == ("Payer Two", "Payer One")
+    assert row.last_payment_event_id == same_day_later_id.id
+    assert row.last_payment_date == date(2026, 9, 1)
+    assert row.last_payment_rent_cents == 10000
+    assert (row.owed_cents, row.allocated_cents, row.remaining_cents) == (
+        100000,
+        0,
+        100000,
+    )
+    assert row.status is ReconciliationStatus.UNPAID
+    unlinked = next(
+        item for item in overview.accounts if item.rent_account_id == no_payer_account.id
+    )
+    assert unlinked.payer_names == ()
+    assert unlinked.last_payment_event_id is None
+    other = next(
+        item for item in overview.accounts if item.rent_account_id == other_account.id
+    )
+    assert other.payer_names == ("Other Payer",)
+    assert other.last_payment_event_id == other_payment.id
+
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            "UPDATE payment_events SET voided_at = ? WHERE id = ?",
+            (datetime.now(UTC).isoformat(), same_day_later_id.id),
+        )
+    row = next(
+        item
+        for item in build(database_path, "2026-10").accounts
+        if item.rent_account_id == account.id
+    )
+    assert row.last_payment_event_id == historical.id
+    assert row.last_payment_rent_cents == 70000
+    assert row.last_payment_rent_cents != 80000
+    assert row.rent_obligation_id == october.id
+
+
+def test_latest_rent_contribution_uses_undated_id_order_when_no_date_exists(tmp_path):
+    database_path, raws, payments, _, rentals, obligations, allocations, _ = (
+        create_fixture(tmp_path)
+    )
+    account = add_account(rentals, "Unit A", "Example Household")
+    may = obligations.create(account.id, "2026-05", 100000, date(2026, 5, 1))
+    obligations.create(account.id, "2026-10", 100000, date(2026, 10, 1))
+    first = add_payment(raws, payments, 1, 30000, None)
+    second = add_payment(raws, payments, 2, 40000, None)
+    allocations.create_checked(first.id, may.id, 30000)
+    allocations.create_checked(second.id, may.id, 40000)
+
+    row = build(database_path, "2026-10").accounts[0]
+
+    assert row.last_payment_event_id == second.id
+    assert row.last_payment_date is None
+    assert row.last_payment_rent_cents == 40000
 
 
 def test_empty_month_is_valid_and_scheduled_amount_is_warning_not_owed(tmp_path):

@@ -4,12 +4,15 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
+from datetime import date
 
 from autorentledger.reconciliation import ReconciliationStatus
+from autorentledger.rental_context import UnitContext, UnitContextProjection
 from autorentledger.reporting import build_monthly_report
 from autorentledger.review import ReviewKind, collect_review_items
 from autorentledger.schedules import GenerationAction, plan_obligation_generation
 from autorentledger.storage import (
+    SQLiteOverviewRepository,
     SQLiteReconciliationRepository,
     SQLiteRentScheduleRepository,
     SQLiteReportingRepository,
@@ -31,17 +34,21 @@ class OverviewRentSummary:
 
 
 @dataclass(frozen=True)
-class OverviewAccountRow:
+class OverviewAccountRow(UnitContextProjection):
     rent_obligation_id: int
     rent_account_id: int
-    unit_label: str
+    unit: UnitContext
     account_display_name: str
+    payer_names: tuple[str, ...]
     period: str
     due_date: str
     owed_cents: int
     allocated_cents: int
     remaining_cents: int
     status: ReconciliationStatus
+    last_payment_event_id: int | None
+    last_payment_date: date | None
+    last_payment_rent_cents: int | None
 
 
 @dataclass(frozen=True)
@@ -100,27 +107,52 @@ def build_owner_overview(
     review_repository: SQLiteReviewRepository,
     suggestion_repository: SQLiteSuggestionRepository,
     schedule_repository: SQLiteRentScheduleRepository,
+    overview_repository: SQLiteOverviewRepository,
     period: str,
 ) -> OwnerOverview:
     """Build one strictly read-only snapshot from existing canonical services."""
     report = build_monthly_report(
         reconciliation_repository, reporting_repository, period
     )
-    accounts = tuple(
-        OverviewAccountRow(
-            rent_obligation_id=row.obligation_id,
-            rent_account_id=row.rent_account_id,
-            unit_label=row.unit_label,
-            account_display_name=row.account_display_name,
-            period=row.period,
-            due_date=row.due_date,
-            owed_cents=row.owed_cents,
-            allocated_cents=row.allocated_cents,
-            remaining_cents=row.remaining_cents,
-            status=row.status,
+    payer_names_by_account: dict[int, list[str]] = {}
+    for payer in overview_repository.list_account_payers():
+        payer_names_by_account.setdefault(payer.rent_account_id, []).append(
+            payer.payer_display_name
         )
-        for row in report.obligations
-    )
+    latest_payment_by_account = {
+        payment.rent_account_id: payment
+        for payment in overview_repository.list_latest_rent_payment_contributions()
+    }
+    account_rows: list[OverviewAccountRow] = []
+    for row in report.obligations:
+        latest_payment = latest_payment_by_account.get(row.rent_account_id)
+        account_rows.append(
+            OverviewAccountRow(
+                rent_obligation_id=row.obligation_id,
+                rent_account_id=row.rent_account_id,
+                unit=row.unit,
+                account_display_name=row.account_display_name,
+                payer_names=tuple(payer_names_by_account.get(row.rent_account_id, ())),
+                period=row.period,
+                due_date=row.due_date,
+                owed_cents=row.owed_cents,
+                allocated_cents=row.allocated_cents,
+                remaining_cents=row.remaining_cents,
+                status=row.status,
+                last_payment_event_id=(
+                    latest_payment.payment_event_id if latest_payment else None
+                ),
+                last_payment_date=(
+                    date.fromisoformat(latest_payment.occurred_on)
+                    if latest_payment and latest_payment.occurred_on
+                    else None
+                ),
+                last_payment_rent_cents=(
+                    latest_payment.rent_cents if latest_payment else None
+                ),
+            )
+        )
+    accounts = tuple(account_rows)
     rent = OverviewRentSummary(
         owed_cents=report.total_owed_cents,
         allocated_cents=report.total_allocated_cents,

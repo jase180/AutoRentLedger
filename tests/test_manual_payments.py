@@ -37,6 +37,7 @@ from autorentledger.storage import (
     SQLiteAllocationRepository,
     SQLiteManualPaymentRepository,
     SQLiteObligationRepository,
+    SQLiteOverviewRepository,
     SQLitePayerRepository,
     SQLitePaymentEventRepository,
     SQLitePaymentListingRepository,
@@ -412,6 +413,7 @@ def test_manual_payment_flows_through_existing_ledger_read_models(tmp_path):
         review_repository,
         SQLiteSuggestionRepository(database_path),
         SQLiteRentScheduleRepository(database_path),
+        SQLiteOverviewRepository(database_path),
         "2026-05",
     )
     assert overview.payment_intake.received_cents == 145000
@@ -825,6 +827,7 @@ def test_voided_payment_is_visible_as_history_but_excluded_from_active_money(tmp
         SQLiteReviewRepository(database_path),
         SQLiteSuggestionRepository(database_path),
         SQLiteRentScheduleRepository(database_path),
+        SQLiteOverviewRepository(database_path),
         "2026-05",
     )
     assert overview.payment_intake.received_cents == 0

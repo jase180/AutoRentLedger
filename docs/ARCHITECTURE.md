@@ -36,6 +36,13 @@ source decides its payer, rent account, or obligation meaning. Each payment even
 source: a raw email or a manual evidence row. Reports, review items, suggestions, and owner
 overviews are recomputed read models rather than persisted workflow state.
 
+The owner overview combines canonical obligation reconciliation with two explicit read-only facts:
+rent-account/payer associations and payment-to-rent allocations. Its latest-payment context is the
+most recent non-voided payment with an actual rent allocation to that account; it never infers a
+payment from sender identity and never includes late-fee allocations in the displayed rent
+contribution. Dated contributions outrank undated ones, with payment-event ID providing the stable
+tie-breaker.
+
 ## Storage organization
 
 SQLite persistence adapters are grouped by existing domain concern under

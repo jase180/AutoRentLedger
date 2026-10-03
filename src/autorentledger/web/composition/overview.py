@@ -6,6 +6,7 @@ from pathlib import Path
 
 from autorentledger.overview import OwnerOverview, build_owner_overview
 from autorentledger.storage import (
+    SQLiteOverviewRepository,
     SQLiteReconciliationRepository,
     SQLiteRentScheduleRepository,
     SQLiteReportingRepository,
@@ -22,5 +23,6 @@ def build_web_owner_overview(database_path: Path, period: str) -> OwnerOverview:
         SQLiteReviewRepository(database_path),
         SQLiteSuggestionRepository(database_path),
         SQLiteRentScheduleRepository(database_path),
+        SQLiteOverviewRepository(database_path),
         period,
     )

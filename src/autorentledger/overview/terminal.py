@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from autorentledger.overview.service import OwnerOverview
+from autorentledger.overview.service import OverviewAccountRow, OwnerOverview
 
 _MONTH_NAMES = (
     "JANUARY",
@@ -158,14 +158,23 @@ def _render_account_table(overview: OwnerOverview) -> list[str]:
     if not overview.accounts:
         return ["None."]
 
-    headers = ("Unit", "Account", "Owed", "Paid", "Left", "Status")
+    headers = (
+        "Unit",
+        "Account / payer",
+        "Rent",
+        "Paid",
+        "Left",
+        "Last payment",
+        "Status",
+    )
     rows = [
         (
             account.unit_label,
-            account.account_display_name,
+            _account_identity(account.account_display_name, account.payer_names),
             _format_money(account.owed_cents),
             _format_money(account.allocated_cents),
             _format_money(account.remaining_cents),
+            _last_payment(account),
             account.status.value,
         )
         for account in overview.accounts
@@ -184,9 +193,26 @@ def _render_account_table(overview: OwnerOverview) -> list[str]:
                 f"{row[3]:>{widths[3]}}",
                 f"{row[4]:>{widths[4]}}",
                 f"{row[5]:<{widths[5]}}",
+                f"{row[6]:<{widths[6]}}",
             )
         ).rstrip()
 
     return [format_row(headers), format_row(tuple("-" * width for width in widths))] + [
         format_row(row) for row in rows
     ]
+
+
+def _account_identity(account_name: str, payer_names: tuple[str, ...]) -> str:
+    payer_text = ", ".join(payer_names) if payer_names else "No linked payer"
+    return f"{account_name} / {payer_text}"
+
+
+def _last_payment(account: OverviewAccountRow) -> str:
+    if account.last_payment_event_id is None:
+        return "-"
+    date_text = (
+        f"{account.last_payment_date.strftime('%b')} {account.last_payment_date.day}"
+        if account.last_payment_date
+        else "Date unknown"
+    )
+    return f"{date_text} {_format_money(account.last_payment_rent_cents or 0)}"

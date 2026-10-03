@@ -24,6 +24,7 @@ from autorentledger.schedules import (
     ObligationGenerationInvariantError,
 )
 from autorentledger.storage import (
+    SQLiteOverviewRepository,
     SQLiteReconciliationRepository,
     SQLiteRentScheduleRepository,
     SQLiteReportingRepository,
@@ -148,6 +149,7 @@ def run_overview(database_path: Path, period: str) -> int:
             SQLiteReviewRepository(database_path),
             SQLiteSuggestionRepository(database_path),
             SQLiteRentScheduleRepository(database_path),
+            SQLiteOverviewRepository(database_path),
             period,
         )
     except (

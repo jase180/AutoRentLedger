@@ -243,6 +243,7 @@ def populate_dashboard(database_path, raws, payments, payers, rentals, obligatio
             suggestion_account.id,
         ),
         "suggestion_payment_id": suggestion_payment.id,
+        "latest_paid_payment_id": september_two.id,
         "unknown_payment_id": unknown_payment.id,
         "suggested_obligation_id": suggested.id,
         "missing_account_id": missing_account.id,
@@ -602,6 +603,17 @@ def test_populated_overview_renders_canonical_semantics_privately_and_read_only(
     assert "PAID" in output
     assert "PARTIAL" in output
     assert "UNPAID" in output
+    assert output.count('class="account-row-paid"') == 1
+    assert output.count('class="account-row-open"') == 3
+    assert "Renter / Account" in output
+    assert "Balance" in output
+    assert "Last payment" in output
+    assert "Suggestion Payer" in output
+    assert "No linked payer" in output
+    assert '<span class="muted">—</span>' in output
+    assert "Due Sep 1" in output
+    assert "Sep 10" in output
+    assert f'/payments/{facts["latest_paid_payment_id"]}' in output
     assert output.index("Unit A") < output.index("Unit B") < output.index("Unit D")
 
     payment_section = output[output.index("Payment intake") : output.index("Current attention")]
@@ -783,6 +795,8 @@ def test_static_assets_are_local_and_post_routes_do_not_exist(tmp_path):
     assert "<script" not in page.get_data(as_text=True).lower()
     assert "http://" not in css.get_data(as_text=True).lower()
     assert "https://" not in css.get_data(as_text=True).lower()
+    assert ".account-row-paid" in css.get_data(as_text=True)
+    assert ".account-row-open" in css.get_data(as_text=True)
     assert client.post("/").status_code == 405
     assert client.post("/overview?period=2026-09").status_code == 405
     assert client.post("/attention").status_code == 405

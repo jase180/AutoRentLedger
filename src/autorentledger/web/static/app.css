@@ -54,6 +54,10 @@ table { width: 100%; border-collapse: collapse; }
 th, td { padding: .75rem .85rem; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
 th { color: var(--muted); background: #f9fafb; font-size: .75rem; letter-spacing: .04em; text-transform: uppercase; }
 tbody tr:last-child td { border-bottom: 0; }
+.rent-status-table tbody tr.account-row-paid td { background: #edf7f2; }
+.rent-status-table tbody tr.account-row-open td { background: #fff1f1; }
+.rent-status-table a { color: var(--accent); font-weight: 700; }
+.table-secondary { display: block; margin-top: .15rem; color: var(--muted); font-size: .8rem; font-weight: 500; }
 .money { text-align: right; font-variant-numeric: tabular-nums; }
 .status { display: inline-block; border: 1px solid currentColor; border-radius: 999px; padding: .15rem .55rem; font-size: .75rem; font-weight: 800; }
 .status-paid { color: #175c4c; background: var(--accent-soft); }
