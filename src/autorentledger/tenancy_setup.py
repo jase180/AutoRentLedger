@@ -22,6 +22,7 @@ from autorentledger.storage import (
     TenancySetupAliasInput,
     TenancySetupAliasStorageResult,
     TenancySetupPayerNotFoundStorageError,
+    TenancySetupPropertyNotFoundStorageError,
     TenancySetupStorageResult,
     TenancySetupUnitLabelConflictStorageError,
     TenancySetupUnitNotFoundStorageError,
@@ -50,6 +51,7 @@ class SetupAction(StrEnum):
 class TenancySetupRequest:
     account_name: str
     unit_id: int | None = None
+    property_id: int | None = None
     unit_label: str | None = None
     active_from: str | None = None
     active_to: str | None = None
@@ -72,6 +74,7 @@ class TenancySetupPreview:
     request: TenancySetupRequest
     unit_action: SetupAction
     unit_id: int | None
+    property_id: int
     unit_label: str
     account_name: str
     active_from: date | None
@@ -111,12 +114,21 @@ def preview_tenancy_setup(
             )
         unit_action = SetupAction.REUSE
         unit_id = unit.id
+        property_id = unit.property_id
         unit_label = unit.label
     else:
-        existing_unit = repository.get_unit_by_label(validated.unit_label or "")
+        property_id = int(validated.property_id)
+        if not repository.get_property(property_id):
+            raise TenancySetupNotFoundError(
+                f"Property {property_id} does not exist."
+            )
+        existing_unit = repository.get_unit_by_property_and_label(
+            property_id, validated.unit_label or ""
+        )
         if existing_unit is not None:
             raise TenancySetupConflictError(
-                f'Unit "{validated.unit_label}" already exists as unit '
+                f'Unit "{validated.unit_label}" already exists in Property '
+                f"{property_id} as unit "
                 f"{existing_unit.id}. Use --unit {existing_unit.id} to reuse it."
             )
         unit_action = SetupAction.CREATE
@@ -156,6 +168,7 @@ def preview_tenancy_setup(
         request=validated,
         unit_action=unit_action,
         unit_id=unit_id,
+        property_id=property_id,
         unit_label=unit_label,
         account_name=validated.account_name,
         active_from=_optional_date(validated.active_from, "active-from"),
@@ -186,6 +199,11 @@ def apply_tenancy_setup(
     try:
         result = repository.apply_checked(
             unit_id=preview.unit_id,
+            property_id=(
+                preview.property_id
+                if preview.unit_action is SetupAction.CREATE
+                else None
+            ),
             unit_label=(
                 preview.unit_label
                 if preview.unit_action is SetupAction.CREATE
@@ -210,9 +228,14 @@ def apply_tenancy_setup(
         raise TenancySetupNotFoundError(
             f"Payer {error.payer_id} does not exist."
         ) from error
+    except TenancySetupPropertyNotFoundStorageError as error:
+        raise TenancySetupNotFoundError(
+            f"Property {error.property_id} does not exist."
+        ) from error
     except TenancySetupUnitLabelConflictStorageError as error:
         raise TenancySetupConflictError(
-            f'Unit "{error.label}" already exists as unit {error.unit_id}. '
+            f'Unit "{error.label}" already exists in Property {error.property_id} '
+            f"as unit {error.unit_id}. "
             f"Use --unit {error.unit_id} to reuse it."
         ) from error
     except TenancySetupAliasConflictStorageError as error:
@@ -227,6 +250,14 @@ def _validate_request(request: TenancySetupRequest) -> TenancySetupRequest:
     if (request.unit_id is None) == (request.unit_label is None):
         raise TenancySetupValidationError(
             "Supply exactly one of --unit or --unit-label."
+        )
+    if request.unit_id is not None and request.property_id is not None:
+        raise TenancySetupValidationError(
+            "Do not supply --property when reusing an existing --unit."
+        )
+    if request.unit_label is not None and request.property_id is None:
+        raise TenancySetupValidationError(
+            "New unit creation requires --property with --unit-label."
         )
     if (request.payer_id is None) == (request.payer_name is None):
         raise TenancySetupValidationError(
@@ -270,6 +301,7 @@ def _validate_request(request: TenancySetupRequest) -> TenancySetupRequest:
     return TenancySetupRequest(
         account_name=account_name,
         unit_id=request.unit_id,
+        property_id=request.property_id,
         unit_label=unit_label,
         active_from=request.active_from,
         active_to=request.active_to,

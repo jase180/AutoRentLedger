@@ -28,14 +28,20 @@ class DuplicateAssociationError(ValueError):
     """The payer is already associated with the rent account."""
 
 
-def create_unit(repository: SQLiteRentalRepository, label: str) -> UnitRecord:
+def create_unit(
+    repository: SQLiteRentalRepository, property_id: int, label: str
+) -> UnitRecord:
     cleaned_label = label.strip()
     if not cleaned_label:
         raise RentalValidationError("Unit label must not be empty.")
+    if not repository.property_exists(property_id):
+        raise RentalEntityNotFoundError(f"Property {property_id} does not exist.")
     try:
-        return repository.create_unit(cleaned_label)
+        return repository.create_unit(property_id, cleaned_label)
     except sqlite3.IntegrityError as error:
-        raise DuplicateUnitError(f'Unit label "{cleaned_label}" already exists.') from error
+        raise DuplicateUnitError(
+            f'Unit label "{cleaned_label}" already exists in Property {property_id}.'
+        ) from error
 
 
 def create_rent_account(

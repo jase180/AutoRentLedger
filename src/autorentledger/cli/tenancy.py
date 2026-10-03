@@ -37,8 +37,11 @@ from autorentledger.rental import (
     create_unit,
 )
 from autorentledger.storage import (
+    PropertyNotFoundError,
+    PropertyValidationError,
     SQLitePayerRepository,
     SQLitePaymentEventRepository,
+    SQLitePropertyRepository,
     SQLiteRentalRepository,
     SQLiteRentScheduleRepository,
     SQLiteTenancySetupRepository,
@@ -66,6 +69,7 @@ def register_commands(subparsers) -> None:
     unit_choice.add_argument("--unit", type=int)
     unit_choice.add_argument("--unit-label")
     tenancy.add_argument("--account-name", required=True)
+    tenancy.add_argument("--property", type=int)
     tenancy.add_argument("--active-from")
     tenancy.add_argument("--active-to")
     payer_choice = tenancy.add_mutually_exclusive_group(required=True)
@@ -95,6 +99,7 @@ def run_tenancy_setup(
     database_path: Path,
     *,
     unit_id: int | None,
+    property_id: int | None,
     unit_label: str | None,
     account_name: str,
     active_from: str | None,
@@ -109,6 +114,7 @@ def run_tenancy_setup(
     request = TenancySetupRequest(
         account_name=account_name,
         unit_id=unit_id,
+        property_id=property_id,
         unit_label=unit_label,
         active_from=active_from,
         active_to=active_to,
@@ -142,7 +148,9 @@ def _print_tenancy_preview(preview: TenancySetupPreview) -> None:
     if preview.unit_action is SetupAction.REUSE:
         print(f"  REUSE {preview.unit_id} - {preview.unit_label}")
     else:
-        print(f'  CREATE "{preview.unit_label}"')
+        print(
+            f'  CREATE Property {preview.property_id} / "{preview.unit_label}"'
+        )
     print("Rent account:")
     print(f'  CREATE "{preview.account_name}"')
     print(f"  Active from: {preview.active_from or '-'}")
@@ -310,21 +318,62 @@ def run_unresolved_payers(database_path: Path) -> int:
         print(f"{sender.sender_name:<32} {sender.count}")
     return 0
 
-def run_unit_add(database_path: Path, label: str) -> int:
-    repository = SQLiteRentalRepository(database_path)
+def run_property_add(database_path: Path, display_name: str) -> int:
     try:
-        unit = create_unit(repository, label)
-    except (DuplicateUnitError, RentalValidationError) as error:
+        property_record = SQLitePropertyRepository(database_path).create_property(
+            display_name
+        )
+    except PropertyValidationError as error:
         print(error)
         return 1
-    print(f"Created unit {unit.id}: {unit.label}")
+    print(f"Created property {property_record.id}: {property_record.display_name}")
+    return 0
+
+
+def run_property_listing(database_path: Path) -> int:
+    properties = SQLitePropertyRepository(database_path).list_properties()
+    print(f"{'ID':<4} NAME")
+    for property_record in properties:
+        print(f"{property_record.id:<4} {property_record.display_name}")
+    return 0
+
+
+def run_property_rename(
+    database_path: Path, property_id: int, display_name: str
+) -> int:
+    try:
+        previous, updated = SQLitePropertyRepository(
+            database_path
+        ).rename_property_checked(property_id, display_name)
+    except (PropertyNotFoundError, PropertyValidationError) as error:
+        print(error)
+        return 1
+    print(
+        f'Renamed property {property_id}: "{previous.display_name}" '
+        f'-> "{updated.display_name}"'
+    )
+    return 0
+
+
+def run_unit_add(database_path: Path, property_id: int, label: str) -> int:
+    repository = SQLiteRentalRepository(database_path)
+    try:
+        unit = create_unit(repository, property_id, label)
+    except (
+        DuplicateUnitError,
+        RentalEntityNotFoundError,
+        RentalValidationError,
+    ) as error:
+        print(error)
+        return 1
+    print(f"Created unit {unit.id}: Property {unit.property_id} / {unit.label}")
     return 0
 
 def run_unit_listing(database_path: Path) -> int:
     units = SQLiteRentalRepository(database_path).list_units()
-    print(f"{'ID':<4} UNIT")
+    print(f"{'ID':<4} {'PROPERTY ID':<12} UNIT")
     for unit in units:
-        print(f"{unit.id:<4} {unit.label}")
+        print(f"{unit.id:<4} {unit.property_id:<12} {unit.label}")
     return 0
 
 def run_rent_account_add(

@@ -15,6 +15,7 @@ from autorentledger.storage import (
     SQLiteRawEmailRepository,
     SQLiteRentalRepository,
 )
+from tests.property_helpers import create_test_unit
 
 
 def create_repositories(tmp_path):
@@ -46,7 +47,7 @@ def add_payment(raws, payments, message_id, amount_cents):
 
 
 def add_obligation(rentals, obligations, unit_label, period, amount_cents):
-    unit = rentals.create_unit(unit_label)
+    unit = create_test_unit(rentals, unit_label)
     account = rentals.create_rent_account(unit.id, f"{unit_label} Household", None, None)
     return obligations.create(account.id, period, amount_cents, date(2026, 8, 1))
 

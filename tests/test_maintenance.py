@@ -37,6 +37,7 @@ from autorentledger.storage import (
 )
 from autorentledger.storage.migrations import CURRENT_SCHEMA_VERSION, MIGRATIONS, upgrade_database
 from autorentledger.suggestions import SuggestionReason, find_allocation_suggestions
+from tests.property_helpers import create_test_unit
 
 
 def create_fixture(tmp_path, *, account_from=None, account_to=None):
@@ -49,7 +50,7 @@ def create_fixture(tmp_path, *, account_from=None, account_to=None):
     obligations = SQLiteObligationRepository(database_path)
     allocations = SQLiteAllocationRepository(database_path)
     schedules = SQLiteRentScheduleRepository(database_path)
-    unit = rentals.create_unit("Unit A")
+    unit = create_test_unit(rentals, "Unit A")
     account = rentals.create_rent_account(
         unit.id, "Synthetic Household", account_from, account_to
     )
@@ -462,7 +463,7 @@ def test_cli_commands_are_private_schema_guarded_and_do_not_change_schema(tmp_pa
                 "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"
             )
         }
-    assert before_version == CURRENT_SCHEMA_VERSION == 13
+    assert before_version == CURRENT_SCHEMA_VERSION == 14
 
     assert main(["payer", "rename", str(payer.id), "Morgan Example", "--database", str(database_path)]) == 0
     assert main(["payer", "alias-remove", str(payer.id), "morgan unknown", "--database", str(database_path)]) == 1

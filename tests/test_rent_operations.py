@@ -19,13 +19,14 @@ from autorentledger.storage import (
     SQLiteRentScheduleRepository,
 )
 from autorentledger.storage.migrations import CURRENT_SCHEMA_VERSION, upgrade_database
+from tests.property_helpers import create_test_unit
 
 
 def create_recurring_rent(tmp_path, *, amount="1300.00", due_day=1):
     database_path = tmp_path / "ledger.sqlite3"
     upgrade_database(database_path)
     rentals = SQLiteRentalRepository(database_path)
-    unit = rentals.create_unit("Synthetic Unit")
+    unit = create_test_unit(rentals, "Synthetic Unit")
     account = rentals.create_rent_account(
         unit.id, "Synthetic Household", date(2026, 1, 1), None
     )
@@ -49,7 +50,7 @@ def test_ensure_monthly_rent_is_idempotent_and_month_scoped(tmp_path):
     assert october.amount_cents == 130000
     assert october.due_date == "2026-10-01"
     assert obligations.get_for_account_period(account.id, "2026-11") is None
-    assert CURRENT_SCHEMA_VERSION == 13
+    assert CURRENT_SCHEMA_VERSION == 14
 
 
 def test_rent_change_preserves_prior_obligation_and_changes_future_month(tmp_path):

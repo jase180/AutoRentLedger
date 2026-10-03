@@ -7,6 +7,7 @@ from autorentledger.storage import (
     SQLiteObligationRepository,
     SQLiteRentalRepository,
 )
+from tests.property_helpers import create_test_unit
 
 
 def create_repositories(tmp_path):
@@ -17,7 +18,7 @@ def create_repositories(tmp_path):
 
 
 def add_account(rentals, unit_label="Unit A", account_name="Synthetic Household"):
-    unit = rentals.create_unit(unit_label)
+    unit = create_test_unit(rentals, unit_label)
     return rentals.create_rent_account(unit.id, account_name, None, None)
 
 

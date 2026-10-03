@@ -41,6 +41,7 @@ from autorentledger.storage import (
     SQLiteRawEmailRepository,
     SQLiteRentalRepository,
 )
+from tests.property_helpers import create_test_property, create_test_unit
 
 
 class StubEmailSource:
@@ -100,7 +101,9 @@ def test_identity_command_defaults():
 
 
 def test_rental_command_defaults():
-    unit_add = build_parser().parse_args(["unit", "add", "Unit A"])
+    unit_add = build_parser().parse_args(
+        ["unit", "add", "--property", "1", "Unit A"]
+    )
     units = build_parser().parse_args(["units"])
     account_add = build_parser().parse_args(
         ["rent-account", "add", "--unit", "1", "--name", "Synthetic Household"]
@@ -410,8 +413,9 @@ def test_rental_cli_workflow_and_inspection_are_privacy_safe(tmp_path, capsys):
         ),
     )
 
-    assert run_unit_add(database_path, "Unit A") == 0
-    assert run_unit_add(database_path, "Unit B") == 0
+    property_record = create_test_property(SQLiteRentalRepository(database_path))
+    assert run_unit_add(database_path, property_record.id, "Unit A") == 0
+    assert run_unit_add(database_path, property_record.id, "Unit B") == 0
     assert run_unit_listing(database_path) == 0
     assert (
         run_rent_account_add(
@@ -428,8 +432,8 @@ def test_rental_cli_workflow_and_inspection_are_privacy_safe(tmp_path, capsys):
     assert run_rent_account_show(database_path, 1) == 0
 
     output = capsys.readouterr().out
-    assert "Created unit 1: Unit A" in output
-    assert "Created unit 2: Unit B" in output
+    assert "Created unit 1: Property 1 / Unit A" in output
+    assert "Created unit 2: Property 1 / Unit B" in output
     assert "Synthetic Household" in output
     assert "Payer 1 is already associated with rent account 1." in output
     assert "Rent account 1" in output
@@ -446,7 +450,8 @@ def test_rental_cli_rejects_invalid_references_and_dates(tmp_path, capsys):
     database_path = tmp_path / "rental-invalid.sqlite3"
     payers = SQLitePayerRepository(database_path)
     payer = payers.create_payer("Alex Example")
-    assert run_unit_add(database_path, "Unit A") == 0
+    property_record = create_test_property(SQLiteRentalRepository(database_path))
+    assert run_unit_add(database_path, property_record.id, "Unit A") == 0
 
     assert run_rent_account_add(database_path, 999, "Synthetic Household", None, None) == 1
     assert (
@@ -473,7 +478,7 @@ def test_rental_cli_rejects_invalid_references_and_dates(tmp_path, capsys):
 def test_obligation_cli_workflow_is_exact_and_privacy_safe(tmp_path, capsys):
     database_path = tmp_path / "obligation-cli.sqlite3"
     rentals = SQLiteRentalRepository(database_path)
-    unit = rentals.create_unit("Unit A")
+    unit = create_test_unit(rentals, "Unit A")
     account = rentals.create_rent_account(
         unit.id,
         "Synthetic Household",
@@ -531,7 +536,7 @@ def test_obligation_cli_workflow_is_exact_and_privacy_safe(tmp_path, capsys):
 def test_obligation_cli_rejects_invalid_inputs_and_active_range(tmp_path, capsys):
     database_path = tmp_path / "obligation-invalid.sqlite3"
     rentals = SQLiteRentalRepository(database_path)
-    unit = rentals.create_unit("Unit A")
+    unit = create_test_unit(rentals, "Unit A")
     account = rentals.create_rent_account(
         unit.id,
         "Synthetic Household",
@@ -586,7 +591,7 @@ def test_allocation_cli_add_list_remove_and_privacy(tmp_path, capsys):
         PaymentNotification("synthetic_provider", "Alex Example", 150000, None, None),
     )
     payment = payments.get_by_raw_email_id(raw.id)
-    unit = rentals.create_unit("Unit A")
+    unit = create_test_unit(rentals, "Unit A")
     account = rentals.create_rent_account(unit.id, "Synthetic Household", None, None)
     obligation = obligations.create(account.id, "2026-08", 135000, date(2026, 8, 1))
     payment_before = payments.get_by_raw_email_id(raw.id)
@@ -619,7 +624,7 @@ def test_reconciliation_cli_and_obligation_show_use_derived_state(tmp_path, caps
     rentals = SQLiteRentalRepository(database_path)
     obligations = SQLiteObligationRepository(database_path)
     allocations = SQLiteAllocationRepository(database_path)
-    unit = rentals.create_unit("Unit A")
+    unit = create_test_unit(rentals, "Unit A")
     account = rentals.create_rent_account(unit.id, "Synthetic Household", None, None)
     obligation = obligations.create(account.id, "2026-08", 123456, date(2026, 8, 1))
     raws.insert(
@@ -662,7 +667,7 @@ def test_review_cli_shows_all_categories_without_raw_content(tmp_path, capsys):
     rentals = SQLiteRentalRepository(database_path)
     obligations = SQLiteObligationRepository(database_path)
     allocations = SQLiteAllocationRepository(database_path)
-    unit = rentals.create_unit("Unit A")
+    unit = create_test_unit(rentals, "Unit A")
     account = rentals.create_rent_account(unit.id, "Synthetic Household", None, None)
     unpaid = obligations.create(account.id, "2026-08", 123456, date(2027, 8, 1))
     partial = obligations.create(account.id, "2026-09", 135000, date(2026, 9, 1))

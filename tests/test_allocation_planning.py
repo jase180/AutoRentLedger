@@ -28,6 +28,7 @@ from autorentledger.storage import (
     SQLiteRentalRepository,
 )
 from autorentledger.storage.migrations import CURRENT_SCHEMA_VERSION, upgrade_database
+from tests.property_helpers import create_test_unit
 
 RAW_SENTINEL = b"PRIVATE_SYNTHETIC_PLANNER_RAW_SENTINEL"
 
@@ -70,7 +71,7 @@ def add_payment(
 def add_account(database_path, number, payer_names=("Synthetic Payer",)):
     payers = SQLitePayerRepository(database_path)
     rentals = SQLiteRentalRepository(database_path)
-    unit = rentals.create_unit(f"Synthetic Unit {number}")
+    unit = create_test_unit(rentals, f"Synthetic Unit {number}")
     account = rentals.create_rent_account(
         unit.id, f"Synthetic Household {number}", None, None
     )
@@ -178,7 +179,7 @@ def test_preview_is_read_only_and_schema_stays_current(tmp_path, capsys):
     assert "Payment 1" in output
     assert "No allocations were created" in output
     assert snapshot(database_path) == before
-    assert before[0] == CURRENT_SCHEMA_VERSION == 13
+    assert before[0] == CURRENT_SCHEMA_VERSION == 14
 
 
 def test_two_payments_fill_one_obligation_and_payment_month_is_not_inferred(tmp_path):

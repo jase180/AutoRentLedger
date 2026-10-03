@@ -7,6 +7,7 @@ from autorentledger.cli import build_parser, main
 from autorentledger.identity import normalize_alias, resolve_payer
 from autorentledger.storage import (
     SQLitePayerRepository,
+    SQLitePropertyRepository,
     SQLiteRentalRepository,
     SQLiteTenancySetupRepository,
 )
@@ -20,11 +21,13 @@ from autorentledger.tenancy_setup import (
     apply_tenancy_setup,
     preview_tenancy_setup,
 )
+from tests.property_helpers import create_test_property, create_test_unit
 
 
 def create_database(tmp_path):
     database_path = tmp_path / "tenancy-setup.sqlite3"
     upgrade_database(database_path)
+    create_test_property(SQLiteRentalRepository(database_path))
     return database_path
 
 
@@ -75,6 +78,7 @@ def database_snapshot(database_path):
 
 def new_request(**overrides):
     request = TenancySetupRequest(
+        property_id=1,
         unit_label="2F",
         account_name="Synthetic Household",
         active_from="2026-05-01",
@@ -94,6 +98,8 @@ def test_setup_tenancy_parser_is_preview_first_and_enforces_xor_and_pairing():
             "tenancy",
             "--unit-label",
             "2F",
+            "--property",
+            "1",
             "--account-name",
             "Synthetic Household",
             "--payer-name",
@@ -136,7 +142,7 @@ def test_setup_tenancy_parser_is_preview_first_and_enforces_xor_and_pairing():
     "setup_request, message",
     [
         (new_request(unit_label=None), "exactly one of --unit"),
-        (new_request(unit_id=1), "exactly one of --unit"),
+        (new_request(unit_id=1, property_id=None), "exactly one of --unit"),
         (new_request(payer_name=None), "exactly one of --payer"),
         (new_request(payer_id=1), "exactly one of --payer"),
         (new_request(unit_label="  "), "Unit label"),
@@ -192,6 +198,8 @@ def test_cli_preview_shows_create_plan_and_causes_zero_mutations(tmp_path, capsy
             "tenancy",
             "--unit-label",
             "2F",
+            "--property",
+            "1",
             "--account-name",
             "Synthetic Household",
             "--active-from",
@@ -211,7 +219,7 @@ def test_cli_preview_shows_create_plan_and_causes_zero_mutations(tmp_path, capsy
     output = capsys.readouterr().out
     assert exit_code == 0
     assert "Tenancy setup preview" in output
-    assert 'CREATE "2F"' in output
+    assert 'CREATE Property 1 / "2F"' in output
     assert 'CREATE "Synthetic Household"' in output
     assert "CREATE Synthetic Tenant" in output
     assert "No obligations, payments, or allocations will be created." in output
@@ -223,7 +231,7 @@ def test_existing_unit_payer_and_same_owner_alias_are_reused(tmp_path, capsys):
     database_path = create_database(tmp_path)
     rentals = SQLiteRentalRepository(database_path)
     payers = SQLitePayerRepository(database_path)
-    unit = rentals.create_unit("Existing Synthetic Unit")
+    unit = create_test_unit(rentals, "Existing Synthetic Unit")
     payer = payers.create_payer("Existing Synthetic Payer")
     alias = payers.add_alias(
         payer.id, "EXISTING SYNTHETIC", normalize_alias("EXISTING SYNTHETIC")
@@ -281,7 +289,7 @@ def test_conflicts_and_missing_references_fail_without_mutation(tmp_path):
     repository = SQLiteTenancySetupRepository(database_path)
     rentals = SQLiteRentalRepository(database_path)
     payers = SQLitePayerRepository(database_path)
-    unit = rentals.create_unit("2F")
+    unit = create_test_unit(rentals, "2F")
     owner = payers.create_payer("Alias Owner")
     payers.add_alias(owner.id, "TAKEN ALIAS", normalize_alias("TAKEN ALIAS"))
     before = row_counts(database_path)
@@ -289,7 +297,10 @@ def test_conflicts_and_missing_references_fail_without_mutation(tmp_path):
     with pytest.raises(TenancySetupConflictError, match=f"unit {unit.id}"):
         preview_tenancy_setup(repository, new_request())
     with pytest.raises(TenancySetupNotFoundError, match="Unit 999"):
-        preview_tenancy_setup(repository, new_request(unit_label=None, unit_id=999))
+        preview_tenancy_setup(
+            repository,
+            new_request(unit_label=None, unit_id=999, property_id=None),
+        )
     with pytest.raises(TenancySetupNotFoundError, match="Payer 999"):
         preview_tenancy_setup(
             repository,
@@ -311,6 +322,8 @@ def test_apply_creates_existing_primitives_only_and_reports_ids(tmp_path, capsys
             "tenancy",
             "--unit-label",
             "2F",
+            "--property",
+            "1",
             "--account-name",
             "Synthetic Household",
             "--active-from",
@@ -355,7 +368,7 @@ def test_apply_creates_existing_primitives_only_and_reports_ids(tmp_path, capsys
         schedule = connection.execute("SELECT * FROM rent_schedules").fetchone()
         assert schedule[4:6] == ("2026-05-01", "2027-04-30")
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 13
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 14
 
 
 def test_new_payer_display_name_collision_does_not_reuse(tmp_path):
@@ -429,8 +442,84 @@ def test_exact_alias_resolution_and_primitive_commands_remain_available(tmp_path
 
     assert resolve_payer("  synthetic   a tenant ", payers).id == result.payer.id
     assert resolve_payer("Synthetic A", payers) is None
-    assert main(["unit", "add", "3F", "--database", str(database_path)]) == 0
+    assert main(
+        [
+            "unit",
+            "add",
+            "--property",
+            "1",
+            "3F",
+            "--database",
+            str(database_path),
+        ]
+    ) == 0
     assert main(
         ["payer", "add", "Another Synthetic Payer", "--database", str(database_path)]
     ) == 0
-    assert CURRENT_SCHEMA_VERSION == 13
+    assert CURRENT_SCHEMA_VERSION == 14
+
+
+def test_new_unit_setup_requires_existing_property_and_scopes_label(tmp_path):
+    database_path = create_database(tmp_path)
+    properties = SQLitePropertyRepository(database_path)
+    property_b = properties.create_property("Property B")
+    repository = SQLiteTenancySetupRepository(database_path)
+
+    first = apply_tenancy_setup(repository, new_request())
+    second = apply_tenancy_setup(
+        repository,
+        new_request(
+            property_id=property_b.id,
+            account_name="Second Household",
+            payer_name="Second Synthetic Payer",
+            aliases=("SECOND SYNTHETIC PAYER",),
+        ),
+    )
+
+    assert first.unit.label == second.unit.label == "2F"
+    assert first.unit.property_id == 1
+    assert second.unit.property_id == property_b.id
+    with pytest.raises(TenancySetupConflictError, match="Property 1"):
+        preview_tenancy_setup(repository, new_request())
+    with pytest.raises(TenancySetupValidationError, match="requires --property"):
+        preview_tenancy_setup(repository, new_request(property_id=None))
+    with pytest.raises(TenancySetupNotFoundError, match="Property 999"):
+        preview_tenancy_setup(repository, new_request(property_id=999))
+
+
+class PropertyRemovedAfterPreviewRepository(SQLiteTenancySetupRepository):
+    def apply_checked(self, **kwargs):
+        with sqlite3.connect(self.database_path) as connection:
+            connection.execute(
+                "DELETE FROM properties WHERE id = ?", (kwargs["property_id"],)
+            )
+        return super().apply_checked(**kwargs)
+
+
+class UnitCreatedAfterPreviewRepository(SQLiteTenancySetupRepository):
+    def apply_checked(self, **kwargs):
+        with sqlite3.connect(self.database_path) as connection:
+            connection.execute(
+                "INSERT INTO units (property_id, label, created_at) VALUES (?, ?, ?)",
+                (kwargs["property_id"], kwargs["unit_label"], "synthetic-race"),
+            )
+        return super().apply_checked(**kwargs)
+
+
+def test_apply_revalidates_property_and_scoped_unit_uniqueness(tmp_path):
+    missing_property_path = create_database(tmp_path / "missing")
+    with pytest.raises(TenancySetupNotFoundError, match="Property 1"):
+        apply_tenancy_setup(
+            PropertyRemovedAfterPreviewRepository(missing_property_path), new_request()
+        )
+    counts = row_counts(missing_property_path)
+    assert counts["units"] == counts["rent_accounts"] == counts["payers"] == 0
+
+    conflict_path = create_database(tmp_path / "conflict")
+    with pytest.raises(TenancySetupConflictError, match="Property 1"):
+        apply_tenancy_setup(
+            UnitCreatedAfterPreviewRepository(conflict_path), new_request()
+        )
+    counts = row_counts(conflict_path)
+    assert counts["units"] == 1
+    assert counts["rent_accounts"] == counts["payers"] == counts["rent_schedules"] == 0

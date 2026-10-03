@@ -75,6 +75,9 @@ from autorentledger.cli.tenancy import (
     run_payer_add,
     run_payer_listing,
     run_payer_rename,
+    run_property_add,
+    run_property_listing,
+    run_property_rename,
     run_rent_account_add,
     run_rent_account_add_payer,
     run_rent_account_end,
@@ -210,6 +213,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return run_tenancy_setup(
                 args.database,
                 unit_id=args.unit,
+                property_id=args.property,
                 unit_label=args.unit_label,
                 account_name=args.account_name,
                 active_from=args.active_from,
@@ -244,9 +248,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_payer_listing(args.database)
     if args.command == "unresolved-payers":
         return run_unresolved_payers(args.database)
+    if args.command == "property":
+        if args.property_command == "add":
+            return run_property_add(args.database, args.display_name)
+        if args.property_command == "list":
+            return run_property_listing(args.database)
+        if args.property_command == "rename":
+            return run_property_rename(
+                args.database, args.property_id, args.display_name
+            )
+        raise AssertionError(f"Unhandled property command: {args.property_command}")
     if args.command == "unit":
         if args.unit_command == "add":
-            return run_unit_add(args.database, args.label)
+            return run_unit_add(args.database, args.property, args.label)
         raise AssertionError(f"Unhandled unit command: {args.unit_command}")
     if args.command == "units":
         return run_unit_listing(args.database)

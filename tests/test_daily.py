@@ -38,6 +38,7 @@ from autorentledger.storage import (
     SQLiteSuggestionRepository,
 )
 from autorentledger.storage.migrations import CURRENT_SCHEMA_VERSION, upgrade_database
+from tests.property_helpers import create_test_unit
 
 
 class FakeEmailSource:
@@ -552,7 +553,7 @@ def test_repeated_daily_runs_create_separate_backups_without_duplicate_evidence(
     payer = payers.create_payer("Synthetic Payer")
     payers.add_alias(payer.id, "ALEX EXAMPLE", "alex example")
     rentals = SQLiteRentalRepository(database_path)
-    unit = rentals.create_unit("Synthetic Unit")
+    unit = create_test_unit(rentals, "Synthetic Unit")
     account = rentals.create_rent_account(
         unit.id,
         "Synthetic Household",
@@ -616,5 +617,5 @@ def test_repeated_daily_runs_create_separate_backups_without_duplicate_evidence(
     assert SQLiteObligationRepository(database_path).count() == 1
     for table in protected_tables:
         assert before[1][table] == after[1][table]
-    assert after[2] == CURRENT_SCHEMA_VERSION == 13
+    assert after[2] == CURRENT_SCHEMA_VERSION == 14
     assert before[0] == after[0]

@@ -21,10 +21,11 @@ from autorentledger.storage import (
     SQLiteRawEmailRepository,
     SQLiteRentalRepository,
 )
+from tests.property_helpers import create_test_unit
 
 
 def create_account(rentals, active_from=None, active_to=None):
-    unit = rentals.create_unit("Unit A")
+    unit = create_test_unit(rentals, "Unit A")
     return rentals.create_rent_account(unit.id, "Synthetic Household", active_from, active_to)
 
 

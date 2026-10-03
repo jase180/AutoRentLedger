@@ -43,6 +43,7 @@ from autorentledger.storage import (
 )
 from autorentledger.storage.migrations import CURRENT_SCHEMA_VERSION, MIGRATIONS, upgrade_database
 from autorentledger.suggestions import SuggestionReason
+from tests.property_helpers import create_test_unit
 
 
 def create_fixture(tmp_path):
@@ -73,7 +74,7 @@ def build(database_path, period="2026-09"):
 
 
 def add_account(rentals, label, name):
-    unit = rentals.create_unit(label)
+    unit = create_test_unit(rentals, label)
     return rentals.create_rent_account(unit.id, name, None, None)
 
 
@@ -514,7 +515,7 @@ def test_service_and_cli_are_strictly_read_only_and_private(tmp_path, capsys):
     assert obligation.id > 0
 
     version, tables, _ = before
-    assert version == CURRENT_SCHEMA_VERSION == 13
+    assert version == CURRENT_SCHEMA_VERSION == 14
     assert not any(
         word in table for table in tables for word in ("overview", "dashboard", "cache", "status")
     )

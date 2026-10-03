@@ -19,6 +19,7 @@ from autorentledger.storage import (
     SQLiteRawEmailRepository,
     SQLiteRentalRepository,
 )
+from tests.property_helpers import create_test_property
 
 
 def create_repositories(tmp_path):
@@ -32,11 +33,12 @@ def create_repositories(tmp_path):
 
 def test_rental_service_validates_names_dates_and_unit(tmp_path):
     _, _, _, rentals = create_repositories(tmp_path)
+    property_record = create_test_property(rentals)
 
     with pytest.raises(RentalValidationError, match="label"):
-        create_unit(rentals, "   ")
+        create_unit(rentals, property_record.id, "   ")
 
-    unit = create_unit(rentals, "  Unit A  ")
+    unit = create_unit(rentals, property_record.id, "  Unit A  ")
     assert unit.label == "Unit A"
 
     with pytest.raises(RentalValidationError, match="name"):
@@ -57,8 +59,9 @@ def test_rental_service_validates_names_dates_and_unit(tmp_path):
 
 def test_association_service_checks_entities_and_duplicate(tmp_path):
     _, _, payers, rentals = create_repositories(tmp_path)
+    property_record = create_test_property(rentals)
     payer = payers.create_payer("Alex Example")
-    unit = create_unit(rentals, "Unit A")
+    unit = create_unit(rentals, property_record.id, "Unit A")
     account = create_rent_account(rentals, unit.id, "Synthetic Household")
 
     with pytest.raises(RentalEntityNotFoundError, match="Rent account 999"):
@@ -73,6 +76,7 @@ def test_association_service_checks_entities_and_duplicate(tmp_path):
 
 def test_association_does_not_modify_aliases_or_payment_events(tmp_path):
     raws, payments, payers, rentals = create_repositories(tmp_path)
+    property_record = create_test_property(rentals)
     payer = payers.create_payer("Alex Example")
     payers.add_alias(payer.id, "ALEX EXAMPLE", normalize_alias("ALEX EXAMPLE"))
     raws.insert(
@@ -98,7 +102,7 @@ def test_association_does_not_modify_aliases_or_payment_events(tmp_path):
     aliases_before = payers.list_aliases(payer.id)
     payment_before = payments.get_by_raw_email_id(raw.id)
 
-    unit = create_unit(rentals, "Unit A")
+    unit = create_unit(rentals, property_record.id, "Unit A")
     account = create_rent_account(rentals, unit.id, "Synthetic Household")
     associate_payer(rentals, payers, account.id, payer.id)
 

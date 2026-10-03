@@ -4,12 +4,14 @@ from datetime import date
 import pytest
 
 from autorentledger.storage import SQLitePayerRepository, SQLiteRentalRepository
+from tests.property_helpers import create_test_property, create_test_unit
 
 
 def create_repositories(tmp_path):
     database_path = tmp_path / "rental.sqlite3"
     payers = SQLitePayerRepository(database_path)
     rentals = SQLiteRentalRepository(database_path)
+    create_test_property(rentals)
     return database_path, payers, rentals
 
 
@@ -18,6 +20,12 @@ def test_rental_schema_initialization(tmp_path):
 
     with sqlite3.connect(database_path) as connection:
         unit_columns = {row[1] for row in connection.execute("PRAGMA table_info(units)")}
+        property_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(properties)")
+        }
+        unit_foreign_keys = connection.execute(
+            "PRAGMA foreign_key_list(units)"
+        ).fetchall()
         account_columns = {
             row[1] for row in connection.execute("PRAGMA table_info(rent_accounts)")
         }
@@ -34,7 +42,14 @@ def test_rental_schema_initialization(tmp_path):
             "PRAGMA index_list(rent_account_payers)"
         ).fetchall()
 
-    assert unit_columns == {"id", "label", "created_at"}
+    assert property_columns == {"id", "display_name", "created_at"}
+    assert unit_columns == {"id", "property_id", "label", "created_at"}
+    assert any(
+        row[2] == "properties"
+        and row[3] == "property_id"
+        and row[6].upper() == "RESTRICT"
+        for row in unit_foreign_keys
+    )
     assert account_columns == {
         "id",
         "unit_id",
@@ -60,16 +75,16 @@ def test_rental_schema_initialization(tmp_path):
 def test_unit_creation_and_unique_label_constraint(tmp_path):
     _, _, rentals = create_repositories(tmp_path)
 
-    unit = rentals.create_unit("Unit A")
+    unit = create_test_unit(rentals, "Unit A")
 
     assert rentals.get_unit(unit.id) == unit
     with pytest.raises(sqlite3.IntegrityError):
-        rentals.create_unit("Unit A")
+        create_test_unit(rentals, "Unit A")
 
 
 def test_rent_account_creation_and_nullable_dates(tmp_path):
     _, _, rentals = create_repositories(tmp_path)
-    unit = rentals.create_unit("Unit A")
+    unit = create_test_unit(rentals, "Unit A")
 
     dated = rentals.create_rent_account(
         unit.id,
@@ -92,7 +107,7 @@ def test_rent_account_constraints_reject_missing_unit_and_reversed_dates(tmp_pat
     with pytest.raises(sqlite3.IntegrityError):
         rentals.create_rent_account(999, "Synthetic Household", None, None)
 
-    unit = rentals.create_unit("Unit A")
+    unit = create_test_unit(rentals, "Unit A")
     with pytest.raises(sqlite3.IntegrityError):
         rentals.create_rent_account(
             unit.id,
@@ -106,8 +121,8 @@ def test_many_to_many_payer_associations(tmp_path):
     _, payers, rentals = create_repositories(tmp_path)
     alex = payers.create_payer("Alex Example")
     morgan = payers.create_payer("Morgan Example")
-    unit_a = rentals.create_unit("Unit A")
-    unit_b = rentals.create_unit("Unit B")
+    unit_a = create_test_unit(rentals, "Unit A")
+    unit_b = create_test_unit(rentals, "Unit B")
     account_a = rentals.create_rent_account(unit_a.id, "Synthetic Household", None, None)
     account_b = rentals.create_rent_account(unit_b.id, "Second Household", None, None)
 
@@ -128,7 +143,7 @@ def test_many_to_many_payer_associations(tmp_path):
 def test_association_constraints_reject_duplicates_and_missing_entities(tmp_path):
     _, payers, rentals = create_repositories(tmp_path)
     payer = payers.create_payer("Alex Example")
-    unit = rentals.create_unit("Unit A")
+    unit = create_test_unit(rentals, "Unit A")
     account = rentals.create_rent_account(unit.id, "Synthetic Household", None, None)
     rentals.add_payer(account.id, payer.id)
 

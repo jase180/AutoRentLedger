@@ -358,6 +358,7 @@ Preview a setup using a new unit and a new payer:
 
 ```powershell
 autorentledger setup tenancy `
+  --property 1 `
   --unit-label "2F" `
   --account-name "Synthetic Household" `
   --active-from 2026-05-01 `
@@ -378,6 +379,7 @@ After reviewing the plan, apply the same command explicitly:
 
 ```powershell
 autorentledger setup tenancy `
+  --property 1 `
   --unit-label "2F" `
   --account-name "Synthetic Household" `
   --active-from 2026-05-01 `
@@ -448,7 +450,8 @@ rows.
 Create each domain object explicitly and use the IDs printed by the preceding commands:
 
 ```powershell
-autorentledger unit add "Unit A"
+autorentledger property add "Property A"
+autorentledger unit add --property 1 "Unit A"
 autorentledger rent-account add `
   --unit 1 `
   --name "Synthetic Household" `

@@ -43,6 +43,7 @@ from autorentledger.storage.migrations import (
     MigrationError,
     upgrade_database,
 )
+from tests.property_helpers import create_test_unit
 
 RAW_MIME = b"PRIVATE_SYNTHETIC_RAW_MIME_SENTINEL"
 MEMO = "PRIVATE_SYNTHETIC_MEMO_SENTINEL"
@@ -170,7 +171,7 @@ def test_allocated_payment_requires_explicit_removal_and_voided_payment_rejects_
     database_path = create_database(tmp_path)
     _, payment = add_gmail_payment(database_path)
     rentals = SQLiteRentalRepository(database_path)
-    unit = rentals.create_unit("Synthetic Unit")
+    unit = create_test_unit(rentals, "Synthetic Unit")
     account = rentals.create_rent_account(unit.id, "Synthetic Household", None, None)
     obligation = SQLiteObligationRepository(database_path).create(
         account.id, "2026-06", 72500, date(2026, 6, 1)
@@ -363,7 +364,7 @@ def test_v10_to_v11_migration_preserves_rows_and_is_transactional(tmp_path):
 
     result = upgrade_database(database_path)
 
-    assert (result.from_version, result.to_version) == (10, 13)
+    assert (result.from_version, result.to_version) == (10, 14)
     assert table_rows(database_path, "raw_emails") == raw_before
     assert table_rows(database_path, "payment_events") == payment_before
     assert table_rows(database_path, "manual_payment_evidence") == manual_evidence_before
@@ -372,7 +373,7 @@ def test_v10_to_v11_migration_preserves_rows_and_is_transactional(tmp_path):
     assert SQLitePaymentEventRepository(database_path).get(payment.id).raw_email_id == raw.id
     assert table_rows(database_path, "gmail_payment_voids") == []
     with sqlite3.connect(database_path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 13
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 14
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
 
     rollback_path = tmp_path / "v10-rollback.sqlite3"
@@ -405,7 +406,7 @@ def test_schema_is_current_and_has_no_generic_payment_action_tables(tmp_path):
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             )
         }
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 13
-    assert CURRENT_SCHEMA_VERSION == 13
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 14
+    assert CURRENT_SCHEMA_VERSION == 14
     assert "gmail_payment_voids" in tables
     assert "payment_actions" not in tables

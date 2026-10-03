@@ -39,6 +39,7 @@ from autorentledger.storage.migrations import (
     upgrade_database,
 )
 from autorentledger.suggestions import SuggestionReason, find_allocation_suggestions
+from tests.property_helpers import create_test_unit
 
 TABLES = (
     "raw_emails",
@@ -253,7 +254,7 @@ def _add_allocated_fixture(tmp_path, *, payment_amount=150000, allocated=140000)
     database_path, raws, payments = create_fixture(tmp_path)
     payment = add_payment(raws, payments, amount=payment_amount)
     rentals = SQLiteRentalRepository(database_path)
-    unit = rentals.create_unit("Unit A")
+    unit = create_test_unit(rentals, "Unit A")
     account = rentals.create_rent_account(unit.id, "Synthetic Household", None, None)
     obligation = SQLiteObligationRepository(database_path).create(
         account.id, "2026-09", allocated, date(2026, 9, 1)
@@ -373,7 +374,7 @@ def test_sender_rebuild_recomputes_identity_and_suggestion_without_alias_mutatio
     payer = payers.create_payer("Alex Example")
     payers.add_alias(payer.id, "ALEX EXAMPLE", normalize_alias("ALEX EXAMPLE"))
     rentals = SQLiteRentalRepository(database_path)
-    unit = rentals.create_unit("Unit A")
+    unit = create_test_unit(rentals, "Unit A")
     account = rentals.create_rent_account(unit.id, "Synthetic Household", None, None)
     rentals.add_payer(account.id, payer.id)
     SQLiteObligationRepository(database_path).create(

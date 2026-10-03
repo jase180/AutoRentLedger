@@ -17,7 +17,7 @@ general property-management system.
 - Preserves append-only correction and void history for manual payment evidence.
 - Deterministically parses supported Chase and U.S. Bank Zelle notifications into payment events.
 - Resolves observed sender names through explicitly managed payer aliases.
-- Models units, household-style rent accounts, recurring schedules, and monthly obligations.
+- Models properties, units, household-style rent accounts, recurring schedules, and monthly obligations.
 - Requires an explicit allocation before payment money satisfies an obligation.
 - Derives reconciliation, review items, conservative allocation suggestions, reports, and a
   monthly owner overview without persisting those projections.
@@ -38,7 +38,7 @@ immutable raw email evidence                         |
        +-----------------------> normalized payment event ---------> payer identity / aliases
        |                                      |
        |                                      v
-       |                                rent account ------> unit
+       |                         rent account ------> unit ------> property
        |                                      |
        |       explicit allocation            v
        +--------------------------------> monthly obligation
@@ -57,6 +57,7 @@ The important distinctions are:
 | Payment evidence | Either immutable Gmail/raw-email evidence or an explicit manual record of an observed historical payment. |
 | Payment event | A normalized payment observation with exactly one evidence source. It is not a tenant. |
 | Payer | The identity that sent money. A payer is not a rent account. |
+| Property | The rental property that contains one or more units. |
 | Rent account | The household/account associated with a unit and eventual rent responsibility. |
 | Obligation | The authoritative fact that a specific account owed an amount for a month. |
 | Rent allocation | The explicit accounting link saying part of a payment satisfies a rent obligation. |
@@ -204,6 +205,7 @@ deterministic plan:
 
 ```powershell
 autorentledger setup tenancy `
+  --property 1 `
   --unit-label "2F" `
   --account-name "Synthetic Household" `
   --active-from 2026-05-01 `
@@ -344,7 +346,7 @@ pytest
 
 GitHub Actions runs the same checks on Python 3.11 for every push and pull request. Tests use
 synthetic local fixtures and require no Gmail credentials, network access, or operational database.
-The current SQLite schema version is 13.
+The current SQLite schema version is 14.
 
 The application uses Python, standard-library `sqlite3`, and a small service/repository structure
 under `src/autorentledger/`. Gmail remains behind an email-source adapter; domain and read-model

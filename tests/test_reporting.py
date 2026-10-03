@@ -18,6 +18,7 @@ from autorentledger.storage import (
     SQLiteReportingRepository,
 )
 from autorentledger.storage.migrations import MIGRATIONS, upgrade_database
+from tests.property_helpers import create_test_unit
 
 
 def create_fixture(tmp_path):
@@ -35,7 +36,7 @@ def create_fixture(tmp_path):
         ("Unit B", "Example Household"),
         ("Unit C", "Demo Household"),
     ]:
-        unit = rentals.create_unit(label)
+        unit = create_test_unit(rentals, label)
         accounts.append(rentals.create_rent_account(unit.id, name, None, None))
     return database_path, raws, payments, obligations, allocations, accounts
 

@@ -32,6 +32,7 @@ from autorentledger.storage.migrations import (
     MIGRATIONS,
     upgrade_database,
 )
+from tests.property_helpers import create_test_unit
 
 SYNTHETIC_RAW = b"PRIVATE_SYNTHETIC_RAW_SENTINEL"
 SYNTHETIC_MEMO = "PRIVATE_SYNTHETIC_MEMO_SENTINEL"
@@ -75,7 +76,7 @@ def add_payment(database_path, number=1, *, sender="ALEX EXAMPLE", amount=100000
 
 def add_obligation(database_path, amount=150000):
     rentals = SQLiteRentalRepository(database_path)
-    unit = rentals.create_unit("Unit A")
+    unit = create_test_unit(rentals, "Unit A")
     account = rentals.create_rent_account(unit.id, "Synthetic Household", None, None)
     return SQLiteObligationRepository(database_path).create(
         account.id, "2026-08", amount, date(2026, 8, 1)
@@ -146,7 +147,7 @@ def test_healthy_database_check_is_strictly_read_only_and_cli_is_private(
     assert "Ledger:        OK" in output
     assert "Database healthy." in output
     assert "PRIVATE_SYNTHETIC" not in output
-    assert before[0] == CURRENT_SCHEMA_VERSION == 13
+    assert before[0] == CURRENT_SCHEMA_VERSION == 14
 
 
 def test_payment_allocation_overage_is_detected_without_repair(tmp_path):
@@ -491,7 +492,7 @@ def test_cli_backup_restore_output_is_private_and_schema_commands_still_work(
     assert "Database restored from:" in output
     assert "Pre-restore backup:" in output
     assert "PRIVATE_SYNTHETIC" not in output
-    assert CURRENT_SCHEMA_VERSION == 13
+    assert CURRENT_SCHEMA_VERSION == 14
     assert database_snapshot(active)[1] == set(EXPECTED_COLUMNS)
 
 

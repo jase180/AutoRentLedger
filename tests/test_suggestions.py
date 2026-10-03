@@ -30,6 +30,7 @@ from autorentledger.suggestions import (
     SuggestionReason,
     find_allocation_suggestions,
 )
+from tests.property_helpers import create_test_unit
 
 
 def create_fixture(tmp_path):
@@ -57,7 +58,7 @@ def create_fixture(tmp_path):
 
 
 def add_account(rentals, label="Unit A", name="Synthetic Household", **dates):
-    unit = rentals.create_unit(label)
+    unit = create_test_unit(rentals, label)
     return rentals.create_rent_account(
         unit.id,
         name,
@@ -369,11 +370,11 @@ def test_suggestions_are_read_only_private_safe_and_add_no_schema(tmp_path, caps
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             )
         }
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 13
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 14
     assert not tables.intersection(
         {"allocation_suggestions", "suggestion_status", "accepted_suggestions", "suggestion_history"}
     )
-    assert CURRENT_SCHEMA_VERSION == 13
+    assert CURRENT_SCHEMA_VERSION == 14
 
 
 def test_no_fuzzy_or_time_ranged_membership_and_schedules_do_not_invent_obligations(tmp_path):

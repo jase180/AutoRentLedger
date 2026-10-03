@@ -15,6 +15,7 @@ from autorentledger.storage import (
     SQLiteRentalRepository,
     SQLiteReviewRepository,
 )
+from tests.property_helpers import create_test_unit
 
 
 def create_fixture(tmp_path):
@@ -25,8 +26,8 @@ def create_fixture(tmp_path):
     rentals = SQLiteRentalRepository(database_path)
     obligations = SQLiteObligationRepository(database_path)
     allocations = SQLiteAllocationRepository(database_path)
-    unit_a = rentals.create_unit("Unit A")
-    unit_b = rentals.create_unit("Unit B")
+    unit_a = create_test_unit(rentals, "Unit A")
+    unit_b = create_test_unit(rentals, "Unit B")
     account_a = rentals.create_rent_account(
         unit_a.id, "Synthetic Household", None, None
     )

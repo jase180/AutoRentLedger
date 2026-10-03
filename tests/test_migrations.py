@@ -12,6 +12,7 @@ from autorentledger.storage import (
     SQLiteObligationRepository,
     SQLitePayerRepository,
     SQLitePaymentEventRepository,
+    SQLitePropertyRepository,
     SQLiteRawEmailRepository,
     SQLiteRentalRepository,
 )
@@ -156,11 +157,19 @@ def test_v7_to_current_adds_legacy_provenance_and_preserves_ledger_rows(tmp_path
             "rent_schedules",
         ],
     )
+    legacy_unit_row = preserved.pop("units")[0]
 
     result = upgrade_database(database_path)
 
-    assert (result.from_version, result.to_version) == (7, 13)
+    assert (result.from_version, result.to_version) == (7, 14)
     assert snapshot_tables(database_path, preserved) == preserved
+    migrated_unit = SQLiteRentalRepository(database_path).get_unit(unit.id)
+    assert migrated_unit is not None
+    assert (migrated_unit.id, migrated_unit.label, migrated_unit.created_at) == (
+        legacy_unit_row[0],
+        legacy_unit_row[1],
+        legacy_unit_row[2],
+    )
     upgraded = SQLitePaymentEventRepository(database_path).get(payment.id)
     assert upgraded is not None
     assert upgraded.id == payment.id
@@ -195,7 +204,7 @@ def test_v8_to_current_preserves_gmail_payments_allocations_and_foreign_keys(tmp
 
     result = upgrade_database(database_path)
 
-    assert (result.from_version, result.to_version) == (8, 13)
+    assert (result.from_version, result.to_version) == (8, 14)
     after_payment = SQLitePaymentEventRepository(database_path).get(payment.id)
     assert after_payment is not None
     assert before_payment is not None
@@ -222,7 +231,7 @@ def test_v8_to_current_preserves_gmail_payments_allocations_and_foreign_keys(tmp
     assert SQLiteAllocationRepository(database_path).get(allocation.id) == allocation
     assert SQLiteRawEmailRepository(database_path).get(raw.gmail_message_id).raw_mime == raw_bytes
     with sqlite3.connect(database_path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 13
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 14
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
         assert connection.execute(
             "SELECT COUNT(*) FROM manual_payment_evidence"
@@ -270,7 +279,7 @@ def test_v9_to_v10_adds_manual_audit_state_without_changing_existing_rows(tmp_pa
 
     result = upgrade_database(database_path)
 
-    assert (result.from_version, result.to_version) == (9, 13)
+    assert (result.from_version, result.to_version) == (9, 14)
     assert snapshot_tables(database_path, before) == before
     payment = SQLitePaymentEventRepository(database_path).get(42)
     assert payment is not None
@@ -280,7 +289,7 @@ def test_v9_to_v10_adds_manual_audit_state_without_changing_existing_rows(tmp_pa
     assert payment.voided_at is None
     assert SQLiteAllocationRepository(database_path).get(allocation.id) == allocation
     with sqlite3.connect(database_path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 13
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 14
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
         assert connection.execute(
             "SELECT COUNT(*) FROM manual_payment_revisions"
@@ -393,11 +402,18 @@ def test_unversioned_rental_and_obligation_eras_upgrade_without_data_loss(tmp_pa
     association = rentals.add_payer(account.id, payer.id)
     rental_tables = ["units", "rent_accounts", "rent_account_payers"]
     rental_before = snapshot_tables(rental_path, rental_tables)
+    legacy_unit_row = rental_before.pop("units")[0]
 
     assert get_schema_status(rental_path).detected_legacy_version == 4
     upgrade_database(rental_path)
-    assert snapshot_tables(rental_path, rental_tables) == rental_before
-    assert SQLiteRentalRepository(rental_path).get_unit(unit.id) == unit
+    assert snapshot_tables(rental_path, rental_before) == rental_before
+    migrated_unit = SQLiteRentalRepository(rental_path).get_unit(unit.id)
+    assert migrated_unit is not None
+    assert (migrated_unit.id, migrated_unit.label, migrated_unit.created_at) == (
+        legacy_unit_row[0],
+        legacy_unit_row[1],
+        legacy_unit_row[2],
+    )
     assert SQLiteRentalRepository(rental_path).has_payer(
         association.rent_account_id, association.payer_id
     )
@@ -523,3 +539,201 @@ def test_real_style_legacy_database_runs_review_after_explicit_upgrade(tmp_path,
     assert f"Schema version: {CURRENT_SCHEMA_VERSION}" in status_output
     assert "Status: current" in status_output
     assert "PRIVATE_SYNTHETIC_RAW_SENTINEL" not in status_output
+
+
+def create_populated_v13_database(database_path):
+    with sqlite3.connect(database_path) as connection:
+        connection.execute("PRAGMA foreign_keys = ON")
+        for version in range(1, 14):
+            MIGRATIONS[version](connection)
+        connection.execute("PRAGMA user_version = 13")
+        connection.executemany(
+            "INSERT INTO units (id, label, created_at) VALUES (?, ?, ?)",
+            (
+                (1, "Unit A", "2026-01-01T00:00:00+00:00"),
+                (4, "2F", "2026-02-01T00:00:00+00:00"),
+                (9, "Unit C", "2026-03-01T00:00:00+00:00"),
+            ),
+        )
+        connection.execute(
+            "INSERT INTO payers VALUES (3, 'Synthetic Payer', '2026-01-01T00:00:00+00:00')"
+        )
+        connection.execute(
+            """
+            INSERT INTO rent_accounts
+                (id, unit_id, display_name, active_from, active_to, created_at)
+            VALUES (7, 4, 'Example Household', '2026-01-01', NULL,
+                    '2026-01-01T00:00:00+00:00')
+            """
+        )
+        connection.execute(
+            "INSERT INTO rent_account_payers VALUES "
+            "(7, 3, '2026-01-01T00:00:00+00:00')"
+        )
+        connection.execute(
+            """
+            INSERT INTO rent_obligations
+                (id, rent_account_id, period, amount_cents, due_date, created_at)
+            VALUES (11, 7, '2026-05', 145000, '2026-05-01',
+                    '2026-01-01T00:00:00+00:00')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO manual_payment_evidence
+                (id, sender_name, amount_cents, occurred_on, note, created_at)
+            VALUES (30, 'Synthetic Payer', 145000, '2026-05-03', NULL,
+                    '2026-01-01T00:00:00+00:00')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO payment_events
+                (id, raw_email_id, manual_evidence_id, provider, sender_name,
+                 amount_cents, occurred_on, memo, parsed_at, parser_version, voided_at)
+            VALUES (20, NULL, 30, 'manual', 'Synthetic Payer', 145000,
+                    '2026-05-03', NULL, '2026-01-01T00:00:00+00:00', 'manual', NULL)
+            """
+        )
+        connection.execute(
+            "INSERT INTO payment_allocations VALUES "
+            "(21, 20, 11, 100000, '2026-01-01T00:00:00+00:00')"
+        )
+        connection.execute(
+            """
+            INSERT INTO rent_schedules
+                (id, rent_account_id, amount_cents, due_day, active_from, active_to,
+                 created_at)
+            VALUES (31, 7, 145000, 1, '2026-01-01', NULL,
+                    '2026-01-01T00:00:00+00:00')
+            """
+        )
+        connection.execute(
+            "INSERT INTO late_fee_charges VALUES "
+            "(40, 11, 5000, '2026-05-10', 'Synthetic fee', "
+            "'2026-01-01T00:00:00+00:00', NULL)"
+        )
+        connection.execute(
+            "INSERT INTO late_fee_voids VALUES "
+            "(41, 40, 'Synthetic waiver', '2026-01-02T00:00:00+00:00')"
+        )
+        connection.execute(
+            "INSERT INTO late_fee_allocations VALUES "
+            "(42, 20, 40, 5000, '2026-01-01T00:00:00+00:00')"
+        )
+
+
+def test_v13_to_v14_preserves_accounting_and_materializes_one_default_property(tmp_path):
+    database_path = tmp_path / "v13-populated.sqlite3"
+    create_populated_v13_database(database_path)
+    preserved_tables = (
+        "rent_accounts",
+        "rent_account_payers",
+        "rent_obligations",
+        "manual_payment_evidence",
+        "payment_events",
+        "payment_allocations",
+        "rent_schedules",
+        "late_fee_charges",
+        "late_fee_voids",
+        "late_fee_allocations",
+    )
+    before = snapshot_tables(database_path, preserved_tables)
+
+    result = upgrade_database(database_path)
+
+    assert (result.from_version, result.to_version) == (13, 14)
+    assert snapshot_tables(database_path, preserved_tables) == before
+    properties = SQLitePropertyRepository(database_path).list_properties()
+    assert len(properties) == 1
+    assert properties[0].display_name == "Default Property"
+    units = SQLiteRentalRepository(database_path).list_units()
+    assert [(item.id, item.label, item.created_at) for item in units] == [
+        (1, "Unit A", "2026-01-01T00:00:00+00:00"),
+        (4, "2F", "2026-02-01T00:00:00+00:00"),
+        (9, "Unit C", "2026-03-01T00:00:00+00:00"),
+    ]
+    assert {item.property_id for item in units} == {properties[0].id}
+    property_b = SQLitePropertyRepository(database_path).create_property("Property B")
+    new_unit = SQLiteRentalRepository(database_path).create_unit(property_b.id, "2F")
+    assert new_unit.id > 9
+    with sqlite3.connect(database_path) as connection:
+        connection.execute("PRAGMA foreign_keys = ON")
+        columns = {
+            row[1]: row for row in connection.execute("PRAGMA table_info(units)")
+        }
+        assert columns["property_id"][3] == 1
+        foreign_keys = connection.execute("PRAGMA foreign_key_list(units)").fetchall()
+        assert any(
+            row[2] == "properties"
+            and row[3] == "property_id"
+            and row[6].upper() == "RESTRICT"
+            for row in foreign_keys
+        )
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+        assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+
+
+def test_v14_empty_and_fresh_databases_do_not_create_default_property(tmp_path):
+    v13_path = tmp_path / "v13-empty.sqlite3"
+    with sqlite3.connect(v13_path) as connection:
+        for version in range(1, 14):
+            MIGRATIONS[version](connection)
+        connection.execute("PRAGMA user_version = 13")
+    upgrade_database(v13_path)
+    assert SQLitePropertyRepository(v13_path).list_properties() == []
+
+    fresh_path = tmp_path / "fresh-v14.sqlite3"
+    upgrade_database(fresh_path)
+    assert SQLitePropertyRepository(fresh_path).list_properties() == []
+
+
+def test_v14_migration_failure_rolls_back_property_and_unit_rebuild(tmp_path):
+    database_path = tmp_path / "v13-failure.sqlite3"
+    create_populated_v13_database(database_path)
+    before = snapshot_tables(
+        database_path,
+        ("units", "rent_accounts", "rent_obligations", "payment_allocations"),
+    )
+
+    def fail_after_v14_changes(connection):
+        MIGRATIONS[14](connection)
+        raise sqlite3.OperationalError("synthetic v14 migration failure")
+
+    with pytest.raises(MigrationError, match="synthetic v14 migration failure"):
+        upgrade_database(
+            database_path, migrations={**MIGRATIONS, 14: fail_after_v14_changes}
+        )
+
+    assert snapshot_tables(database_path, before) == before
+    with sqlite3.connect(database_path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 13
+        assert connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE name = 'properties'"
+        ).fetchone() is None
+        assert {row[1] for row in connection.execute("PRAGMA table_info(units)")} == {
+            "id",
+            "label",
+            "created_at",
+        }
+
+
+def test_schema_validation_rejects_malformed_v14_unit_constraints(tmp_path):
+    database_path = tmp_path / "malformed-v14.sqlite3"
+    with sqlite3.connect(database_path) as connection:
+        for version in range(1, 14):
+            MIGRATIONS[version](connection)
+        connection.execute(
+            "CREATE TABLE properties (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "display_name TEXT NOT NULL, created_at TEXT NOT NULL)"
+        )
+        connection.execute("ALTER TABLE units RENAME TO units_v13")
+        connection.execute(
+            "CREATE TABLE units (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "property_id INTEGER NOT NULL, label TEXT NOT NULL, created_at TEXT NOT NULL)"
+        )
+        connection.execute("DROP TABLE units_v13")
+        connection.execute("PRAGMA user_version = 14")
+
+    with pytest.raises(LegacySchemaDetectionError, match="reference properties"):
+        get_schema_status(database_path)

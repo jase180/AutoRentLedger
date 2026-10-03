@@ -29,6 +29,7 @@ from autorentledger.storage.migrations import (
     MIGRATIONS,
     upgrade_database,
 )
+from tests.property_helpers import create_test_unit
 
 
 def create_fixture(tmp_path, *, account_active_from=None, account_active_to=None):
@@ -37,7 +38,7 @@ def create_fixture(tmp_path, *, account_active_from=None, account_active_to=None
     rentals = SQLiteRentalRepository(database_path)
     obligations = SQLiteObligationRepository(database_path)
     schedules = SQLiteRentScheduleRepository(database_path)
-    unit = rentals.create_unit("Unit A")
+    unit = create_test_unit(rentals, "Unit A")
     account = rentals.create_rent_account(
         unit.id,
         "Synthetic Household",
@@ -90,7 +91,7 @@ def database_snapshot(database_path):
 
 def test_schedule_schema_creation_constraints_and_exact_listing(tmp_path):
     database_path, rentals, _, schedules, account_a = create_fixture(tmp_path)
-    unit_b = rentals.create_unit("Unit B")
+    unit_b = create_test_unit(rentals, "Unit B")
     account_b = rentals.create_rent_account(
         unit_b.id, "Example Household", None, None
     )
@@ -213,7 +214,7 @@ def test_overlaps_are_rejected_but_adjacency_and_other_accounts_are_allowed(tmp_
         add_schedule(schedules, account_a.id, active_from="2026-08-15", active_to="2026-09-15")
     adjacent = add_schedule(schedules, account_a.id, active_from="2026-09-01")
 
-    unit_b = rentals.create_unit("Unit B")
+    unit_b = create_test_unit(rentals, "Unit B")
     account_b = rentals.create_rent_account(unit_b.id, "Example Household", None, None)
     other = add_schedule(schedules, account_b.id, active_from="2026-01-01")
     assert [item.id for item in schedules.list_summaries()] == [
@@ -319,7 +320,7 @@ def test_zero_applicable_schedules_and_multiple_accounts_generate_deterministica
     add_schedule(schedules, account_a.id, active_from="2026-09-01")
     assert generate_obligations(schedules, "2026-08").items == ()
 
-    unit_b = rentals.create_unit("Unit B")
+    unit_b = create_test_unit(rentals, "Unit B")
     account_b = rentals.create_rent_account(unit_b.id, "Example Household", None, None)
     add_schedule(schedules, account_b.id, "1350.00", 2, "2026-09-01")
     plan = generate_obligations(schedules, "2026-09")
@@ -353,7 +354,7 @@ def test_existing_obligations_do_not_infer_schedules_and_read_commands_never_gen
 def test_generation_rolls_back_every_insert_on_mid_run_failure(tmp_path, monkeypatch):
     _, rentals, obligations, schedules, account_a = create_fixture(tmp_path)
     add_schedule(schedules, account_a.id, active_from="2026-01-01")
-    unit_b = rentals.create_unit("Unit B")
+    unit_b = create_test_unit(rentals, "Unit B")
     account_b = rentals.create_rent_account(unit_b.id, "Example Household", None, None)
     add_schedule(schedules, account_b.id, active_from="2026-01-01")
     original_insert = schedules._insert_generated_obligation
@@ -405,15 +406,19 @@ def test_v6_to_current_upgrade_preserves_prior_rows_and_adds_new_schema_state(tm
     account = rentals.create_rent_account(unit.id, "Synthetic Household", None, None)
     obligation = obligations.create(account.id, "2026-08", 140000, date(2026, 8, 1))
     before = database_snapshot(database_path)
+    legacy_unit_rows = before[1].pop("units")
 
     result = upgrade_database(database_path)
 
     after = database_snapshot(database_path)
     assert result.from_version == 6
-    assert result.to_version == CURRENT_SCHEMA_VERSION == 13
-    assert after[0] == 13
+    assert result.to_version == CURRENT_SCHEMA_VERSION == 14
+    assert after[0] == 14
     for table, rows in before[1].items():
         assert after[1][table] == rows
+    assert [(row[0], row[2], row[3]) for row in after[1]["units"]] == [
+        (row[0], row[1], row[2]) for row in legacy_unit_rows
+    ]
     assert after[1]["rent_schedules"] == []
     assert obligations.get(obligation.id) == obligation
 

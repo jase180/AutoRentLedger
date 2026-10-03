@@ -52,6 +52,7 @@ from autorentledger.storage.migrations import (
 from autorentledger.suggestions import find_allocation_suggestions
 from autorentledger.web.app import create_app
 from autorentledger.web.auth import WebAuthConfig
+from tests.property_helpers import create_test_unit
 
 
 def snapshot(path):
@@ -73,7 +74,7 @@ def ledger(tmp_path):
     path = tmp_path / "late-fee-allocations.sqlite3"
     upgrade_database(path)
     rentals = SQLiteRentalRepository(path)
-    unit = rentals.create_unit("Synthetic Unit")
+    unit = create_test_unit(rentals, "Synthetic Unit")
     account = rentals.create_rent_account(unit.id, "Synthetic Household", None, None)
     obligation = SQLiteObligationRepository(path).create(
         account.id, "2026-05", 135000, date(2026, 5, 5)
@@ -355,11 +356,18 @@ def test_v12_to_v13_migration_preserves_existing_rows_and_rolls_back(tmp_path):
         SQLiteLateFeeRepository(path), obligation.id, "50", "2026-05-10", "Synthetic fee"
     )
     before = snapshot(path)
+    legacy_unit_rows = before[1].pop("units")
     result = upgrade_database(path)
     after = snapshot(path)
-    assert (result.from_version, result.to_version) == (12, 13)
-    assert after[0] == CURRENT_SCHEMA_VERSION == 13
+    assert (result.from_version, result.to_version) == (12, 14)
+    assert after[0] == CURRENT_SCHEMA_VERSION == 14
     assert all(after[1][name] == rows for name, rows in before[1].items())
+    assert [
+        (row[0], row[2], row[3]) for row in after[1]["units"]
+    ] == [
+        (row[0], row[1], row[2]) for row in legacy_unit_rows
+    ]
+    assert len(after[1]["properties"]) == 1
     assert after[1]["late_fee_allocations"] == []
     with sqlite3.connect(path) as connection:
         connection.execute("PRAGMA foreign_keys = ON")

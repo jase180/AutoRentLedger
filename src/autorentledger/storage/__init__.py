@@ -106,6 +106,12 @@ from autorentledger.storage.payments import (
     SQLitePaymentEventRepository,
     SQLiteRawEmailRepository,
 )
+from autorentledger.storage.properties import (
+    PropertyNotFoundError,
+    PropertyRecord,
+    PropertyValidationError,
+    SQLitePropertyRepository,
+)
 from autorentledger.storage.reconciliation import (
     ReconciliationSourceRecord,
     SQLiteReconciliationRepository,
@@ -120,6 +126,7 @@ from autorentledger.storage.rentals import (
     TenancySetupAliasInput,
     TenancySetupAliasStorageResult,
     TenancySetupPayerNotFoundStorageError,
+    TenancySetupPropertyNotFoundStorageError,
     TenancySetupStorageResult,
     TenancySetupUnitLabelConflictStorageError,
     TenancySetupUnitNotFoundStorageError,
@@ -223,6 +230,9 @@ __all__ = [
     "PaymentRebuildNotFoundStorageError",
     "PaymentRebuildSourceRecord",
     "PaymentSenderCount",
+    "PropertyNotFoundError",
+    "PropertyRecord",
+    "PropertyValidationError",
     "RawEmailRecord",
     "ReconciliationSourceRecord",
     "RentAccountPayerRecord",
@@ -250,6 +260,7 @@ __all__ = [
     "SQLitePayerRepository",
     "SQLitePaymentEventRepository",
     "SQLitePaymentListingRepository",
+    "SQLitePropertyRepository",
     "SQLiteRawEmailRepository",
     "SQLiteReconciliationRepository",
     "SQLiteRentScheduleRepository",
@@ -267,6 +278,7 @@ __all__ = [
     "TenancySetupAliasInput",
     "TenancySetupAliasStorageResult",
     "TenancySetupPayerNotFoundStorageError",
+    "TenancySetupPropertyNotFoundStorageError",
     "TenancySetupStorageResult",
     "TenancySetupUnitLabelConflictStorageError",
     "TenancySetupUnitNotFoundStorageError",

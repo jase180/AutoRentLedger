@@ -19,6 +19,7 @@ from autorentledger.storage.maintenance_errors import (
 )
 from autorentledger.storage.migrations import (
     create_rental_schema,
+    create_rental_v4_schema,
 )
 from autorentledger.storage.schedules import RentScheduleRecord
 
@@ -26,8 +27,17 @@ from autorentledger.storage.schedules import RentScheduleRecord
 @dataclass(frozen=True)
 class UnitRecord:
     id: int
+    property_id: int
     label: str
     created_at: str
+
+
+def _unit_record(row: sqlite3.Row) -> UnitRecord:
+    values = dict(row)
+    # Historical repositories are used only by migration tests to construct
+    # pre-v14 fixtures. Current databases always persist a real property_id.
+    values.setdefault("property_id", 0)
+    return UnitRecord(**values)
 
 
 @dataclass(frozen=True)
@@ -91,13 +101,19 @@ class TenancySetupUnitNotFoundStorageError(Exception):
         self.unit_id = unit_id
 
 
+class TenancySetupPropertyNotFoundStorageError(Exception):
+    def __init__(self, property_id: int) -> None:
+        self.property_id = property_id
+
+
 class TenancySetupPayerNotFoundStorageError(Exception):
     def __init__(self, payer_id: int) -> None:
         self.payer_id = payer_id
 
 
 class TenancySetupUnitLabelConflictStorageError(Exception):
-    def __init__(self, label: str, unit_id: int) -> None:
+    def __init__(self, property_id: int, label: str, unit_id: int) -> None:
+        self.property_id = property_id
         self.label = label
         self.unit_id = unit_id
 
@@ -123,12 +139,24 @@ class SQLiteTenancySetupRepository:
     def get_unit(self, unit_id: int) -> UnitRecord | None:
         with self._connect_read_only() as connection:
             row = connection.execute("SELECT * FROM units WHERE id = ?", (unit_id,)).fetchone()
-        return UnitRecord(**dict(row)) if row else None
+        return _unit_record(row) if row else None
 
-    def get_unit_by_label(self, label: str) -> UnitRecord | None:
+    def get_property(self, property_id: int) -> bool:
         with self._connect_read_only() as connection:
-            row = connection.execute("SELECT * FROM units WHERE label = ?", (label,)).fetchone()
-        return UnitRecord(**dict(row)) if row else None
+            row = connection.execute(
+                "SELECT 1 FROM properties WHERE id = ?", (property_id,)
+            ).fetchone()
+        return row is not None
+
+    def get_unit_by_property_and_label(
+        self, property_id: int, label: str
+    ) -> UnitRecord | None:
+        with self._connect_read_only() as connection:
+            row = connection.execute(
+                "SELECT * FROM units WHERE property_id = ? AND label = ?",
+                (property_id, label),
+            ).fetchone()
+        return _unit_record(row) if row else None
 
     def get_payer(self, payer_id: int) -> PayerRecord | None:
         with self._connect_read_only() as connection:
@@ -147,6 +175,7 @@ class SQLiteTenancySetupRepository:
         self,
         *,
         unit_id: int | None,
+        property_id: int | None,
         unit_label: str | None,
         account_name: str,
         active_from: date | None,
@@ -163,7 +192,9 @@ class SQLiteTenancySetupRepository:
         active_to_text = active_to.isoformat() if active_to else None
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            unit, unit_reused = self._resolve_unit(connection, unit_id, unit_label, created_at)
+            unit, unit_reused = self._resolve_unit(
+                connection, unit_id, property_id, unit_label, created_at
+            )
             account_cursor = connection.execute(
                 """
                 INSERT INTO rent_accounts (
@@ -241,6 +272,7 @@ class SQLiteTenancySetupRepository:
     def _resolve_unit(
         connection: sqlite3.Connection,
         unit_id: int | None,
+        property_id: int | None,
         unit_label: str | None,
         created_at: str,
     ) -> tuple[UnitRecord, bool]:
@@ -248,16 +280,28 @@ class SQLiteTenancySetupRepository:
             row = connection.execute("SELECT * FROM units WHERE id = ?", (unit_id,)).fetchone()
             if row is None:
                 raise TenancySetupUnitNotFoundStorageError(unit_id)
-            return UnitRecord(**dict(row)), True
+            return _unit_record(row), True
+        selected_property_id = int(property_id)
+        if connection.execute(
+            "SELECT 1 FROM properties WHERE id = ?", (selected_property_id,)
+        ).fetchone() is None:
+            raise TenancySetupPropertyNotFoundStorageError(selected_property_id)
         label = str(unit_label)
-        existing = connection.execute("SELECT * FROM units WHERE label = ?", (label,)).fetchone()
+        existing = connection.execute(
+            "SELECT * FROM units WHERE property_id = ? AND label = ?",
+            (selected_property_id, label),
+        ).fetchone()
         if existing is not None:
-            raise TenancySetupUnitLabelConflictStorageError(label, int(existing["id"]))
+            raise TenancySetupUnitLabelConflictStorageError(
+                selected_property_id, label, int(existing["id"])
+            )
         cursor = connection.execute(
-            "INSERT INTO units (label, created_at) VALUES (?, ?)",
-            (label, created_at),
+            "INSERT INTO units (property_id, label, created_at) VALUES (?, ?, ?)",
+            (selected_property_id, label, created_at),
         )
-        return UnitRecord(int(cursor.lastrowid), label, created_at), False
+        return UnitRecord(
+            int(cursor.lastrowid), selected_property_id, label, created_at
+        ), False
 
     @staticmethod
     def _resolve_payer(
@@ -325,27 +369,62 @@ class SQLiteRentalRepository:
 
     def _initialize_schema(self) -> None:
         with self._connect() as connection:
-            create_rental_schema(connection)
+            tables = {
+                str(row[0])
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master "
+                    "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+                )
+            }
+            if "units" in tables:
+                return
+            if tables and "properties" not in tables:
+                create_rental_v4_schema(connection)
+            else:
+                create_rental_schema(connection)
 
-    def create_unit(self, label: str) -> UnitRecord:
+    def create_unit(
+        self, property_id: int | str, label: str | None = None
+    ) -> UnitRecord:
         created_at = datetime.now(UTC).isoformat()
         with self._connect() as connection:
+            columns = {
+                str(row[1]) for row in connection.execute("PRAGMA table_info(units)")
+            }
+            if "property_id" not in columns:
+                if label is not None:
+                    raise TypeError("Legacy unit creation accepts only a label.")
+                legacy_label = str(property_id)
+                cursor = connection.execute(
+                    "INSERT INTO units (label, created_at) VALUES (?, ?)",
+                    (legacy_label, created_at),
+                )
+                return UnitRecord(int(cursor.lastrowid), 0, legacy_label, created_at)
+            if label is None:
+                raise TypeError("Current unit creation requires property_id and label.")
             cursor = connection.execute(
-                "INSERT INTO units (label, created_at) VALUES (?, ?)",
-                (label, created_at),
+                "INSERT INTO units (property_id, label, created_at) VALUES (?, ?, ?)",
+                (property_id, label, created_at),
             )
             unit_id = int(cursor.lastrowid)
-        return UnitRecord(unit_id, label, created_at)
+        return UnitRecord(unit_id, int(property_id), label, created_at)
+
+    def property_exists(self, property_id: int) -> bool:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT 1 FROM properties WHERE id = ?", (property_id,)
+            ).fetchone()
+        return row is not None
 
     def get_unit(self, unit_id: int) -> UnitRecord | None:
         with self._connect() as connection:
             row = connection.execute("SELECT * FROM units WHERE id = ?", (unit_id,)).fetchone()
-        return UnitRecord(**dict(row)) if row else None
+        return _unit_record(row) if row else None
 
     def list_units(self) -> list[UnitRecord]:
         with self._connect() as connection:
             rows = connection.execute("SELECT * FROM units ORDER BY id").fetchall()
-        return [UnitRecord(**dict(row)) for row in rows]
+        return [_unit_record(row) for row in rows]
 
     def create_rent_account(
         self,

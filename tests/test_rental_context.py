@@ -2,6 +2,7 @@ from datetime import date
 
 from autorentledger.rental import UnitContext
 from autorentledger.storage import SQLiteObligationRepository, SQLiteRentalRepository
+from tests.property_helpers import create_test_unit
 
 
 def test_unit_context_carries_the_existing_unit_identity():
@@ -15,7 +16,7 @@ def test_rental_summaries_share_unit_context_and_flat_compatibility(tmp_path):
     database_path = tmp_path / "unit-context.sqlite3"
     rentals = SQLiteRentalRepository(database_path)
     obligations = SQLiteObligationRepository(database_path)
-    unit = rentals.create_unit("Synthetic Unit")
+    unit = create_test_unit(rentals, "Synthetic Unit")
     account = rentals.create_rent_account(unit.id, "Synthetic Household", None, None)
     obligation = obligations.create(
         account.id,
@@ -42,8 +43,8 @@ def test_rental_summaries_share_unit_context_and_flat_compatibility(tmp_path):
 def test_unit_context_does_not_conflate_distinct_units(tmp_path):
     database_path = tmp_path / "distinct-unit-contexts.sqlite3"
     rentals = SQLiteRentalRepository(database_path)
-    first = rentals.create_unit("Synthetic Unit A")
-    second = rentals.create_unit("Synthetic Unit B")
+    first = create_test_unit(rentals, "Synthetic Unit A")
+    second = create_test_unit(rentals, "Synthetic Unit B")
     rentals.create_rent_account(first.id, "First Household", None, None)
     rentals.create_rent_account(second.id, "Second Household", None, None)
 

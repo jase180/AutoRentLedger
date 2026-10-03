@@ -46,9 +46,24 @@ def register_commands(subparsers) -> None:
     )
     unresolved.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
 
+    property_parser = subparsers.add_parser("property", help="manage rental properties")
+    property_commands = property_parser.add_subparsers(
+        dest="property_command", required=True
+    )
+    property_add = property_commands.add_parser("add", help="create a property")
+    property_add.add_argument("display_name")
+    property_add.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+    property_list = property_commands.add_parser("list", help="list properties")
+    property_list.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+    property_rename = property_commands.add_parser("rename", help="rename a property")
+    property_rename.add_argument("property_id", type=int)
+    property_rename.add_argument("display_name")
+    property_rename.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
     unit = subparsers.add_parser("unit", help="manage rental units")
     unit_commands = unit.add_subparsers(dest="unit_command", required=True)
     unit_add = unit_commands.add_parser("add", help="create a unit")
+    unit_add.add_argument("--property", type=int, required=True)
     unit_add.add_argument("label")
     unit_add.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
 

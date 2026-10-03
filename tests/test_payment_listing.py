@@ -20,6 +20,7 @@ from autorentledger.storage import (
     SQLiteRentalRepository,
 )
 from autorentledger.storage.migrations import upgrade_database
+from tests.property_helpers import create_test_unit
 
 
 def create_fixture(tmp_path):
@@ -70,7 +71,7 @@ def test_listing_composes_exact_aliases_allocations_dates_and_stable_order(tmp_p
     second = add_payment(raws, payments, 2, "UNKNOWN SENDER", 67500, None)
     payer = payers.create_payer("Alex Example")
     payers.add_alias(payer.id, "ALEX EXAMPLE", normalize_alias("ALEX EXAMPLE"))
-    unit = rentals.create_unit("Unit A")
+    unit = create_test_unit(rentals, "Unit A")
     account = rentals.create_rent_account(unit.id, "Synthetic Household", None, None)
     october = obligations.create(account.id, "2026-10", 100000, date(2026, 10, 1))
     allocations.create_checked(first.id, october.id, 100000)
@@ -91,7 +92,7 @@ def test_listing_composes_exact_aliases_allocations_dates_and_stable_order(tmp_p
     assert all(record.provider == "synthetic_provider" for record in records)
 
     with sqlite3.connect(database_path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 13
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 14
 
 
 def test_listing_identity_changes_dynamically_without_changing_payment(tmp_path):
@@ -111,7 +112,7 @@ def test_listing_identity_changes_dynamically_without_changing_payment(tmp_path)
 def test_listing_rejects_payment_allocation_overage(tmp_path):
     database_path, raws, payments, _, rentals, obligations, _, listing = create_fixture(tmp_path)
     payment = add_payment(raws, payments, 1, "ALEX EXAMPLE", 10000, None)
-    unit = rentals.create_unit("Unit A")
+    unit = create_test_unit(rentals, "Unit A")
     account = rentals.create_rent_account(unit.id, "Synthetic Household", None, None)
     obligation = obligations.create(account.id, "2026-09", 20000, date(2026, 9, 1))
     with sqlite3.connect(database_path) as connection:

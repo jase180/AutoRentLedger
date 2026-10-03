@@ -11,7 +11,7 @@ from pathlib import Path
 
 from autorentledger.parsing.version import LEGACY_UNVERSIONED_PARSER_VERSION
 
-CURRENT_SCHEMA_VERSION = 13
+CURRENT_SCHEMA_VERSION = 14
 
 RAW_EMAILS_SQL = """
     CREATE TABLE IF NOT EXISTS raw_emails (
@@ -196,11 +196,32 @@ PAYER_ALIASES_SQL = """
     )
 """
 
-UNITS_SQL = """
+PROPERTIES_SQL = """
+    CREATE TABLE IF NOT EXISTS properties (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        display_name TEXT NOT NULL CHECK (length(trim(display_name)) > 0),
+        created_at TEXT NOT NULL
+    )
+"""
+
+UNITS_V13_SQL = """
     CREATE TABLE IF NOT EXISTS units (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         label TEXT NOT NULL UNIQUE CHECK (length(trim(label)) > 0),
         created_at TEXT NOT NULL
+    )
+"""
+
+UNITS_SQL = """
+    CREATE TABLE IF NOT EXISTS units (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        property_id INTEGER NOT NULL,
+        label TEXT NOT NULL CHECK (length(trim(label)) > 0),
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (property_id)
+            REFERENCES properties(id)
+            ON DELETE RESTRICT,
+        UNIQUE (property_id, label)
     )
 """
 
@@ -342,10 +363,11 @@ EXPECTED_COLUMNS: dict[str, frozenset[str]] = {
         {"id", "payment_event_id", "reason", "created_at"}
     ),
     "payers": frozenset({"id", "display_name", "created_at"}),
+    "properties": frozenset({"id", "display_name", "created_at"}),
     "payer_aliases": frozenset(
         {"id", "payer_id", "alias", "normalized_alias", "created_at"}
     ),
-    "units": frozenset({"id", "label", "created_at"}),
+    "units": frozenset({"id", "property_id", "label", "created_at"}),
     "rent_accounts": frozenset(
         {"id", "unit_id", "display_name", "active_from", "active_to", "created_at"}
     ),
@@ -371,7 +393,7 @@ EXPECTED_COLUMNS: dict[str, frozenset[str]] = {
 
 PRE_LATE_FEE_TABLES = frozenset(
     set(EXPECTED_COLUMNS)
-    - {"late_fee_charges", "late_fee_voids", "late_fee_allocations"}
+    - {"properties", "late_fee_charges", "late_fee_voids", "late_fee_allocations"}
 )
 
 TABLES_BY_VERSION: dict[int, frozenset[str]] = {
@@ -432,8 +454,9 @@ TABLES_BY_VERSION: dict[int, frozenset[str]] = {
     ),
     10: frozenset(set(PRE_LATE_FEE_TABLES) - {"gmail_payment_voids"}),
     11: PRE_LATE_FEE_TABLES,
-    12: frozenset(set(EXPECTED_COLUMNS) - {"late_fee_allocations"}),
-    13: frozenset(EXPECTED_COLUMNS),
+    12: frozenset(set(EXPECTED_COLUMNS) - {"properties", "late_fee_allocations"}),
+    13: frozenset(set(EXPECTED_COLUMNS) - {"properties"}),
+    14: frozenset(EXPECTED_COLUMNS),
 }
 
 PAYMENT_EVENT_COLUMNS_V7 = frozenset(
@@ -518,7 +541,15 @@ def create_payer_schema(connection: sqlite3.Connection) -> None:
 
 
 def create_rental_schema(connection: sqlite3.Connection) -> None:
+    connection.execute(PROPERTIES_SQL)
     connection.execute(UNITS_SQL)
+    connection.execute(RENT_ACCOUNTS_SQL)
+    connection.execute(RENT_ACCOUNT_PAYERS_SQL)
+
+
+def create_rental_v4_schema(connection: sqlite3.Connection) -> None:
+    """Create the historical rental schema used by migrations 4 through 13."""
+    connection.execute(UNITS_V13_SQL)
     connection.execute(RENT_ACCOUNTS_SQL)
     connection.execute(RENT_ACCOUNT_PAYERS_SQL)
 
@@ -605,11 +636,42 @@ def add_late_fee_allocations(connection: sqlite3.Connection) -> None:
     )
 
 
+def add_properties(connection: sqlite3.Connection) -> None:
+    """Place the legacy unit namespace under one Property without changing IDs."""
+    connection.execute(PROPERTIES_SQL)
+    property_id: int | None = None
+    if connection.execute("SELECT 1 FROM units LIMIT 1").fetchone() is not None:
+        cursor = connection.execute(
+            "INSERT INTO properties (display_name, created_at) VALUES (?, ?)",
+            ("Default Property", datetime.now(UTC).isoformat()),
+        )
+        property_id = int(cursor.lastrowid)
+
+    # Prevent ALTER TABLE from rewriting rent_accounts.unit_id to reference
+    # the temporary legacy table name. The whole operation remains inside the
+    # caller's BEGIN IMMEDIATE transaction.
+    connection.execute("PRAGMA legacy_alter_table = ON")
+    connection.execute("ALTER TABLE units RENAME TO units_v13")
+    connection.execute(UNITS_SQL)
+    if property_id is not None:
+        connection.execute(
+            """
+            INSERT INTO units (id, property_id, label, created_at)
+            SELECT id, ?, label, created_at
+            FROM units_v13
+            ORDER BY id
+            """,
+            (property_id,),
+        )
+    connection.execute("DROP TABLE units_v13")
+    connection.execute("PRAGMA legacy_alter_table = OFF")
+
+
 MIGRATIONS: dict[int, Migration] = {
     1: create_raw_email_schema,
     2: create_payment_event_v2_schema,
     3: create_payer_schema,
-    4: create_rental_schema,
+    4: create_rental_v4_schema,
     5: create_obligation_schema,
     6: create_allocation_schema,
     7: create_rent_schedule_schema,
@@ -619,6 +681,7 @@ MIGRATIONS: dict[int, Migration] = {
     11: add_gmail_payment_voids,
     12: add_late_fee_charges,
     13: add_late_fee_allocations,
+    14: add_properties,
 }
 
 
@@ -694,7 +757,10 @@ def upgrade_database(
     database_path.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(database_path, isolation_level=None)
     connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA foreign_keys = ON")
+    # SQLite cannot change foreign-key enforcement inside a transaction. Keep
+    # it disabled only while the atomic migration rebuilds referenced tables,
+    # then require an explicit foreign_key_check before commit and re-enable it.
+    connection.execute("PRAGMA foreign_keys = OFF")
     try:
         connection.execute("BEGIN IMMEDIATE")
         reported = _user_version(connection)
@@ -722,9 +788,11 @@ def upgrade_database(
         if integrity != "ok":
             raise MigrationError(f"Database integrity check failed: {integrity}")
         connection.execute("COMMIT")
+        connection.execute("PRAGMA foreign_keys = ON")
     except Exception as error:
         if connection.in_transaction:
             connection.execute("ROLLBACK")
+        connection.execute("PRAGMA foreign_keys = ON")
         if isinstance(error, DatabaseSchemaError):
             raise
         raise MigrationError(f"Database upgrade failed: {error}") from error
@@ -778,6 +846,8 @@ def _known_table_columns_match(
 
 
 def _expected_columns(table: str, version: int) -> frozenset[str]:
+    if table == "units" and version < 14:
+        return frozenset({"id", "label", "created_at"})
     if table == "payment_events" and version < 8:
         return PAYMENT_EVENT_COLUMNS_V7
     if table == "payment_events" and version < 9:
@@ -801,6 +871,42 @@ def _validate_schema_matches_version(
             f"unexpected: {unexpected}."
         )
     _validate_known_table_columns(connection, known_tables, version)
+    if version == 14:
+        _validate_v14_constraints(connection)
+
+
+def _validate_v14_constraints(connection: sqlite3.Connection) -> None:
+    unit_columns = {
+        str(row[1]): row for row in connection.execute("PRAGMA table_info(units)")
+    }
+    if int(unit_columns["property_id"][3]) != 1:
+        raise LegacySchemaDetectionError(
+            "Table units.property_id must be NOT NULL in schema version 14."
+        )
+    foreign_keys = connection.execute("PRAGMA foreign_key_list(units)").fetchall()
+    if not any(
+        str(row[2]) == "properties"
+        and str(row[3]) == "property_id"
+        and str(row[4]) == "id"
+        and str(row[6]).upper() == "RESTRICT"
+        for row in foreign_keys
+    ):
+        raise LegacySchemaDetectionError(
+            "Table units.property_id must reference properties(id) ON DELETE RESTRICT."
+        )
+    unique_indexes: set[tuple[str, ...]] = set()
+    for index in connection.execute("PRAGMA index_list(units)"):
+        if int(index[2]) != 1:
+            continue
+        columns = tuple(
+            str(row[2])
+            for row in connection.execute(f'PRAGMA index_info("{index[1]}")')
+        )
+        unique_indexes.add(columns)
+    if ("property_id", "label") not in unique_indexes or ("label",) in unique_indexes:
+        raise LegacySchemaDetectionError(
+            "Table units must uniquely constrain (property_id, label), not label globally."
+        )
 
 
 def _validate_version(version: int) -> None:

@@ -20,6 +20,7 @@ from autorentledger.storage import (
     SQLiteRawEmailRepository,
     SQLiteRentalRepository,
 )
+from tests.property_helpers import create_test_unit
 
 
 def create_fixture(tmp_path, payment_amount=150000, obligation_amount=135000):
@@ -32,7 +33,7 @@ def create_fixture(tmp_path, payment_amount=150000, obligation_amount=135000):
     allocations = SQLiteAllocationRepository(database_path)
     payer = payers.create_payer("Alex Example")
     payers.add_alias(payer.id, "ALEX EXAMPLE", normalize_alias("ALEX EXAMPLE"))
-    unit = rentals.create_unit("Unit A")
+    unit = create_test_unit(rentals, "Unit A")
     account = rentals.create_rent_account(unit.id, "Synthetic Household", None, None)
     raws.insert(
         EmailMessageSummary(
@@ -110,7 +111,7 @@ def test_service_reports_duplicate_and_both_remaining_limits(tmp_path):
         PaymentNotification("synthetic_provider", "Morgan Example", 100000, None, None),
     )
     second_payment = payments.get_by_raw_email_id(second_raw.id)
-    second_unit = rentals.create_unit("Unit B")
+    second_unit = create_test_unit(rentals, "Unit B")
     second_account = rentals.create_rent_account(
         second_unit.id, "Example Household", None, None
     )

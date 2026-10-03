@@ -16,6 +16,7 @@ from autorentledger.storage import (
     SQLiteRentScheduleRepository,
 )
 from autorentledger.storage.migrations import CURRENT_SCHEMA_VERSION, upgrade_database
+from tests.property_helpers import create_test_unit
 
 
 def empty_sync_result() -> SyncResult:
@@ -40,7 +41,7 @@ def create_account_with_schedule(
     due_day=5,
 ):
     rentals = SQLiteRentalRepository(database_path)
-    unit = rentals.create_unit(label)
+    unit = create_test_unit(rentals, label)
     account = rentals.create_rent_account(
         unit.id,
         name,
@@ -102,7 +103,7 @@ def test_daily_creates_current_month_once_and_refreshes_attention(tmp_path):
     with sqlite3.connect(database_path) as connection:
         assert connection.execute("SELECT COUNT(*) FROM payment_allocations").fetchone()[0] == 0
         assert connection.execute("SELECT COUNT(*) FROM late_fee_charges").fetchone()[0] == 0
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION == 13
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION == 14
 
 
 def test_daily_month_rollover_creates_only_each_current_month(tmp_path):

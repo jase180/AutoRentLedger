@@ -28,6 +28,7 @@ from autorentledger.storage import (
     SQLiteSuggestionRepository,
 )
 from autorentledger.storage.migrations import CURRENT_SCHEMA_VERSION, MIGRATIONS, upgrade_database
+from tests.property_helpers import create_test_unit
 
 
 class FakeEmailSource:
@@ -223,7 +224,7 @@ def test_review_and_actionable_suggestion_use_canonical_current_state(tmp_path):
     rentals = SQLiteRentalRepository(database_path)
     obligations = SQLiteObligationRepository(database_path)
     allocations = SQLiteAllocationRepository(database_path)
-    unit = rentals.create_unit("Unit A")
+    unit = create_test_unit(rentals, "Unit A")
     account = rentals.create_rent_account(unit.id, "Synthetic Household", None, None)
     payer = payers.create_payer("Alex Example")
     payers.add_alias(payer.id, "ALEX EXAMPLE", normalize_alias("ALEX EXAMPLE"))
@@ -273,7 +274,7 @@ def test_ambiguous_obligations_are_not_actionable(tmp_path):
     payers = SQLitePayerRepository(database_path)
     rentals = SQLiteRentalRepository(database_path)
     obligations = SQLiteObligationRepository(database_path)
-    unit = rentals.create_unit("Unit A")
+    unit = create_test_unit(rentals, "Unit A")
     account = rentals.create_rent_account(unit.id, "Synthetic Household", None, None)
     payer = payers.create_payer("Alex Example")
     payers.add_alias(payer.id, "ALEX EXAMPLE", normalize_alias("ALEX EXAMPLE"))
@@ -296,7 +297,7 @@ def test_sync_write_boundary_excludes_accounting_configuration_and_generation(tm
     obligations = SQLiteObligationRepository(database_path)
     allocations = SQLiteAllocationRepository(database_path)
     schedules = SQLiteRentScheduleRepository(database_path)
-    unit = rentals.create_unit("Unit A")
+    unit = create_test_unit(rentals, "Unit A")
     account = rentals.create_rent_account(unit.id, "Synthetic Household", None, None)
     payer = payers.create_payer("Alex Example")
     payers.add_alias(payer.id, "ALEX EXAMPLE", normalize_alias("ALEX EXAMPLE"))
@@ -323,7 +324,7 @@ def test_sync_write_boundary_excludes_accounting_configuration_and_generation(tm
     assert len(result.actionable_suggestions) == 1
     assert table_snapshot(database_path, protected_tables) == before
     assert schema_snapshot(database_path) == before_schema
-    assert before_schema[0] == CURRENT_SCHEMA_VERSION == 13
+    assert before_schema[0] == CURRENT_SCHEMA_VERSION == 14
     assert obligations.get_for_account_period(account.id, "2026-10") is None
     assert allocations.list_summaries() == []
     assert not any("sync" in table for table in before_schema[1])

@@ -23,6 +23,7 @@ from autorentledger.storage import (
     SQLiteReconciliationRepository,
     SQLiteRentalRepository,
 )
+from tests.property_helpers import create_test_unit
 
 
 def create_fixture(tmp_path):
@@ -37,8 +38,8 @@ def create_fixture(tmp_path):
 
     payer = payers.create_payer("Alex Example")
     payers.add_alias(payer.id, "ALEX EXAMPLE", normalize_alias("ALEX EXAMPLE"))
-    unit_a = rentals.create_unit("Unit A")
-    unit_b = rentals.create_unit("Unit B")
+    unit_a = create_test_unit(rentals, "Unit A")
+    unit_b = create_test_unit(rentals, "Unit B")
     account_a = rentals.create_rent_account(
         unit_a.id, "Synthetic Household", None, None
     )

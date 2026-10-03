@@ -45,6 +45,7 @@ from autorentledger.storage.migrations import (
 )
 from autorentledger.web.app import create_app
 from autorentledger.web.auth import WebAuthConfig
+from tests.property_helpers import create_test_unit
 
 
 def snapshot(path):
@@ -60,9 +61,13 @@ def snapshot(path):
         return connection.execute("PRAGMA user_version").fetchone()[0], schema, rows
 
 
-def populate(path):
+def populate(path, *, legacy=False):
     rentals = SQLiteRentalRepository(path)
-    unit = rentals.create_unit("Synthetic Unit")
+    unit = (
+        rentals.create_unit("Synthetic Unit")
+        if legacy
+        else create_test_unit(rentals, "Synthetic Unit")
+    )
     account = rentals.create_rent_account(unit.id, "Synthetic Household", None, None)
     obligation = SQLiteObligationRepository(path).create(
         account.id, "2026-05", 135000, date(2026, 5, 5)
@@ -350,7 +355,7 @@ def create_v11(path):
         for version in range(1, 12):
             MIGRATIONS[version](connection)
         connection.execute("PRAGMA user_version = 11")
-    _, obligation = populate(path)
+    _, obligation = populate(path, legacy=True)
     payment = create_manual_payment(
         SQLiteManualPaymentRepository(path), "Synthetic Sender", "1350", "2026-05-03"
     ).payment_event
@@ -389,14 +394,20 @@ def test_v11_to_current_adds_fee_tables_and_preserves_all_old_data(tmp_path):
     path = tmp_path / "v11.sqlite3"
     create_v11(path)
     before = snapshot(path)
+    legacy_unit_rows = before[2].pop("units")
+    before[2].pop("sqlite_sequence", None)
     result = upgrade_database(path)
     after = snapshot(path)
-    assert (result.from_version, result.to_version) == (11, 13)
-    assert after[0] == CURRENT_SCHEMA_VERSION == 13
-    assert all(entry in after[1] for entry in before[1])
+    assert (result.from_version, result.to_version) == (11, 14)
+    assert after[0] == CURRENT_SCHEMA_VERSION == 14
     assert all(after[2][name] == rows for name, rows in before[2].items())
+    assert [
+        (row[0], row[2], row[3]) for row in after[2]["units"]
+    ] == [
+        (row[0], row[1], row[2]) for row in legacy_unit_rows
+    ]
     assert set(after[2]) - set(before[2]) == {
-        "late_fee_charges", "late_fee_voids", "late_fee_allocations"
+        "sqlite_sequence", "properties", "units", "late_fee_charges", "late_fee_voids", "late_fee_allocations"
     }
     with sqlite3.connect(path) as connection:
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []

@@ -53,6 +53,7 @@ from autorentledger.storage.migrations import CURRENT_SCHEMA_VERSION, upgrade_da
 from autorentledger.suggestions import find_allocation_suggestions
 from autorentledger.web import WebAuthConfig, create_app
 from autorentledger.web.composition import build_web_payments
+from tests.property_helpers import create_test_unit
 
 
 def create_database(tmp_path):
@@ -291,8 +292,8 @@ def test_manual_add_cli_output_duplicate_override_and_schema_guard(tmp_path, cap
     assert main([*args, "--confirm-duplicate"]) == 0
     assert table_count(database_path, "payment_events") == 2
     with sqlite3.connect(database_path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 13
-    assert CURRENT_SCHEMA_VERSION == 13
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 14
+    assert CURRENT_SCHEMA_VERSION == 14
 
 
 def test_sync_and_processing_do_not_modify_manual_evidence(tmp_path):
@@ -356,7 +357,7 @@ def test_manual_payment_flows_through_existing_ledger_read_models(tmp_path):
         payer.id, "Synthetic Tenant", normalize_alias("Synthetic Tenant")
     )
     rentals = SQLiteRentalRepository(database_path)
-    unit = rentals.create_unit("Synthetic Unit")
+    unit = create_test_unit(rentals, "Synthetic Unit")
     account = rentals.create_rent_account(
         unit.id, "Synthetic Household", None, None
     )
@@ -618,7 +619,7 @@ def test_correction_duplicate_guard_excludes_self_and_allows_confirmation(tmp_pa
 
 def _add_obligation_for_manual_payment(database_path, amount_cents=145000):
     rentals = SQLiteRentalRepository(database_path)
-    unit = rentals.create_unit("Synthetic Correction Unit")
+    unit = create_test_unit(rentals, "Synthetic Correction Unit")
     account = rentals.create_rent_account(
         unit.id, "Synthetic Correction Household", None, None
     )
