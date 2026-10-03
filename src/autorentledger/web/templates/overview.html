@@ -20,8 +20,8 @@
     <h2 id="monthly-rent-heading">Monthly rent</h2>
     <div class="summary-grid">
       <article class="summary-card"><span>Owed</span><strong>{{ overview.rent.owed_cents|money }}</strong></article>
-      <article class="summary-card"><span>Allocated</span><strong>{{ overview.rent.allocated_cents|money }}</strong></article>
-      <article class="summary-card"><span>Remaining</span><strong>{{ overview.rent.remaining_cents|money }}</strong></article>
+      <article class="summary-card summary-card-paid"><span>Paid</span><strong>{{ overview.rent.allocated_cents|money }}</strong></article>
+      <article class="summary-card{% if overview.rent.remaining_cents > 0 %} summary-card-open{% endif %}"><span>Remaining</span><strong>{{ overview.rent.remaining_cents|money }}</strong></article>
       <article class="summary-card">
         <span>Collected</span>
         <strong>{% if collected is none %}N/A{% else %}{{ "%.1f"|format(collected) }}%{% endif %}</strong>
@@ -36,43 +36,51 @@
         {% if collected is none %}0{% else %}{{ "%.1f"|format(collected) }}{% endif %}%
       </progress>
     </div>
-    <dl class="count-strip">
+    <dl class="count-strip rent-counts">
       <div><dt>Accounts</dt><dd>{{ overview.rent.total_obligation_count }}</dd></div>
-      <div><dt>Paid</dt><dd>{{ overview.rent.paid_count }}</dd></div>
-      <div><dt>Partial</dt><dd>{{ overview.rent.partial_count }}</dd></div>
-      <div><dt>Unpaid</dt><dd>{{ overview.rent.unpaid_count }}</dd></div>
+      <div class="count-paid"><dt>Paid</dt><dd>{{ overview.rent.paid_count }}</dd></div>
+      <div class="count-partial"><dt>Partial</dt><dd>{{ overview.rent.partial_count }}</dd></div>
+      <div class="count-unpaid"><dt>Unpaid</dt><dd>{{ overview.rent.unpaid_count }}</dd></div>
     </dl>
   </section>
 
-  <section aria-labelledby="account-status-heading">
+  <section class="rent-status-section" aria-labelledby="rent-status-heading">
     <div class="section-heading-row">
-      <h2 id="account-status-heading">Account status</h2>
+      <div>
+        <p class="eyebrow">Monthly obligations</p>
+        <h2 id="rent-status-heading">Rent status</h2>
+        {% if overview.rent.total_obligation_count %}
+          <p class="rent-status-headline">{{ overview.rent.paid_count }} of {{ overview.rent.total_obligation_count }} rent obligations paid</p>
+        {% endif %}
+      </div>
       <a href="{{ url_for('web.obligations', period=overview.period) }}">View obligations</a>
     </div>
     {% if overview.accounts %}
-      <div class="table-wrap">
+      <div class="table-wrap rent-status-board">
         <table class="rent-status-table">
           <thead><tr><th>Unit</th><th>Renter / Account</th><th class="money">Rent</th><th class="money">Paid</th><th class="money">Balance</th><th>Last payment</th><th>Status</th></tr></thead>
           <tbody>
             {% for account in overview.accounts %}
               <tr class="{% if account.status.value == 'PAID' %}account-row-paid{% else %}account-row-open{% endif %}">
-                <td>{{ account.unit_label }}</td>
-                <td>
+                <td class="rent-unit" data-label="Unit"><strong>{{ account.unit_label }}</strong></td>
+                <td class="rent-account" data-label="Renter / Account">
                   <a href="{{ url_for('web.rent_account_detail', rent_account_id=account.rent_account_id) }}#obligation-{{ account.rent_obligation_id }}">{{ account.account_display_name }}</a>
-                  <span class="table-secondary">{% if account.payer_names %}{{ account.payer_names|join(', ') }}{% else %}No linked payer{% endif %}</span>
+                  {% if account.payer_names|length != 1 or account.payer_names[0] != account.account_display_name %}
+                    <span class="table-secondary">{% if account.payer_names %}{{ account.payer_names|join(', ') }}{% else %}No linked payer{% endif %}</span>
+                  {% endif %}
                 </td>
-                <td class="money">{{ account.owed_cents|money }}<span class="table-secondary">Due {{ account.due_date|short_date }}</span></td>
-                <td class="money">{{ account.allocated_cents|money }}</td>
-                <td class="money">{{ account.remaining_cents|money }}</td>
-                <td>
+                <td class="money rent-amount" data-label="Rent"><strong>{{ account.owed_cents|money }}</strong><span class="table-secondary">Due {{ account.due_date|short_date }}</span></td>
+                <td class="money rent-paid" data-label="Paid"><strong>{{ account.allocated_cents|money }}</strong></td>
+                <td class="money rent-balance {% if account.remaining_cents == 0 %}balance-settled{% else %}balance-due{% endif %}" data-label="Balance"><strong>{{ account.remaining_cents|money }}</strong></td>
+                <td class="rent-last-payment" data-label="Last payment">
                   {% if account.last_payment_event_id is not none %}
                     <a href="{{ url_for('web.payment_detail', payment_event_id=account.last_payment_event_id) }}">{% if account.last_payment_date %}{{ account.last_payment_date|short_date }}{% else %}Date unknown{% endif %}</a>
                     · {{ account.last_payment_rent_cents|money }}
                   {% else %}
-                    <span class="muted">—</span>
+                    <span class="muted">No rent payment</span>
                   {% endif %}
                 </td>
-                <td><span class="status status-{{ account.status.value|lower }}">{{ account.status.value }}</span></td>
+                <td class="rent-status" data-label="Status"><span class="status status-{{ account.status.value|lower }}"><span aria-hidden="true">{% if account.status.value == 'PAID' %}✓{% else %}!{% endif %}</span> {{ account.status.value }}</span></td>
               </tr>
             {% endfor %}
           </tbody>

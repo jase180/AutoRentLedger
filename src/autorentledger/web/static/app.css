@@ -54,15 +54,35 @@ table { width: 100%; border-collapse: collapse; }
 th, td { padding: .75rem .85rem; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
 th { color: var(--muted); background: #f9fafb; font-size: .75rem; letter-spacing: .04em; text-transform: uppercase; }
 tbody tr:last-child td { border-bottom: 0; }
-.rent-status-table tbody tr.account-row-paid td { background: #edf7f2; }
-.rent-status-table tbody tr.account-row-open td { background: #fff1f1; }
+.summary-card-paid { border-color: #8fc7ae; background: #edf8f2; }
+.summary-card-paid strong, .count-paid dd { color: #11633f; }
+.summary-card-open { border-color: #e5a4a4; background: #fff0f0; }
+.summary-card-open strong, .count-unpaid dd { color: #9d2929; }
+.count-partial dd { color: #8a5200; }
+.rent-status-section { margin-top: 3rem; }
+.rent-status-section .section-heading-row { align-items: end; margin-bottom: 1rem; }
+.rent-status-section h2 { margin: .15rem 0 0; font-size: 1.55rem; }
+.rent-status-headline { margin: .25rem 0 0; color: var(--muted); font-weight: 650; }
+.rent-status-board { border-color: #b8c0c8; box-shadow: 0 8px 24px rgb(23 32 42 / 8%); }
+.rent-status-table tbody tr.account-row-paid td { background: #ddf1e6; }
+.rent-status-table tbody tr.account-row-open td { background: #fbe2e2; }
+.rent-status-table tbody tr.account-row-paid td:first-child { border-left: 5px solid #20835b; }
+.rent-status-table tbody tr.account-row-open td:first-child { border-left: 5px solid #c83f3f; }
+.rent-status-table tbody tr:hover td { filter: brightness(.985); }
 .rent-status-table a { color: var(--accent); font-weight: 700; }
+.rent-status-table th { padding-block: .85rem; background: #edf0f3; color: #3d4852; }
+.rent-status-table td { padding-block: .9rem; }
+.rent-unit strong { color: #14212b; font-size: 1.15rem; letter-spacing: .01em; }
+.rent-account > a { font-size: 1rem; }
+.rent-amount strong, .rent-paid strong, .rent-balance strong { font-size: 1.03rem; }
+.balance-settled strong { color: #11633f; }
+.balance-due strong { color: #a52222; font-size: 1.12rem; }
 .table-secondary { display: block; margin-top: .15rem; color: var(--muted); font-size: .8rem; font-weight: 500; }
 .money { text-align: right; font-variant-numeric: tabular-nums; }
 .status { display: inline-block; border: 1px solid currentColor; border-radius: 999px; padding: .15rem .55rem; font-size: .75rem; font-weight: 800; }
-.status-paid { color: #175c4c; background: var(--accent-soft); }
-.status-partial { color: #7a4b00; background: var(--warning-soft); }
-.status-unpaid { color: #8d2d2d; background: #fbe9e9; }
+.status-paid { color: #0d5938; background: #c9ead8; }
+.status-partial { color: #714000; background: #ffe3a3; }
+.status-unpaid { color: #8b1e1e; background: #f5bebe; }
 .section-note { margin-top: -.5rem; font-size: .875rem; }
 .panel-list { display: grid; gap: .75rem; }
 .warning-panel, .suggestion-panel { padding: 1rem; }
@@ -126,7 +146,7 @@ code { display: block; width: fit-content; max-width: 100%; margin: .35rem 0; pa
 .plain-list { margin: 0; padding: 1rem 1rem 1rem 2rem; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
 .muted { color: var(--muted); }
 
-@media (max-width: 760px) {
+@media (max-width: 820px) {
   .page-heading { align-items: stretch; flex-direction: column; }
   .header-inner { flex-wrap: wrap; padding-block: .65rem; }
   .local-label { flex-basis: 100%; }
@@ -136,6 +156,23 @@ code { display: block; width: fit-content; max-width: 100%; margin: .35rem 0; pa
   .review-list { grid-template-columns: 1fr; }
   .site-nav { flex-wrap: wrap; }
   .fact-grid, .compact-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .rent-status-board { overflow: visible; border: 0; box-shadow: none; background: transparent; }
+  .rent-status-table, .rent-status-table tbody { display: block; }
+  .rent-status-table thead { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+  .rent-status-table tbody tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "unit status" "account account" "rent paid" "balance last"; gap: .65rem 1rem; margin-bottom: .85rem; padding: .9rem; border: 1px solid var(--line); border-left-width: 5px; border-radius: 10px; }
+  .rent-status-table tbody tr.account-row-paid { border-left-color: #20835b; background: #ddf1e6; }
+  .rent-status-table tbody tr.account-row-open { border-left-color: #c83f3f; background: #fbe2e2; }
+  .rent-status-table tbody tr td { padding: 0; border: 0; background: transparent; white-space: normal; }
+  .rent-status-table tbody tr.account-row-paid td:first-child, .rent-status-table tbody tr.account-row-open td:first-child { border-left: 0; }
+  .rent-status-table tbody tr.account-row-paid td, .rent-status-table tbody tr.account-row-open td { background: transparent; }
+  .rent-status-table tbody tr td::before { display: block; margin-bottom: .1rem; color: var(--muted); content: attr(data-label); font-size: .68rem; font-weight: 750; letter-spacing: .05em; text-transform: uppercase; }
+  .rent-unit { grid-area: unit; }
+  .rent-account { grid-area: account; }
+  .rent-amount { grid-area: rent; text-align: left; }
+  .rent-paid { grid-area: paid; text-align: right; }
+  .rent-balance { grid-area: balance; text-align: left; }
+  .rent-last-payment { grid-area: last; text-align: right; }
+  .rent-status { grid-area: status; text-align: right; }
 }
 
 @media (max-width: 440px) {

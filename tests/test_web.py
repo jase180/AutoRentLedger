@@ -588,7 +588,7 @@ def test_populated_overview_renders_canonical_semantics_privately_and_read_only(
     assert "SEPTEMBER 2026" in output
     for section in (
         "Monthly rent",
-        "Account status",
+        "Rent status",
         "Payment intake",
         "Current attention",
         "Missing obligations",
@@ -605,15 +605,23 @@ def test_populated_overview_renders_canonical_semantics_privately_and_read_only(
     assert "UNPAID" in output
     assert output.count('class="account-row-paid"') == 1
     assert output.count('class="account-row-open"') == 3
+    assert '<span>Paid</span><strong>$2,700.00</strong>' in output
+    assert "summary-card-paid" in output
+    assert "summary-card-open" in output
     assert "Renter / Account" in output
     assert "Balance" in output
     assert "Last payment" in output
     assert "Suggestion Payer" in output
     assert "No linked payer" in output
-    assert '<span class="muted">—</span>' in output
+    assert "No rent payment" in output
     assert "Due Sep 1" in output
     assert "Sep 10" in output
     assert f'/payments/{facts["latest_paid_payment_id"]}' in output
+    assert "balance-settled" in output
+    assert "balance-due" in output
+    assert "✓</span> PAID" in output
+    assert "!</span> PARTIAL" in output
+    assert "!</span> UNPAID" in output
     assert output.index("Unit A") < output.index("Unit B") < output.index("Unit D")
 
     payment_section = output[output.index("Payment intake") : output.index("Current attention")]
@@ -797,6 +805,7 @@ def test_static_assets_are_local_and_post_routes_do_not_exist(tmp_path):
     assert "https://" not in css.get_data(as_text=True).lower()
     assert ".account-row-paid" in css.get_data(as_text=True)
     assert ".account-row-open" in css.get_data(as_text=True)
+    assert "grid-template-areas" in css.get_data(as_text=True)
     assert client.post("/").status_code == 405
     assert client.post("/overview?period=2026-09").status_code == 405
     assert client.post("/attention").status_code == 405
