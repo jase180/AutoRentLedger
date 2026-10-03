@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+
+{% block title %}Property Cash | AutoRentLedger{% endblock %}
+
+{% block content %}
+  <section class="page-heading">
+    <div>
+      <p class="eyebrow">Derived monthly read model</p>
+      <h1>Property Cash</h1>
+      <p class="section-note">Rent allocations minus active expenses. This is not profit, NOI, taxable income, or cash after debt.</p>
+    </div>
+    <form class="period-form" method="get" action="{{ url_for('web.property_cash') }}">
+      <label>Month<input type="month" name="period" value="{{ portfolio.period }}" required></label>
+      {% if selected %}<input type="hidden" name="property" value="{{ selected.property_id }}">{% endif %}
+      <button type="submit">View</button>
+    </form>
+  </section>
+
+  {% if selected %}
+    <p><a class="back-link" href="{{ url_for('web.property_cash', period=portfolio.period) }}">All Properties</a></p>
+    <h2>{{ selected.property_name }} — {{ portfolio.period|month_heading }}</h2>
+    <section class="summary-grid cash-summary-grid" aria-label="Cash summary">
+      <div class="summary-card"><span>Rent owed</span><strong>{{ selected.rent_owed_cents|money }}</strong></div>
+      <div class="summary-card"><span>Rent collected</span><strong>{{ selected.rent_collected_cents|money }}</strong></div>
+      <div class="summary-card"><span>Operating expenses</span><strong>{{ selected.operating_expense_cents|money }}</strong></div>
+      <div class="summary-card"><span>Capital improvements</span><strong>{{ selected.capital_improvement_cents|money }}</strong></div>
+      <div class="summary-card"><span>Net cash before debt</span><strong>{{ selected.net_cash_before_debt_cents|money }}</strong></div>
+    </section>
+
+    <h2>Rent</h2>
+    {% if selected.rent %}
+      <div class="table-wrap"><table>
+        <thead><tr><th>Property / Unit / Account</th><th class="money">Owed</th><th class="money">Collected</th></tr></thead>
+        <tbody>{% for item in selected.rent %}<tr>
+          <td>{{ item.display_name }}</td><td class="money">{{ item.owed_cents|money }}</td><td class="money">{{ item.collected_cents|money }}</td>
+        </tr>{% endfor %}</tbody>
+      </table></div>
+    {% else %}<p class="empty-state">No rent obligations for this Property and month.</p>{% endif %}
+
+    <h2>Expense category breakdown</h2>
+    {% if selected.operating_categories or selected.capital_improvement_cents %}
+      <div class="table-wrap"><table>
+        <thead><tr><th>Category</th><th class="money">Amount</th></tr></thead>
+        <tbody>
+          {% for item in selected.operating_categories %}<tr><td>{{ item.label }}</td><td class="money">{{ item.amount_cents|money }}</td></tr>{% endfor %}
+          {% if selected.capital_improvement_cents %}<tr><td>Capital Improvement <span class="muted">(separate from operating)</span></td><td class="money">{{ selected.capital_improvement_cents|money }}</td></tr>{% endif %}
+        </tbody>
+      </table></div>
+    {% else %}<p class="empty-state">No active expenses for this Property and month.</p>{% endif %}
+
+    <h2>Active expenses used in this summary</h2>
+    {% if selected.expenses %}
+      <div class="table-wrap"><table>
+        <thead><tr><th>Date</th><th>Property / Unit</th><th>Category</th><th>Vendor</th><th class="money">Amount</th></tr></thead>
+        <tbody>{% for expense in selected.expenses %}<tr>
+          <td><a href="{{ url_for('web.expense_detail', expense_id=expense.expense_id) }}">{{ expense.occurred_on }}</a></td>
+          <td>{{ expense.property_unit_display }}</td><td>{{ expense.category|expense_category }}</td><td>{{ expense.vendor or "-" }}</td><td class="money">{{ expense.amount_cents|money }}</td>
+        </tr>{% endfor %}</tbody>
+      </table></div>
+    {% else %}<p class="empty-state">No active expenses for this Property and month.</p>{% endif %}
+  {% else %}
+    {% if portfolio.properties %}
+      <div class="table-wrap"><table>
+        <thead><tr><th>Property</th><th class="money">Rent owed</th><th class="money">Rent collected</th><th class="money">Operating expenses</th><th class="money">Capital improvements</th><th class="money">Net cash before debt</th></tr></thead>
+        <tbody>{% for item in portfolio.properties %}<tr>
+          <td><a href="{{ url_for('web.property_cash', period=portfolio.period, property=item.property_id) }}">{{ item.property_name }}</a></td>
+          <td class="money">{{ item.rent_owed_cents|money }}</td><td class="money">{{ item.rent_collected_cents|money }}</td><td class="money">{{ item.operating_expense_cents|money }}</td><td class="money">{{ item.capital_improvement_cents|money }}</td><td class="money">{{ item.net_cash_before_debt_cents|money }}</td>
+        </tr>{% endfor %}</tbody>
+      </table></div>
+    {% else %}<p class="empty-state">No Properties found.</p>{% endif %}
+  {% endif %}
+{% endblock %}

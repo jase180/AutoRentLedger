@@ -88,6 +88,22 @@ Expense categories are controlled machine values: `repairs_maintenance`, `utilit
 `legal_professional`, `capital_improvement`, `supplies`, and `other`. Capital improvements remain
 distinct from repairs and maintenance; no depreciation or tax interpretation is performed.
 
+Property Cash Summary is a derived, read-only model over the same canonical facts. It persists no
+snapshots, cached totals, or rollups and leaves the schema at v15. For one Property and month:
+
+- Rent owed is the sum of durable monthly rent obligations. Schedules are not debt.
+- Rent collected is the sum of rent allocations to those obligations. Payment occurrence dates do
+  not select the accounting month.
+- Operating expenses are active expenses whose `occurred_on` is in the month, excluding
+  `capital_improvement`.
+- Capital improvements are active `capital_improvement` expenses for that month.
+- Net cash before debt is collected rent minus operating expenses and capital improvements.
+
+The read model joins Property and Unit names dynamically, retains Property isolation even when Unit
+labels repeat, and exposes rent-account, expense-category, and active-expense breakdowns. It does
+not include late fees, bank activity, security deposits, mortgages, debt service, depreciation, or
+tax semantics. Property Cash is not profit, NOI, taxable income, or cash after debt service.
+
 ## Presentation and orchestration organization
 
 CLI parser registration and handlers are grouped by domain under `src/autorentledger/cli/`, behind

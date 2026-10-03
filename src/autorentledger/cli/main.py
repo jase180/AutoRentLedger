@@ -15,6 +15,7 @@ from autorentledger.cli import (
     obligations,
     operations,
     payments,
+    property_cash,
     reporting,
     review,
     tenancy,
@@ -74,6 +75,7 @@ from autorentledger.cli.payments import (
     run_payment_listing,
     run_payment_rebuild,
 )
+from autorentledger.cli.property_cash import run_property_cash
 from autorentledger.cli.reporting import run_overview, run_report
 from autorentledger.cli.review import run_review
 from autorentledger.cli.tenancy import (
@@ -113,6 +115,7 @@ def build_parser() -> argparse.ArgumentParser:
     tenancy.register_commands(subparsers)
     discovery.register_commands(subparsers)
     expenses.register_commands(subparsers)
+    property_cash.register_commands(subparsers)
     identity_rentals.register_commands(subparsers)
     obligations.register_commands(subparsers)
     allocations.register_commands(subparsers)
@@ -246,6 +249,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             category=args.category,
             include_voided=args.include_voided,
         )
+    if args.command == "property-cash":
+        return run_property_cash(args.database, args.period, args.property_id)
     if args.command == "setup":
         if args.setup_command == "tenancy":
             return run_tenancy_setup(

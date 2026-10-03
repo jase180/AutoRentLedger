@@ -365,8 +365,23 @@ autorentledger expense void 1 --reason "Entered twice"
 
 Expense categories are controlled and discoverable through `expense categories` or the
 `--category` CLI choices. Voiding is audited and retains the original row. The web **Expenses**
-page is read-only, and expenses are deliberately excluded from rent Overview and monthly-report
-totals until a separate property cash-reporting milestone defines those semantics.
+page is read-only, and expenses remain excluded from the rent Overview and monthly report.
+
+## Property Cash
+
+Show the derived monthly summary for every Property or drill into one Property:
+
+```powershell
+autorentledger property-cash --period 2026-10
+autorentledger property-cash --period 2026-10 --property 1
+```
+
+The read-only **Property Cash** web page shows the same monthly facts with rent-account, expense
+category, and active-expense breakdowns. Rent owed comes only from durable obligations; rent
+collected comes from allocations to those obligations, regardless of when the payment occurred.
+Operating expenses exclude Capital Improvement, which remains a separate line. Net cash before
+debt is collected rent minus both expense groups. It is not profit, NOI, taxable income, or cash
+after mortgage/debt service. No summary rows are persisted and the schema remains v15.
 
 The application uses Python, standard-library `sqlite3`, and a small service/repository structure
 under `src/autorentledger/`. Gmail remains behind an email-source adapter; domain and read-model

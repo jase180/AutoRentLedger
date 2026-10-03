@@ -19,6 +19,7 @@ from autorentledger.web.composition.payments import (
     build_web_payment_detail,
     build_web_payments,
 )
+from autorentledger.web.composition.property_cash import build_web_property_cash
 from autorentledger.web.composition.rent_accounts import (
     ContributingPaymentDetail,
     RentAccountDetail,

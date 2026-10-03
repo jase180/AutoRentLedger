@@ -63,6 +63,7 @@ from autorentledger.cli.payments import (
     run_payment_listing,
     run_payment_rebuild,
 )
+from autorentledger.cli.property_cash import run_property_cash
 from autorentledger.cli.reporting import run_overview, run_report
 from autorentledger.cli.review import run_review
 from autorentledger.cli.tenancy import (

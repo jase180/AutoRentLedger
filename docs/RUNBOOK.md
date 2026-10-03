@@ -1063,6 +1063,38 @@ there is no vendor registry, receipt storage, automatic categorization, or tax l
 The browser **Expenses** page and expense detail are read-only. Expenses do not change `daily`,
 rent reconciliation, Overview totals, or the monthly rent report.
 
+## Review monthly Property Cash
+
+List every Property for a month:
+
+```powershell
+autorentledger property-cash --period 2026-10
+```
+
+Inspect one Property with its rent-account, expense-category, and active-expense breakdowns:
+
+```powershell
+autorentledger property-cash --period 2026-10 --property 1
+```
+
+The browser **Property Cash** page is also read-only. Select a month, then choose a Property for the
+detailed breakdown. A Property with no activity appears with zero values.
+
+Interpret the lines precisely:
+
+- **Rent owed** counts actual obligation rows for the selected month. A schedule without an
+  obligation is not owed rent.
+- **Rent collected** counts allocation amounts attached to those obligations. A November payment
+  allocated to October rent counts in October, not November.
+- **Operating expenses** count active expenses by `occurred_on`, excluding Capital Improvement.
+- **Capital improvements** count active `capital_improvement` expenses separately.
+- **Net cash before debt** is collected rent minus operating expenses and capital improvements.
+
+Voided expenses do not count. Negative net cash is valid and is not clamped. This report does not
+include late fees, mortgages, debt service, bank transactions, security deposits, depreciation, or
+tax concepts. It is not profit, NOI, taxable income, or cash after debt service. The report creates
+no stored summary rows and does not alter the rent Overview or monthly rent report.
+
 ## Late fees
 
 Rent obligation != late-fee charge. AutoRentLedger records an explicit owner assessment; it does not

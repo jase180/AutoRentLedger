@@ -9,6 +9,7 @@ from autorentledger.web.routes import (
     obligations,
     overview,
     payments,
+    property_cash,
     rent_accounts,
     root,
 )
@@ -20,6 +21,7 @@ overview.register_routes(web_blueprint)
 attention.register_routes(web_blueprint)
 expenses.register_routes(web_blueprint)
 payments.register_routes(web_blueprint)
+property_cash.register_routes(web_blueprint)
 obligations.register_routes(web_blueprint)
 allocation_plan.register_routes(web_blueprint)
 rent_accounts.register_routes(web_blueprint)

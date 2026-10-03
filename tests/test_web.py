@@ -336,6 +336,7 @@ def test_app_factory_is_side_effect_free_and_registers_auth_and_ledger_routes(tm
         "/overview",
         "/payments",
         "/payments/<int:payment_event_id>",
+            "/property-cash",
         "/rent-accounts/<int:rent_account_id>",
         "/static/<path:filename>",
     }

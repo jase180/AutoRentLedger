@@ -36,6 +36,7 @@ input { display: block; padding: .45rem .65rem; background: var(--surface); }
 button { padding: .45rem .9rem; color: white; background: var(--accent); border-color: var(--accent); cursor: pointer; font-weight: 700; }
 .summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .8rem; }
 .summary-grid.three-up { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.cash-summary-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .summary-card, .collection-progress, .count-strip, .attention-grid, .warning-panel, .suggestion-panel, .error-panel { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
 .summary-card { padding: 1rem; }
 .summary-card span { display: block; color: var(--muted); font-size: .8rem; font-weight: 700; }
@@ -151,7 +152,7 @@ code { display: block; width: fit-content; max-width: 100%; margin: .35rem 0; pa
   .header-inner { flex-wrap: wrap; padding-block: .65rem; }
   .local-label { flex-basis: 100%; }
   .period-form { align-items: stretch; flex-direction: column; }
-  .summary-grid, .summary-grid.three-up { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .summary-grid, .summary-grid.three-up, .cash-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .attention-grid { grid-template-columns: repeat(2, 1fr); }
   .review-list { grid-template-columns: 1fr; }
   .site-nav { flex-wrap: wrap; }
