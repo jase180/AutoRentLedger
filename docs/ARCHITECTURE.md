@@ -87,8 +87,9 @@ thin and authenticated, and the web surface remains inspection-only.
   obligation.
 - Actual obligations state what was owed. Schedules describe recurring terms and can generate a
   missing obligation, but never count as debt or overwrite an existing obligation. `daily` invokes
-  the same canonical generator for the host-local current month only; manual generation remains
-  available for explicit historical or future periods.
+  the canonical `ensure_monthly_rent` operation for the host-local current month only; manual
+  generation remains available for explicit repair/backfill. Effective-dated rent changes create
+  schedule history, and ending a tenancy stops future applicability without deleting history.
 - Rent obligation != late-fee charge. Explicit assessments live in `late_fee_charges`, linked to
   an obligation for context only. Original assessment facts are retained; `late_fee_voids` records
   the waiver/void reason and timestamp atomically with the charge's `voided_at` projection.

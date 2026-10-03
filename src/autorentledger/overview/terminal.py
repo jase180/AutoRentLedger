@@ -79,7 +79,7 @@ def render_owner_overview_terminal(overview: OwnerOverview) -> str:
             _metric("Unpaid obligation", str(overview.attention.unpaid_obligations)),
             _metric("Unparsed email", str(overview.attention.unparsed_emails)),
             "",
-            "MISSING OBLIGATIONS",
+            "MISSING SCHEDULED RENT",
         ]
     )
     if overview.missing_obligations:
@@ -94,8 +94,9 @@ def render_owner_overview_terminal(overview: OwnerOverview) -> str:
             )
         lines.extend(
             [
-                "Run:",
-                f"  autorentledger obligations generate --period {overview.period}",
+                "AutoRentLedger expected these monthly rent charges.",
+                "Run: autorentledger daily",
+                "Or review recurring-rent setup.",
             ]
         )
     else:

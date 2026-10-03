@@ -128,7 +128,26 @@ autorentledger overview --period 2026-09
 The default Gmail query is `subject:zelle`. Override it when necessary with `--query` and limit
 the search with `--max-results`.
 
-## Routine workflow
+## Normal operating workflow
+
+First-time configuration is preview-first and establishes the unit, rent account, payer identity,
+aliases, association, and recurring rent schedule in one reviewed operation:
+
+```powershell
+autorentledger setup tenancy ...
+autorentledger setup tenancy ... --apply
+```
+
+After that, ordinary month-to-month operation is one command:
+
+```powershell
+autorentledger daily
+```
+
+The schedule remains the recurring rule and each obligation remains a durable monthly charge.
+`daily` ensures exactly the current host-local month; it never pre-generates future months.
+
+## Evidence-only workflow
 
 Normal evidence refresh:
 
@@ -149,7 +168,7 @@ positive retention limit with `--keep-backups`. Windows Task Scheduler, cron, or
 scheduler decides when it runs; AutoRentLedger contains no scheduler or daemon. Repeated runs are
 idempotent, and only the host-local current month is generated.
 
-Historical or future obligation generation remains available explicitly:
+Advanced historical/backfill obligation generation remains available explicitly:
 
 ```powershell
 autorentledger obligations generate --period 2026-09 --dry-run
@@ -176,11 +195,11 @@ unparsed Gmail subjects. Possible duplicates are warnings only: the command neve
 voids, or changes payments. It does not infer tenants, units, rent accounts, associations, or
 aliases and writes no configuration or accounting state. Review the evidence first, then use
 `setup tenancy` for confirmed configuration and explicit obligation/allocation commands for
-accounting interpretation.
+accounting interpretation. Current-month rent is maintained by `daily` after setup.
 
 ### Bootstrap one tenancy
 
-Preview a new unit, rent account, payer, aliases, association, and optional schedule in one
+Preview a new unit, rent account, payer, aliases, association, and recurring schedule in one
 deterministic plan:
 
 ```powershell
@@ -198,7 +217,7 @@ Preview is the default and writes nothing. Add `--apply` only after reviewing ea
 action. The command is a convenience wrapper over the existing primitives; it creates no tenant
 model, obligations, payments, or allocations. Payers remain distinct from rent accounts, and
 sender resolution remains exact after conservative alias normalization. See the runbook for new
-and reused-record examples.
+and reused-record examples. After setup, `daily` creates missing current-month rent automatically.
 
 ### Local read-only web view
 
@@ -231,6 +250,8 @@ LAN, Tailscale-IP, and public binding. See the runbook for private Tailscale Ser
 | Open the local read-only browser view | `autorentledger web` |
 | Inventory historical payment evidence before setup | `autorentledger discovery payments` |
 | Preview one guided tenancy setup | `autorentledger setup tenancy ...` |
+| Change recurring rent from a future month | `autorentledger rent change --account ID --amount 1350.00 --effective 2026-11-01` |
+| End recurring rent without deleting history | `autorentledger tenancy end --account ID --active-to 2026-11-30` |
 | Inspect the owner dashboard | `autorentledger overview --period YYYY-MM` |
 | Inspect focused exceptions | `autorentledger review` |
 | List normalized payments | `autorentledger payments` |
@@ -244,7 +265,7 @@ LAN, Tailscale-IP, and public binding. See the runbook for private Tailscale Ser
 | Allocate payment money explicitly | `autorentledger allocation add --payment ID --obligation ID --amount 675.00` |
 | Preview historical allocations | `autorentledger allocation plan --from 2026-05 --to 2026-08` |
 | Apply a fully reviewed historical plan | `autorentledger allocation plan --from 2026-05 --to 2026-08 --apply` |
-| Preview monthly obligation generation | `autorentledger obligations generate --period YYYY-MM --dry-run` |
+| Advanced/backfill monthly rent preview | `autorentledger obligations generate --period YYYY-MM --dry-run` |
 | Show monthly reconciliation | `autorentledger reconcile --period YYYY-MM` |
 | Show/export a monthly report | `autorentledger report --period YYYY-MM --csv reports/YYYY-MM.csv` |
 | Check database health | `autorentledger db check` |

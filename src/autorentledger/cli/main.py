@@ -42,6 +42,7 @@ from autorentledger.cli.obligations import (
     run_obligation_generation,
     run_obligation_listing,
     run_obligation_show,
+    run_rent_change,
     run_rent_schedule_add,
     run_rent_schedule_end,
     run_rent_schedule_listing,
@@ -81,6 +82,7 @@ from autorentledger.cli.tenancy import (
     run_rent_account_remove_payer,
     run_rent_account_rename,
     run_rent_account_show,
+    run_tenancy_end,
     run_tenancy_setup,
     run_unit_add,
     run_unit_listing,
@@ -274,6 +276,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise AssertionError(f"Unhandled rent-account command: {args.rent_account_command}")
     if args.command == "rent-accounts":
         return run_rent_account_listing(args.database)
+    if args.command == "tenancy":
+        if args.tenancy_command == "end":
+            return run_tenancy_end(args.database, args.account, args.active_to)
+        raise AssertionError(f"Unhandled tenancy command: {args.tenancy_command}")
     if args.command == "obligation":
         if args.obligation_command == "add":
             return run_obligation_add(
@@ -305,6 +311,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.rent_schedule_command == "end":
             return run_rent_schedule_end(args.database, args.schedule_id, args.active_to)
         raise AssertionError(f"Unhandled rent-schedule command: {args.rent_schedule_command}")
+    if args.command == "rent":
+        if args.rent_command == "change":
+            return run_rent_change(
+                args.database, args.account, args.amount, args.effective
+            )
+        raise AssertionError(f"Unhandled rent command: {args.rent_command}")
     if args.command == "rent-schedules":
         return run_rent_schedule_listing(args.database, args.account)
     if args.command == "allocation":

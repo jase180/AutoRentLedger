@@ -42,14 +42,14 @@ def test_empty_month_has_readable_heading_neutral_collection_and_stable_sections
         "ACCOUNT STATUS",
         "PAYMENT INTAKE",
         "CURRENT ATTENTION",
-        "MISSING OBLIGATIONS",
+        "MISSING SCHEDULED RENT",
         "SUGGESTIONS",
     )] == sorted(output.index(section) for section in (
         "MONTHLY RENT",
         "ACCOUNT STATUS",
         "PAYMENT INTAKE",
         "CURRENT ATTENTION",
-        "MISSING OBLIGATIONS",
+        "MISSING SCHEDULED RENT",
         "SUGGESTIONS",
     ))
     for attention_label in (
@@ -174,7 +174,9 @@ def test_payment_attention_missing_warning_and_suggestion_render_without_private
     assert "Allocated                   $2,125" in output
     assert "Unallocated                    $50" in output
     assert "Expected $1,450 | due day 1" in output
-    assert "autorentledger obligations generate --period 2026-09" in output
+    assert "Run: autorentledger daily" in output
+    assert "review recurring-rent setup" in output
+    assert "autorentledger obligations generate" not in output
     assert "Payment 42 -> Unit C / Synthetic Household / 2026-09" in output
     assert "Suggest $825" in output
     assert "Reason: EXACT_AMOUNT" in output

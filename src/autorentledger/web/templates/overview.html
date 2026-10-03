@@ -114,7 +114,7 @@
   </section>
 
   <section aria-labelledby="missing-heading">
-    <h2 id="missing-heading">Missing obligations</h2>
+    <h2 id="missing-heading">Missing scheduled rent</h2>
     {% if overview.missing_obligations %}
       <div class="panel-list">
         {% for missing in overview.missing_obligations %}
@@ -124,8 +124,8 @@
           </article>
         {% endfor %}
       </div>
-      <p>Run:</p>
-      <code>autorentledger obligations generate --period {{ overview.period }}</code>
+      <p>AutoRentLedger expected these monthly rent charges, but they have not been created.</p>
+      <p>Run <code>autorentledger daily</code> or review recurring-rent setup.</p>
     {% else %}
       <p class="empty-state">None.</p>
     {% endif %}

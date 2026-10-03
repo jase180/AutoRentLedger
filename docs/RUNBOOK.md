@@ -6,13 +6,34 @@ the package is installed, and the default database is `data/autorentledger.db`.
 All names, units, dates, IDs, and amounts below are synthetic examples. Add `--database PATH` to a
 database-backed command when using a non-default database.
 
+## Everyday operating model
+
+Normal use is deliberately small:
+
+```text
+FIRST TIME
+1. initialize the database and connect Gmail
+2. preview and apply `autorentledger setup tenancy ...`
+
+ONGOING
+autorentledger daily
+
+CHANGES ONLY
+autorentledger rent change ...
+autorentledger tenancy end ...
+```
+
+`RentSchedule` is the recurring configuration rule. `RentObligation` is the durable monthly rent
+charge. Normal `daily` operation ensures the current month's charge exists; raw schedule and
+obligation commands remain available for advanced repair and historical backfill.
+
 ## Contents
 
 - [Before risky work](#before-risky-work)
 - [Routine sync](#routine-sync)
 - [Scheduled daily operation](#scheduled-daily-operation)
 - [Local read-only web view](#local-read-only-web-view)
-- [Monthly setup](#monthly-setup)
+- [Advanced monthly repair/backfill](#advanced-monthly-repairbackfill)
 - [Bootstrap discovery](#bootstrap-discovery)
 - [Bootstrap a tenancy](#bootstrap-a-tenancy)
 - [Add a new payer](#add-a-new-payer)
@@ -234,9 +255,9 @@ Tailscale remains external to AutoRentLedger—there is no Python dependency or 
 
 Do not use router port forwarding, Tailscale Funnel, or direct `0.0.0.0` binding for this app.
 
-## Monthly setup
+## Advanced monthly repair/backfill
 
-For explicit historical/current/future generation when needed:
+For explicit historical or repair generation when needed:
 
 ```powershell
 autorentledger obligations generate --period 2026-09 --dry-run
@@ -289,7 +310,8 @@ not infer a tenant, unit, account, association, or setup command.
 7. Confirm payer, unit, and rent-account mappings manually.
 8. Run `autorentledger setup tenancy ...` as a preview, then repeat it with `--apply` only for
    confirmed configuration.
-9. Generate obligations separately with the existing dry-run-first command.
+9. Let `autorentledger daily` ensure current-month rent. Use explicit generation only for
+   historical backfill.
 10. Create allocations explicitly and run reconciliation.
 
 The boundary is intentional:
@@ -328,7 +350,7 @@ automatically. There is no Gmail correction or unvoid command.
 
 ## Bootstrap a tenancy
 
-`setup tenancy` is a preview-first convenience wrapper over the existing unit, rent-account,
+`setup tenancy` is the normal preview-first workflow over the existing unit, rent-account,
 payer, alias, payer-association, and rent-schedule primitives. It does not introduce a tenant or
 occupant model. It also never creates obligations, payments, or allocations.
 
@@ -387,14 +409,11 @@ autorentledger setup tenancy `
 
 An alias already owned by payer 7 is shown as REUSE. An alias owned by another payer aborts setup;
 it is never reassigned. A payer display-name match never causes reuse—use `--payer ID` explicitly.
-The schedule is optional: omit both `--rent` and `--due-day` to create none. When requested, both
+The schedule is optional for advanced configuration: omit both `--rent` and `--due-day` to create
+none. For normal setup, provide both. When requested, both
 are required along with `--active-from`, and the schedule inherits the rent account's active
-dates. Generate obligations later through the separate preview/apply workflow:
-
-```powershell
-autorentledger obligations generate --period 2026-09 --dry-run
-autorentledger obligations generate --period 2026-09
-```
+dates. Normal `autorentledger daily` operation then ensures the current month's rent. Manual
+generation is reserved for repair/backfill.
 
 A payer is the observed sender identity and is not necessarily the tenant or occupant. The rent
 account remains the household/account configuration, and allocation remains a separate explicit
@@ -693,40 +712,36 @@ payer satisfies that account. Each payment allocation remains explicit.
 
 ## Rent amount changes
 
-Represent the change with effective-dated schedules. End the old schedule, then create the new one:
+Use the high-level effective-dated rent change:
 
 ```powershell
-autorentledger rent-schedule end 4 --active-to 2026-08-31
-autorentledger rent-schedule add `
+autorentledger rent change `
   --account 1 `
   --amount 1500.00 `
-  --due-day 1 `
-  --active-from 2026-09-01
+  --effective 2026-09-01
 ```
 
-Inspect and generate explicitly:
+Inspect the resulting schedule history; normal `daily` operation creates September rent:
 
 ```powershell
 autorentledger rent-schedules --account 1
-autorentledger obligations generate --period 2026-09 --dry-run
-autorentledger obligations generate --period 2026-09
+autorentledger daily
 ```
 
-Historical obligations remain unchanged. The new schedule affects only later explicit generation;
-it does not rewrite already generated or manually created obligations.
+Historical obligations remain unchanged. The new schedule affects only later monthly ensure runs;
+it refuses to change a month whose obligation already exists.
 
 ## Tenant or account ends
 
-End schedules first when they extend beyond the proposed account end, then end the account:
+Use the high-level tenancy end operation:
 
 ```powershell
-autorentledger rent-schedule end 4 --active-to 2027-04-30
-autorentledger rent-account end 1 --active-to 2027-04-30
+autorentledger tenancy end --account 1 --active-to 2027-04-30
 ```
 
-`rent-account end` refuses to silently truncate an open-ended schedule or one ending after the
-requested account date. Ending either record preserves payer associations, obligations,
-allocations, and historical schedule facts.
+This atomically aligns the account and applicable schedule end date. It preserves payer
+associations, obligations, allocations, and historical schedule facts. A conflicting future
+schedule is reported rather than guessed or deleted.
 
 ## Wrong payer or account configuration
 
@@ -759,18 +774,20 @@ The monthly `overview` compares applicable schedules with actual obligations and
 when a scheduled account/month has no obligation. It never creates the missing row and never adds
 the scheduled amount to rent owed.
 
-Preview, then explicitly generate:
+For the current month, rerun normal daily operation:
 
 ```powershell
 autorentledger overview --period 2026-09
-autorentledger obligations generate --period 2026-09 --dry-run
-autorentledger obligations generate --period 2026-09
+autorentledger daily
 autorentledger overview --period 2026-09
 ```
 
 Any existing manual or generated obligation suppresses the warning, even when its amount or due date
 differs from the schedule. The obligation is authoritative for that month; there is no automatic
 schedule mismatch correction.
+
+For a historical missing month, use `obligations generate --period ... --dry-run` followed by the
+same advanced/backfill command without `--dry-run`.
 
 ## Parser improved
 

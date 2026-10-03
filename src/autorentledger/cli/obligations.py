@@ -25,6 +25,12 @@ from autorentledger.reconciliation import (
     ReconciliationInvariantError,
     get_reconciliation,
 )
+from autorentledger.rent_operations import (
+    RentOperationConflictError,
+    RentOperationNotFoundError,
+    RentOperationValidationError,
+    change_recurring_rent,
+)
 from autorentledger.schedules import (
     ObligationGenerationInvariantError,
     ObligationGenerationPlan,
@@ -61,13 +67,26 @@ def register_commands(subparsers) -> None:
     obligations.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
     obligation_list_commands = obligations.add_subparsers(dest="obligations_command")
     obligations_generate = obligation_list_commands.add_parser(
-        "generate", help="explicitly generate missing obligations from schedules"
+        "generate",
+        help="advanced/backfill: ensure scheduled rent exists for one month",
     )
     obligations_generate.add_argument("--period", required=True)
     obligations_generate.add_argument("--dry-run", action="store_true")
     obligations_generate.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
 
-    rent_schedule = subparsers.add_parser("rent-schedule", help="manage recurring rent schedules")
+    rent = subparsers.add_parser("rent", help="manage recurring monthly rent")
+    rent_commands = rent.add_subparsers(dest="rent_command", required=True)
+    rent_change = rent_commands.add_parser(
+        "change", help="change recurring rent from a future month"
+    )
+    rent_change.add_argument("--account", type=int, required=True)
+    rent_change.add_argument("--amount", required=True)
+    rent_change.add_argument("--effective", required=True)
+    rent_change.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+    rent_schedule = subparsers.add_parser(
+        "rent-schedule", help="advanced: manage effective-dated rent schedules"
+    )
     rent_schedule_commands = rent_schedule.add_subparsers(
         dest="rent_schedule_command", required=True
     )
@@ -183,6 +202,40 @@ def run_rent_schedule_add(
         f"Created rent schedule {schedule.id}: account {schedule.rent_account_id}, "
         f"{_format_currency(schedule.amount_cents)} due day {schedule.due_day}."
     )
+    return 0
+
+
+def run_rent_change(
+    database_path: Path,
+    account_id: int,
+    amount: str,
+    effective: str,
+) -> int:
+    try:
+        result = change_recurring_rent(
+            SQLiteRentScheduleRepository(database_path),
+            account_id,
+            amount,
+            effective,
+        )
+    except (
+        RentOperationConflictError,
+        RentOperationNotFoundError,
+        RentOperationValidationError,
+    ) as error:
+        print(error)
+        return 1
+    print("Recurring rent changed.")
+    print(f"Account: {account_id}")
+    print(
+        f"Previous: {_format_currency(result.previous_schedule.amount_cents)} "
+        f"through {result.previous_schedule.active_to}"
+    )
+    print(
+        f"New: {_format_currency(result.new_schedule.amount_cents)} "
+        f"from {result.new_schedule.active_from}"
+    )
+    print("Existing obligations and allocations were not changed.")
     return 0
 
 def run_rent_schedule_listing(

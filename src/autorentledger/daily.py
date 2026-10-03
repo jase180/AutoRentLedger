@@ -14,7 +14,7 @@ from autorentledger.retention import (
     daily_backup_destination,
     prune_daily_backups,
 )
-from autorentledger.schedules import ObligationGenerationPlan, generate_obligations
+from autorentledger.schedules import ObligationGenerationPlan, ensure_monthly_rent
 from autorentledger.storage import (
     SQLiteReconciliationRepository,
     SQLiteRentScheduleRepository,
@@ -129,7 +129,7 @@ def run_daily_operation(
         effective_date = today or date.today()  # noqa: DTZ011 - host-local calendar month
         target_period = effective_date.strftime("%Y-%m")
         generate = obligation_operation or (
-            lambda period: generate_obligations(
+            lambda period: ensure_monthly_rent(
                 SQLiteRentScheduleRepository(database_path), period
             )
         )

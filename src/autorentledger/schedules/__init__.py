@@ -9,6 +9,7 @@ from autorentledger.schedules.service import (
     RentScheduleOverlapError,
     RentScheduleValidationError,
     create_rent_schedule,
+    ensure_monthly_rent,
     generate_obligations,
     plan_obligation_generation,
 )
@@ -22,6 +23,7 @@ __all__ = [
     "RentScheduleOverlapError",
     "RentScheduleValidationError",
     "create_rent_schedule",
+    "ensure_monthly_rent",
     "generate_obligations",
     "plan_obligation_generation",
 ]

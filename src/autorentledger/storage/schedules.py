@@ -6,8 +6,9 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from autorentledger.rental_context import UnitContext, UnitContextProjection, extract_unit_context
 from autorentledger.storage.db import open_connection, open_read_only_connection
@@ -18,6 +19,9 @@ from autorentledger.storage.maintenance_errors import (
     MaintenanceScheduleNotFoundError,
     MaintenanceScheduleOutsideAccountRangeError,
 )
+
+if TYPE_CHECKING:
+    from autorentledger.storage.rentals import RentAccountRecord
 
 
 @dataclass(frozen=True)
@@ -55,6 +59,19 @@ class ObligationGenerationSourceRecord(UnitContextProjection):
     existing_obligation_id: int | None
 
 
+@dataclass(frozen=True)
+class RentChangeStorageResult:
+    previous_schedule: RentScheduleRecord
+    new_schedule: RentScheduleRecord
+
+
+@dataclass(frozen=True)
+class TenancyEndStorageResult:
+    previous_account: RentAccountRecord
+    updated_account: RentAccountRecord
+    ended_schedule_ids: tuple[int, ...]
+
+
 def _rent_schedule_summary(row: sqlite3.Row) -> RentScheduleSummary:
     values = dict(row)
     return RentScheduleSummary(unit=extract_unit_context(values), **values)
@@ -75,6 +92,18 @@ class RentScheduleOutsideAccountRangeError(Exception):
 
 class RentScheduleOverlapStorageError(Exception):
     """The schedule overlaps another schedule for the same account."""
+
+
+class RentChangeExistingObligationStorageError(Exception):
+    """The effective month already has a durable obligation."""
+
+
+class RentChangeScheduleStorageError(Exception):
+    """There is not exactly one schedule to supersede."""
+
+
+class TenancyEndFutureScheduleStorageError(Exception):
+    """A future schedule cannot be safely shortened to the tenancy end date."""
 
 
 class SQLiteScheduleGenerationTransaction:
@@ -288,6 +317,185 @@ class SQLiteRentScheduleRepository:
             active_to_text,
             previous.created_at,
         )
+
+    def change_rent_checked(
+        self,
+        rent_account_id: int,
+        amount_cents: int,
+        effective_on: date,
+    ) -> RentChangeStorageResult:
+        """Atomically supersede one schedule without touching monthly obligations."""
+        effective_text = effective_on.isoformat()
+        prior_day_text = (effective_on - timedelta(days=1)).isoformat()
+        period = effective_text[:7]
+        created_at = datetime.now(UTC).isoformat()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            account = connection.execute(
+                "SELECT * FROM rent_accounts WHERE id = ?", (rent_account_id,)
+            ).fetchone()
+            if account is None:
+                raise RentScheduleAccountNotFoundError
+            if (
+                account["active_from"] is not None
+                and effective_text < account["active_from"]
+            ) or (
+                account["active_to"] is not None
+                and effective_text > account["active_to"]
+            ):
+                raise RentScheduleOutsideAccountRangeError
+            if connection.execute(
+                """
+                SELECT 1
+                FROM rent_obligations
+                WHERE rent_account_id = ? AND period = ?
+                """,
+                (rent_account_id, period),
+            ).fetchone() is not None:
+                raise RentChangeExistingObligationStorageError
+
+            rows = connection.execute(
+                """
+                SELECT *
+                FROM rent_schedules
+                WHERE rent_account_id = ?
+                    AND active_from <= ?
+                    AND (active_to IS NULL OR active_to >= ?)
+                ORDER BY id
+                """,
+                (rent_account_id, prior_day_text, prior_day_text),
+            ).fetchall()
+            if len(rows) != 1:
+                raise RentChangeScheduleStorageError
+            previous = RentScheduleRecord(**dict(rows[0]))
+
+            overlap = connection.execute(
+                """
+                SELECT id
+                FROM rent_schedules
+                WHERE rent_account_id = ?
+                    AND id <> ?
+                    AND active_from <= COALESCE(?, '9999-12-31')
+                    AND (active_to IS NULL OR active_to >= ?)
+                ORDER BY id
+                LIMIT 1
+                """,
+                (
+                    rent_account_id,
+                    previous.id,
+                    previous.active_to,
+                    effective_text,
+                ),
+            ).fetchone()
+            if overlap is not None:
+                raise RentScheduleOverlapStorageError
+
+            connection.execute(
+                "UPDATE rent_schedules SET active_to = ? WHERE id = ?",
+                (prior_day_text, previous.id),
+            )
+            ended_previous = RentScheduleRecord(
+                previous.id,
+                previous.rent_account_id,
+                previous.amount_cents,
+                previous.due_day,
+                previous.active_from,
+                prior_day_text,
+                previous.created_at,
+            )
+            cursor = connection.execute(
+                """
+                INSERT INTO rent_schedules (
+                    rent_account_id, amount_cents, due_day,
+                    active_from, active_to, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    rent_account_id,
+                    amount_cents,
+                    previous.due_day,
+                    effective_text,
+                    previous.active_to,
+                    created_at,
+                ),
+            )
+            replacement = RentScheduleRecord(
+                int(cursor.lastrowid),
+                rent_account_id,
+                amount_cents,
+                previous.due_day,
+                effective_text,
+                previous.active_to,
+                created_at,
+            )
+        return RentChangeStorageResult(ended_previous, replacement)
+
+    def end_tenancy_checked(
+        self, rent_account_id: int, active_to: date
+    ) -> TenancyEndStorageResult:
+        """Atomically end an account and its currently applicable schedules."""
+        from autorentledger.storage.rentals import RentAccountRecord
+
+        active_to_text = active_to.isoformat()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT * FROM rent_accounts WHERE id = ?", (rent_account_id,)
+            ).fetchone()
+            if row is None:
+                raise MaintenanceRentAccountNotFoundError
+            previous = RentAccountRecord(**dict(row))
+            if previous.active_from is not None and active_to_text < previous.active_from:
+                raise MaintenanceDateRangeError
+            if previous.active_to is not None and active_to_text > previous.active_to:
+                raise MaintenanceDateRangeError
+            future = connection.execute(
+                """
+                SELECT id
+                FROM rent_schedules
+                WHERE rent_account_id = ? AND active_from > ?
+                ORDER BY id
+                LIMIT 1
+                """,
+                (rent_account_id, active_to_text),
+            ).fetchone()
+            if future is not None:
+                raise TenancyEndFutureScheduleStorageError
+            affected = connection.execute(
+                """
+                SELECT id
+                FROM rent_schedules
+                WHERE rent_account_id = ?
+                    AND active_from <= ?
+                    AND (active_to IS NULL OR active_to > ?)
+                ORDER BY id
+                """,
+                (rent_account_id, active_to_text, active_to_text),
+            ).fetchall()
+            ended_schedule_ids = tuple(int(item["id"]) for item in affected)
+            connection.execute(
+                """
+                UPDATE rent_schedules
+                SET active_to = ?
+                WHERE rent_account_id = ?
+                    AND active_from <= ?
+                    AND (active_to IS NULL OR active_to > ?)
+                """,
+                (active_to_text, rent_account_id, active_to_text, active_to_text),
+            )
+            connection.execute(
+                "UPDATE rent_accounts SET active_to = ? WHERE id = ?",
+                (active_to_text, rent_account_id),
+            )
+        updated = RentAccountRecord(
+            previous.id,
+            previous.unit_id,
+            previous.display_name,
+            previous.active_from,
+            active_to_text,
+            previous.created_at,
+        )
+        return TenancyEndStorageResult(previous, updated, ended_schedule_ids)
 
     def list_generation_sources(
         self, period: str, month_start: str, month_end: str

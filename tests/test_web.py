@@ -591,7 +591,7 @@ def test_populated_overview_renders_canonical_semantics_privately_and_read_only(
         "Rent status",
         "Payment intake",
         "Current attention",
-        "Missing obligations",
+        "Missing scheduled rent",
         "Suggestions",
     ):
         assert section in output
@@ -630,7 +630,7 @@ def test_populated_overview_renders_canonical_semantics_privately_and_read_only(
     assert "$50.00" in payment_section
 
     attention_section = output[
-        output.index("Current attention") : output.index("Missing obligations")
+        output.index("Current attention") : output.index("Missing scheduled rent")
     ]
     for label in (
         "Unresolved payer",
@@ -645,7 +645,9 @@ def test_populated_overview_renders_canonical_semantics_privately_and_read_only(
     assert "Missing Household" in output
     assert "Expected $1,450.00" in output
     assert "due day 1" in output
-    assert "autorentledger obligations generate --period 2026-09" in output
+    assert "autorentledger daily" in output
+    assert "review recurring-rent setup" in output
+    assert "autorentledger obligations generate" not in output
     assert f"Payment {facts['suggestion_payment_id']}" in output
     assert "Suggestion Household / 2026-09" in output
     assert "$825.00" in output
@@ -717,7 +719,7 @@ def test_empty_month_and_missing_obligation_authority(tmp_path):
     assert "$1,500.00" in actual_output
     assert "Expected $1,450.00" not in actual_output
     missing_section = actual_output[
-        actual_output.index("Missing obligations") : actual_output.index("Suggestions")
+        actual_output.index("Missing scheduled rent") : actual_output.index("Suggestions")
     ]
     assert "None." in missing_section
 

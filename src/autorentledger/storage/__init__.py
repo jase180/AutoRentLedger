@@ -133,12 +133,17 @@ from autorentledger.storage.review import (
 )
 from autorentledger.storage.schedules import (
     ObligationGenerationSourceRecord,
+    RentChangeExistingObligationStorageError,
+    RentChangeScheduleStorageError,
+    RentChangeStorageResult,
     RentScheduleAccountNotFoundError,
     RentScheduleOutsideAccountRangeError,
     RentScheduleOverlapStorageError,
     RentScheduleRecord,
     RentScheduleSummary,
     SQLiteRentScheduleRepository,
+    TenancyEndFutureScheduleStorageError,
+    TenancyEndStorageResult,
 )
 from autorentledger.storage.suggestions import (
     SQLiteSuggestionRepository,
@@ -223,6 +228,9 @@ __all__ = [
     "RentAccountPayerRecord",
     "RentAccountRecord",
     "RentAccountSummary",
+    "RentChangeExistingObligationStorageError",
+    "RentChangeScheduleStorageError",
+    "RentChangeStorageResult",
     "RentObligationRecord",
     "RentObligationSummary",
     "RentScheduleAccountNotFoundError",
@@ -253,6 +261,8 @@ __all__ = [
     "SuggestionAccountSourceRecord",
     "SuggestionAliasSourceRecord",
     "SuggestionPaymentSourceRecord",
+    "TenancyEndFutureScheduleStorageError",
+    "TenancyEndStorageResult",
     "TenancySetupAliasConflictStorageError",
     "TenancySetupAliasInput",
     "TenancySetupAliasStorageResult",

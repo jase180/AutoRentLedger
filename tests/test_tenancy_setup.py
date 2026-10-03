@@ -350,6 +350,7 @@ def test_apply_creates_existing_primitives_only_and_reports_ids(tmp_path, capsys
     assert "Payer: 1 - Synthetic Tenant" in output
     assert "Schedule: 1 - $1,450.00 due day 1" in output
     assert "No obligations, payments, or allocations were created." in output
+    assert "Current-month rent will be created automatically" in output
     with sqlite3.connect(database_path) as connection:
         schedule = connection.execute("SELECT * FROM rent_schedules").fetchone()
         assert schedule[4:6] == ("2026-05-01", "2027-04-30")

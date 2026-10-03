@@ -63,7 +63,8 @@ def register_commands(subparsers) -> None:
     sync.add_argument("--token", type=Path, default=Path("token.json"))
 
     daily = subparsers.add_parser(
-        "daily", help="create a verified backup, sync Gmail, and summarize attention"
+        "daily",
+        help="back up, ensure current rent, sync Gmail, and summarize attention",
     )
     daily.add_argument("--query", default=DEFAULT_QUERY, help="Gmail search query")
     daily.add_argument("--max-results", type=int, default=100)
@@ -75,7 +76,7 @@ def register_commands(subparsers) -> None:
     daily.add_argument(
         "--skip-obligations",
         action="store_true",
-        help="skip current-month obligation generation for this run",
+        help="advanced recovery: skip ensuring current-month rent for this run",
     )
 
     parse = subparsers.add_parser("parse", help="parse locally stored raw emails")

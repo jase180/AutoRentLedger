@@ -506,7 +506,7 @@ def test_service_and_cli_are_strictly_read_only_and_private(tmp_path, capsys):
     assert "MONTHLY RENT" in output
     assert "PAYMENT INTAKE" in output
     assert "CURRENT ATTENTION" in output
-    assert "MISSING OBLIGATIONS" in output
+    assert "MISSING SCHEDULED RENT" in output
     assert "SUGGESTIONS" in output
     assert "PRIVATE_SYNTHETIC_RAW_SENTINEL" not in output
     assert "PRIVATE_SYNTHETIC_MEMO_SENTINEL" not in output

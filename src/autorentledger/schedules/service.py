@@ -150,6 +150,19 @@ def generate_obligations(
     return plan
 
 
+def ensure_monthly_rent(
+    repository: SQLiteRentScheduleRepository,
+    period: str,
+) -> ObligationGenerationPlan:
+    """Ensure each applicable schedule has one durable rent charge for ``period``.
+
+    This is the normal business-facing operation. ``generate_obligations`` remains
+    available as the advanced/backfill primitive and is the single canonical write
+    path used here.
+    """
+    return generate_obligations(repository, period)
+
+
 def _build_plan(
     period: MonthlyPeriod,
     sources: list[ObligationGenerationSourceRecord],

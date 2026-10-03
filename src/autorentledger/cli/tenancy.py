@@ -21,6 +21,12 @@ from autorentledger.maintenance import (
     rename_payer,
     rename_rent_account,
 )
+from autorentledger.rent_operations import (
+    RentOperationConflictError,
+    RentOperationNotFoundError,
+    RentOperationValidationError,
+    end_tenancy,
+)
 from autorentledger.rental import (
     DuplicateAssociationError,
     DuplicateUnitError,
@@ -34,6 +40,7 @@ from autorentledger.storage import (
     SQLitePayerRepository,
     SQLitePaymentEventRepository,
     SQLiteRentalRepository,
+    SQLiteRentScheduleRepository,
     SQLiteTenancySetupRepository,
 )
 from autorentledger.tenancy_setup import (
@@ -69,6 +76,19 @@ def register_commands(subparsers) -> None:
     tenancy.add_argument("--due-day", type=int)
     tenancy.add_argument("--apply", action="store_true")
     tenancy.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+    tenancy_admin = subparsers.add_parser(
+        "tenancy", help="manage an established recurring-rent tenancy"
+    )
+    tenancy_commands = tenancy_admin.add_subparsers(
+        dest="tenancy_command", required=True
+    )
+    tenancy_end = tenancy_commands.add_parser(
+        "end", help="end recurring rent without deleting ledger history"
+    )
+    tenancy_end.add_argument("--account", type=int, required=True)
+    tenancy_end.add_argument("--active-to", required=True)
+    tenancy_end.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
 
 
 def run_tenancy_setup(
@@ -155,6 +175,7 @@ def _print_tenancy_preview(preview: TenancySetupPreview) -> None:
 
 def _print_tenancy_result(result: TenancySetupResult) -> None:
     print("Created tenancy setup")
+    print("Rent setup complete.")
     unit_suffix = " (reused)" if result.unit_reused else ""
     payer_suffix = " (reused)" if result.payer_reused else ""
     print(f"Unit: {result.unit.id} - {result.unit.label}{unit_suffix}")
@@ -176,6 +197,28 @@ def _print_tenancy_result(result: TenancySetupResult) -> None:
             f"due day {result.schedule.due_day}"
         )
     print("No obligations, payments, or allocations were created.")
+    if result.schedule is not None:
+        print("Current-month rent will be created automatically by `autorentledger daily`.")
+
+
+def run_tenancy_end(database_path: Path, account_id: int, active_to: str) -> int:
+    try:
+        result = end_tenancy(
+            SQLiteRentScheduleRepository(database_path), account_id, active_to
+        )
+    except (
+        RentOperationConflictError,
+        RentOperationNotFoundError,
+        RentOperationValidationError,
+    ) as error:
+        print(error)
+        return 1
+    print("Tenancy ended.")
+    print(f"Account: {account_id}")
+    print(f"Active through: {result.updated_account.active_to}")
+    print(f"Schedules ended: {len(result.ended_schedule_ids)}")
+    print("Existing obligations, payments, and allocations were not changed.")
+    return 0
 
 def run_payer_add(database_path: Path, display_name: str) -> int:
     if not display_name.strip():
