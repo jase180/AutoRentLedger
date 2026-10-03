@@ -77,6 +77,8 @@ class SQLiteAllocationPlanningRepository:
                 SELECT
                     rent_obligations.id AS obligation_id,
                     rent_obligations.rent_account_id,
+                    properties.id AS property_id,
+                    properties.display_name AS property_name,
                     rent_accounts.unit_id,
                     units.label AS unit_label,
                     rent_accounts.display_name AS account_display_name,
@@ -88,12 +90,15 @@ class SQLiteAllocationPlanningRepository:
                 JOIN rent_accounts
                     ON rent_accounts.id = rent_obligations.rent_account_id
                 JOIN units ON units.id = rent_accounts.unit_id
+                JOIN properties ON properties.id = units.property_id
                 LEFT JOIN payment_allocations
                     ON payment_allocations.rent_obligation_id = rent_obligations.id
                 WHERE rent_obligations.period >= ? AND rent_obligations.period <= ?
                 GROUP BY
                     rent_obligations.id,
                     rent_obligations.rent_account_id,
+                    properties.id,
+                    properties.display_name,
                     rent_accounts.unit_id,
                     units.label,
                     rent_accounts.display_name,

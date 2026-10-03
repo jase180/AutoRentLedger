@@ -68,10 +68,10 @@ class OverviewAttentionSummary:
 
 
 @dataclass(frozen=True)
-class OverviewMissingObligation:
+class OverviewMissingObligation(UnitContextProjection):
     schedule_id: int
     rent_account_id: int
-    unit_label: str
+    unit: UnitContext
     account_display_name: str
     period: str
     amount_cents: int
@@ -79,11 +79,11 @@ class OverviewMissingObligation:
 
 
 @dataclass(frozen=True)
-class OverviewSuggestion:
+class OverviewSuggestion(UnitContextProjection):
     payment_event_id: int
     rent_obligation_id: int
     rent_account_id: int
-    unit_label: str
+    unit: UnitContext
     account_display_name: str
     period: str
     suggested_amount_cents: int
@@ -190,7 +190,7 @@ def build_owner_overview(
             payment_event_id=suggestion.payment_event_id,
             rent_obligation_id=suggestion.rent_obligation_id,
             rent_account_id=suggestion.rent_account_id,
-            unit_label=suggestion.unit_label,
+            unit=suggestion.unit,
             account_display_name=suggestion.account_display_name,
             period=suggestion.period,
             suggested_amount_cents=suggestion.suggested_amount_cents,
@@ -205,7 +205,7 @@ def build_owner_overview(
         OverviewMissingObligation(
             schedule_id=item.schedule_id,
             rent_account_id=item.rent_account_id,
-            unit_label=item.unit_label,
+            unit=item.unit,
             account_display_name=item.account_display_name,
             period=item.period,
             amount_cents=item.amount_cents,

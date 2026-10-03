@@ -86,12 +86,13 @@ def run_report(database_path: Path, period: str, csv_path: Path | None = None) -
 def _print_monthly_report(report: MonthlyReport) -> None:
     print(f"Monthly Rent Report - {report.period}")
     print(
-        f"{'UNIT':<12} {'ACCOUNT':<24} {'OWED':>12} "
+        f"{'PROPERTY / UNIT':<32} {'ACCOUNT':<24} {'OWED':>12} "
         f"{'ALLOCATED':>12} {'REMAINING':>12} STATUS"
     )
     for row in report.obligations:
         print(
-            f"{row.unit_label:<12} {row.account_display_name:<24} "
+            f"{row.property_name + ' / ' + row.unit_label:<32} "
+            f"{row.account_display_name:<24} "
             f"{_format_currency(row.owed_cents):>12} "
             f"{_format_currency(row.allocated_cents):>12} "
             f"{_format_currency(row.remaining_cents):>12} {row.status}"
@@ -117,7 +118,10 @@ def _write_report_csv(report: MonthlyReport, csv_path: Path) -> None:
             [
                 "period",
                 "obligation_id",
-                "unit",
+                "property_id",
+                "property_name",
+                "unit_id",
+                "unit_label",
                 "account",
                 "due_date",
                 "owed_cents",
@@ -131,6 +135,9 @@ def _write_report_csv(report: MonthlyReport, csv_path: Path) -> None:
                 [
                     row.period,
                     row.obligation_id,
+                    row.property_id,
+                    row.property_name,
+                    row.unit_id,
                     row.unit_label,
                     row.account_display_name,
                     row.due_date,

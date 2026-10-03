@@ -142,10 +142,11 @@ def run_obligation_add(
 def run_obligation_listing(database_path: Path, account_id: int | None = None) -> int:
     SQLiteRentalRepository(database_path)
     obligations = SQLiteObligationRepository(database_path).list_summaries(account_id)
-    print(f"{'ID':<4} {'PERIOD':<8} {'UNIT':<12} {'ACCOUNT':<24} {'DUE':<10} {'AMOUNT':>12}")
+    print(f"{'ID':<4} {'PERIOD':<8} {'PROPERTY / UNIT':<32} {'ACCOUNT':<24} {'DUE':<10} {'AMOUNT':>12}")
     for obligation in obligations:
         print(
-            f"{obligation.id:<4} {obligation.period:<8} {obligation.unit_label:<12} "
+            f"{obligation.id:<4} {obligation.period:<8} "
+            f"{obligation.property_name + ' / ' + obligation.unit_label:<32} "
             f"{obligation.account_display_name:<24} {obligation.due_date:<10} "
             f"{_format_currency(obligation.amount_cents):>12}"
         )
@@ -164,7 +165,7 @@ def run_obligation_show(database_path: Path, obligation_id: int) -> int:
 
     print(f"Rent obligation {obligation.obligation_id}")
     print(f"Account: {obligation.account_display_name}")
-    print(f"Unit: {obligation.unit_label}")
+    print(f"Property / Unit: {obligation.property_name} / {obligation.unit_label}")
     print(f"Period: {obligation.period}")
     print(f"Due date: {obligation.due_date}")
     print()
@@ -243,12 +244,12 @@ def run_rent_schedule_listing(
 ) -> int:
     schedules = SQLiteRentScheduleRepository(database_path).list_summaries(account_id)
     print(
-        f"{'ID':<4} {'UNIT':<12} {'ACCOUNT':<24} {'AMOUNT':>12} "
+        f"{'ID':<4} {'PROPERTY / UNIT':<32} {'ACCOUNT':<24} {'AMOUNT':>12} "
         f"{'DUE DAY':>7} {'ACTIVE FROM':<12} ACTIVE TO"
     )
     for schedule in schedules:
         print(
-            f"{schedule.id:<4} {schedule.unit_label:<12} "
+            f"{schedule.id:<4} {schedule.property_name + ' / ' + schedule.unit_label:<32} "
             f"{schedule.account_display_name:<24} "
             f"{_format_currency(schedule.amount_cents):>12} "
             f"{schedule.due_day:>7} {schedule.active_from:<12} "
@@ -296,7 +297,7 @@ def run_obligation_generation(
 def _print_obligation_generation_plan(plan: ObligationGenerationPlan) -> None:
     for item in plan.items:
         detail = (
-            f"{item.unit_label} / {item.account_display_name}  "
+            f"{item.property_name} / {item.unit_label} / {item.account_display_name}  "
             f"{_format_currency(item.amount_cents)} due {item.due_date.isoformat()}"
         )
         if item.reason:

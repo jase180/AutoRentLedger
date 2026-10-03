@@ -38,12 +38,12 @@
       <div class="table-wrap">
         <table class="obligations-table">
           <thead>
-            <tr><th>Unit</th><th>Account</th><th>Due</th><th class="money">Owed</th><th class="money">Paid</th><th class="money">Left</th><th>Status</th></tr>
+            <tr><th>Property / Unit</th><th>Account</th><th>Due</th><th class="money">Owed</th><th class="money">Paid</th><th class="money">Left</th><th>Status</th></tr>
           </thead>
           <tbody>
             {% for obligation in obligations.records %}
               <tr>
-                <td>{{ obligation.unit_label }}</td>
+                <td><strong>{{ obligation.unit_label }}</strong><span class="property-context">{{ obligation.property_name }}</span></td>
                 <td><a href="{{ url_for('web.rent_account_detail', rent_account_id=obligation.rent_account_id) }}#obligation-{{ obligation.obligation_id }}">{{ obligation.account_display_name }}</a></td>
                 <td>{{ obligation.due_date }}</td>
                 <td class="money">{{ obligation.owed_cents|money }}</td>

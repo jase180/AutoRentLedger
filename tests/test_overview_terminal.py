@@ -102,7 +102,7 @@ def test_account_table_is_complete_ordered_and_money_is_compact():
         OverviewAccountRow(
             rent_obligation_id=index,
             rent_account_id=index,
-            unit=UnitContext(index, f"Unit {index}"),
+            unit=UnitContext(1, "Property A", index, f"Unit {index}"),
             account_display_name=(
                 "A deliberately long synthetic household name"
                 if index == 2
@@ -151,7 +151,13 @@ def test_payment_attention_missing_warning_and_suggestion_render_without_private
         attention=OverviewAttentionSummary(1, 2, 3, 4, 5),
         missing_obligations=(
             OverviewMissingObligation(
-                9, 3, "Unit C", "Synthetic Household", "2026-09", 145000, 1
+                9,
+                3,
+                UnitContext(1, "Property A", 3, "Unit C"),
+                "Synthetic Household",
+                "2026-09",
+                145000,
+                1,
             ),
         ),
         actionable_suggestions=(
@@ -159,7 +165,7 @@ def test_payment_attention_missing_warning_and_suggestion_render_without_private
                 42,
                 8,
                 3,
-                "Unit C",
+                UnitContext(1, "Property A", 3, "Unit C"),
                 "Synthetic Household",
                 "2026-09",
                 82500,
@@ -177,7 +183,7 @@ def test_payment_attention_missing_warning_and_suggestion_render_without_private
     assert "Run: autorentledger daily" in output
     assert "review recurring-rent setup" in output
     assert "autorentledger obligations generate" not in output
-    assert "Payment 42 -> Unit C / Synthetic Household / 2026-09" in output
+    assert "Payment 42 -> Property A / Unit C / Synthetic Household / 2026-09" in output
     assert "Suggest $825" in output
     assert "Reason: EXACT_AMOUNT" in output
     for sentinel in (

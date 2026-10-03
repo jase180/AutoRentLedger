@@ -8,6 +8,7 @@ from pathlib import Path
 from autorentledger.gmail_payments import GmailPaymentHistory, get_gmail_payment_history
 from autorentledger.manual_payments import ManualPaymentHistory, get_manual_payment_history
 from autorentledger.payment_listing import PaymentListRecord, list_payment_records
+from autorentledger.rental_context import UnitContext, UnitContextProjection
 from autorentledger.storage import (
     LateFeeAllocationSummary,
     PaymentEventRecord,
@@ -38,12 +39,12 @@ class PaymentsPage:
         return self.unallocated_only or self.unresolved_only
 
 @dataclass(frozen=True)
-class PaymentAllocationDetail:
+class PaymentAllocationDetail(UnitContextProjection):
     allocation_id: int
     rent_obligation_id: int
     rent_account_id: int
     period: str
-    unit_label: str
+    unit: UnitContext
     account_display_name: str
     amount_cents: int
 
@@ -110,7 +111,7 @@ def build_web_payment_detail(
                 allocation.rent_obligation_id,
                 obligation.rent_account_id,
                 allocation.period,
-                allocation.unit_label,
+                allocation.unit,
                 obligation.account_display_name,
                 allocation.amount_cents,
             )

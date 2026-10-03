@@ -115,6 +115,6 @@ def test_unit_cli_requires_property_and_lists_property_id(tmp_path, capsys):
     ) == 0
     assert main(["units", "--database", str(database_path)]) == 0
     output = capsys.readouterr().out
-    assert "PROPERTY ID" in output
+    assert "PROPERTY / UNIT" in output
+    assert "Property A / 2F" in output
     assert "Property 1 / 2F" in output
-    assert "1            2F" in output

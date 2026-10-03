@@ -239,6 +239,8 @@ class SQLiteRentScheduleRepository:
                 SELECT
                     rent_schedules.id,
                     rent_schedules.rent_account_id,
+                    properties.id AS property_id,
+                    properties.display_name AS property_name,
                     rent_accounts.unit_id,
                     units.label AS unit_label,
                     rent_accounts.display_name AS account_display_name,
@@ -250,6 +252,7 @@ class SQLiteRentScheduleRepository:
                 FROM rent_schedules
                 JOIN rent_accounts ON rent_accounts.id = rent_schedules.rent_account_id
                 JOIN units ON units.id = rent_accounts.unit_id
+                JOIN properties ON properties.id = units.property_id
                 """
                 + where_clause
                 + " ORDER BY rent_schedules.id",
@@ -529,6 +532,8 @@ class SQLiteRentScheduleRepository:
             SELECT
                 rent_schedules.id AS schedule_id,
                 rent_schedules.rent_account_id,
+                properties.id AS property_id,
+                properties.display_name AS property_name,
                 rent_accounts.unit_id,
                 units.label AS unit_label,
                 rent_accounts.display_name AS account_display_name,
@@ -538,6 +543,7 @@ class SQLiteRentScheduleRepository:
             FROM rent_schedules
             JOIN rent_accounts ON rent_accounts.id = rent_schedules.rent_account_id
             JOIN units ON units.id = rent_accounts.unit_id
+            JOIN properties ON properties.id = units.property_id
             LEFT JOIN rent_obligations
                 ON rent_obligations.rent_account_id = rent_schedules.rent_account_id
                 AND rent_obligations.period = ?

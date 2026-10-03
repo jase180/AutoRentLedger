@@ -6,7 +6,7 @@
   <section class="page-heading">
     <div>
       <p class="eyebrow">Rent account {{ detail.account.id }}</p>
-      <h1>{{ detail.account.unit_label }} — {{ detail.account.display_name }}</h1>
+      <h1>{{ detail.account.property_name }} / {{ detail.account.unit_label }} — {{ detail.account.display_name }}</h1>
       <p class="section-note">Actual obligations and canonical reconciliation with contributing payments.</p>
     </div>
     <a class="back-link" href="{{ url_for('web.obligations') }}">Back to obligations</a>
@@ -14,7 +14,7 @@
 
   <dl class="fact-grid account-facts">
     <div><dt>Account ID</dt><dd>{{ detail.account.id }}</dd></div>
-    <div><dt>Unit</dt><dd>{{ detail.account.unit_label }}</dd></div>
+    <div><dt>Property / Unit</dt><dd>{{ detail.account.property_name }} / {{ detail.account.unit_label }}</dd></div>
     <div><dt>Active from</dt><dd>{{ detail.account.active_from if detail.account.active_from else "Not set" }}</dd></div>
     <div><dt>Active to</dt><dd>{{ detail.account.active_to if detail.account.active_to else "Open" }}</dd></div>
   </dl>

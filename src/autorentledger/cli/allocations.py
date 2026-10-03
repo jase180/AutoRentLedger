@@ -124,12 +124,13 @@ def run_allocation_listing(
     allocations = _allocation_repository(database_path).list_summaries(
         payment_event_id, rent_obligation_id
     )
-    print(f"{'ID':<4} {'PAYMENT':<9} {'OBLIGATION':<12} {'PERIOD':<8} {'UNIT':<12} {'AMOUNT':>12}")
+    print(f"{'ID':<4} {'PAYMENT':<9} {'OBLIGATION':<12} {'PERIOD':<8} {'PROPERTY / UNIT':<32} {'AMOUNT':>12}")
     for allocation in allocations:
         print(
             f"{allocation.id:<4} {allocation.payment_event_id:<9} "
             f"{allocation.rent_obligation_id:<12} {allocation.period:<8} "
-            f"{allocation.unit_label:<12} {_format_currency(allocation.amount_cents):>12}"
+            f"{allocation.property_name + ' / ' + allocation.unit_label:<32} "
+            f"{_format_currency(allocation.amount_cents):>12}"
         )
     return 0
 
@@ -179,7 +180,10 @@ def run_allocation_suggestions(
         )
         print("SUGGEST")
         print(f"  Obligation {suggestion.rent_obligation_id}")
-        print(f"  {suggestion.unit_label} / {suggestion.account_display_name}")
+        print(
+            f"  {suggestion.property_name} / {suggestion.unit_label} / "
+            f"{suggestion.account_display_name}"
+        )
         print(f"  Period: {suggestion.period}")
         print(
             "  Obligation remaining: "
@@ -265,7 +269,7 @@ def _print_allocation_plan(plan: AllocationPlan) -> None:
     print(f"Period: {plan.period_from} through {plan.period_to}")
     for account in plan.accounts:
         print(f"Account {account.rent_account_id} - {account.account_name}")
-        print(f"Unit: {account.unit_label}")
+        print(f"Property / Unit: {account.property_name} / {account.unit_label}")
         print("Proposed allocations:")
         proposed = False
         for payment in account.payments:
@@ -321,12 +325,12 @@ def run_reconciliation(database_path: Path, period: str) -> int:
         return 1
 
     print(
-        f"{'PERIOD':<8} {'UNIT':<12} {'ACCOUNT':<24} {'DUE':<10} "
+        f"{'PERIOD':<8} {'PROPERTY / UNIT':<32} {'ACCOUNT':<24} {'DUE':<10} "
         f"{'OWED':>12} {'ALLOCATED':>12} {'REMAINING':>12} STATUS"
     )
     for record in records:
         print(
-            f"{record.period:<8} {record.unit_label:<12} "
+            f"{record.period:<8} {record.property_name + ' / ' + record.unit_label:<32} "
             f"{record.account_display_name:<24} {record.due_date:<10} "
             f"{_format_currency(record.owed_cents):>12} "
             f"{_format_currency(record.allocated_cents):>12} "

@@ -88,7 +88,10 @@ def render_owner_overview_terminal(overview: OwnerOverview) -> str:
                 lines.append("")
             lines.extend(
                 [
-                    f"{missing.unit_label} / {missing.account_display_name}",
+                    (
+                        f"{missing.property_name} / {missing.unit_label} / "
+                        f"{missing.account_display_name}"
+                    ),
                     f"Expected {_format_money(missing.amount_cents)} | due day {missing.due_day}",
                 ]
             )
@@ -110,7 +113,8 @@ def render_owner_overview_terminal(overview: OwnerOverview) -> str:
             lines.extend(
                 [
                     (
-                        f"Payment {suggestion.payment_event_id} -> {suggestion.unit_label} / "
+                        f"Payment {suggestion.payment_event_id} -> "
+                        f"{suggestion.property_name} / {suggestion.unit_label} / "
                         f"{suggestion.account_display_name} / {suggestion.period}"
                     ),
                     f"Suggest {_format_money(suggestion.suggested_amount_cents)}",
@@ -160,7 +164,7 @@ def _render_account_table(overview: OwnerOverview) -> list[str]:
         return ["None."]
 
     headers = (
-        "Unit",
+        "Property / Unit",
         "Account / payer",
         "Rent",
         "Paid",
@@ -170,7 +174,7 @@ def _render_account_table(overview: OwnerOverview) -> list[str]:
     )
     rows = [
         (
-            account.unit_label,
+            f"{account.property_name} / {account.unit_label}",
             _account_identity(account.account_display_name, account.payer_names),
             _format_money(account.owed_cents),
             _format_money(account.allocated_cents),

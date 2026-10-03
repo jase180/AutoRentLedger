@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from autorentledger.email import EmailSource
 from autorentledger.ingestion import IngestionResult, ingest_raw_emails
 from autorentledger.processing import ProcessingResult, process_raw_emails
+from autorentledger.rental_context import UnitContext, UnitContextProjection
 from autorentledger.review import ReviewKind, collect_review_items
 from autorentledger.storage import (
     SQLitePaymentEventRepository,
@@ -29,10 +30,10 @@ class SyncReviewSummary:
 
 
 @dataclass(frozen=True)
-class SyncSuggestionSummary:
+class SyncSuggestionSummary(UnitContextProjection):
     payment_event_id: int
     rent_obligation_id: int
-    unit_label: str
+    unit: UnitContext
     account_display_name: str
     period: str
     suggested_amount_cents: int
@@ -98,7 +99,7 @@ def refresh_sync_projections(
         SyncSuggestionSummary(
             payment_event_id=suggestion.payment_event_id,
             rent_obligation_id=suggestion.rent_obligation_id,
-            unit_label=suggestion.unit_label,
+            unit=suggestion.unit,
             account_display_name=suggestion.account_display_name,
             period=suggestion.period,
             suggested_amount_cents=suggestion.suggested_amount_cents,

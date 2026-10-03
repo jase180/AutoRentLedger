@@ -160,6 +160,8 @@ class SQLiteAllocationRepository:
                     payment_allocations.payment_event_id,
                     payment_allocations.rent_obligation_id,
                     rent_obligations.period,
+                    properties.id AS property_id,
+                    properties.display_name AS property_name,
                     rent_accounts.unit_id,
                     units.label AS unit_label,
                     payment_allocations.amount_cents,
@@ -170,6 +172,7 @@ class SQLiteAllocationRepository:
                     ON rent_obligations.id = payment_allocations.rent_obligation_id
                 JOIN rent_accounts ON rent_accounts.id = rent_obligations.rent_account_id
                 JOIN units ON units.id = rent_accounts.unit_id
+                JOIN properties ON properties.id = units.property_id
                 """
                 + where_clause
                 + " ORDER BY payment_allocations.id",

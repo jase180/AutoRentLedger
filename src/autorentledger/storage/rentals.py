@@ -32,6 +32,15 @@ class UnitRecord:
     created_at: str
 
 
+@dataclass(frozen=True)
+class UnitSummary:
+    id: int
+    property_id: int
+    property_name: str
+    label: str
+    created_at: str
+
+
 def _unit_record(row: sqlite3.Row) -> UnitRecord:
     values = dict(row)
     # Historical repositories are used only by migration tests to construct
@@ -421,10 +430,17 @@ class SQLiteRentalRepository:
             row = connection.execute("SELECT * FROM units WHERE id = ?", (unit_id,)).fetchone()
         return _unit_record(row) if row else None
 
-    def list_units(self) -> list[UnitRecord]:
+    def list_units(self) -> list[UnitSummary]:
         with self._connect() as connection:
-            rows = connection.execute("SELECT * FROM units ORDER BY id").fetchall()
-        return [_unit_record(row) for row in rows]
+            rows = connection.execute(
+                """SELECT units.id, properties.id AS property_id,
+                          properties.display_name AS property_name,
+                          units.label, units.created_at
+                   FROM units
+                   JOIN properties ON properties.id = units.property_id
+                   ORDER BY units.id"""
+            ).fetchall()
+        return [UnitSummary(**dict(row)) for row in rows]
 
     def create_rent_account(
         self,
@@ -468,6 +484,8 @@ class SQLiteRentalRepository:
                 """
                 SELECT
                     rent_accounts.id,
+                    properties.id AS property_id,
+                    properties.display_name AS property_name,
                     rent_accounts.unit_id,
                     units.label AS unit_label,
                     rent_accounts.display_name,
@@ -476,6 +494,7 @@ class SQLiteRentalRepository:
                     rent_accounts.created_at
                 FROM rent_accounts
                 JOIN units ON units.id = rent_accounts.unit_id
+                JOIN properties ON properties.id = units.property_id
                 WHERE rent_accounts.id = ?
                 """,
                 (account_id,),
@@ -488,6 +507,8 @@ class SQLiteRentalRepository:
                 """
                 SELECT
                     rent_accounts.id,
+                    properties.id AS property_id,
+                    properties.display_name AS property_name,
                     rent_accounts.unit_id,
                     units.label AS unit_label,
                     rent_accounts.display_name,
@@ -496,6 +517,7 @@ class SQLiteRentalRepository:
                     rent_accounts.created_at
                 FROM rent_accounts
                 JOIN units ON units.id = rent_accounts.unit_id
+                JOIN properties ON properties.id = units.property_id
                 ORDER BY rent_accounts.id
                 """
             ).fetchall()
@@ -545,6 +567,8 @@ class SQLiteRentalRepository:
                 """
                 SELECT
                     rent_accounts.id,
+                    properties.id AS property_id,
+                    properties.display_name AS property_name,
                     rent_accounts.unit_id,
                     units.label AS unit_label,
                     rent_accounts.display_name,
@@ -554,6 +578,7 @@ class SQLiteRentalRepository:
                 FROM rent_account_payers
                 JOIN rent_accounts ON rent_accounts.id = rent_account_payers.rent_account_id
                 JOIN units ON units.id = rent_accounts.unit_id
+                JOIN properties ON properties.id = units.property_id
                 WHERE rent_account_payers.payer_id = ?
                 ORDER BY rent_accounts.id
                 """,

@@ -29,14 +29,14 @@
     {% if detail.allocations %}
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Allocation</th><th>Obligation</th><th>Period</th><th>Unit</th><th>Account</th><th class="money">Amount</th></tr></thead>
+          <thead><tr><th>Allocation</th><th>Obligation</th><th>Period</th><th>Property / Unit</th><th>Account</th><th class="money">Amount</th></tr></thead>
           <tbody>
             {% for allocation in detail.allocations %}
               <tr>
                 <td>{{ allocation.allocation_id }}</td>
                 <td><a href="{{ url_for('web.rent_account_detail', rent_account_id=allocation.rent_account_id) }}#obligation-{{ allocation.rent_obligation_id }}">{{ allocation.rent_obligation_id }}</a></td>
                 <td>{{ allocation.period|month_heading }}</td>
-                <td>{{ allocation.unit_label }}</td>
+                <td>{{ allocation.property_name }} / {{ allocation.unit_label }}</td>
                 <td><a href="{{ url_for('web.rent_account_detail', rent_account_id=allocation.rent_account_id) }}">{{ allocation.account_display_name }}</a></td>
                 <td class="money">{{ allocation.amount_cents|money }}</td>
               </tr>
@@ -54,14 +54,14 @@
     {% if detail.late_fee_allocations %}
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Allocation</th><th>Late fee</th><th>Period</th><th>Unit</th><th>Account</th><th class="money">Amount</th></tr></thead>
+          <thead><tr><th>Allocation</th><th>Late fee</th><th>Period</th><th>Property / Unit</th><th>Account</th><th class="money">Amount</th></tr></thead>
           <tbody>
             {% for allocation in detail.late_fee_allocations %}
               <tr>
                 <td>{{ allocation.id }}</td>
                 <td><a href="{{ url_for('web.rent_account_detail', rent_account_id=allocation.rent_account_id) }}#late-fee-{{ allocation.late_fee_charge_id }}">{{ allocation.late_fee_charge_id }}</a></td>
                 <td>{{ allocation.period|month_heading }}</td>
-                <td>{{ allocation.unit_label }}</td>
+                <td>{{ allocation.property_name }} / {{ allocation.unit_label }}</td>
                 <td><a href="{{ url_for('web.rent_account_detail', rent_account_id=allocation.rent_account_id) }}">{{ allocation.account_display_name }}</a></td>
                 <td class="money">{{ allocation.amount_cents|money }}</td>
               </tr>

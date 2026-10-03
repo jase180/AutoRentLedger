@@ -437,7 +437,7 @@ def test_rental_cli_workflow_and_inspection_are_privacy_safe(tmp_path, capsys):
     assert "Synthetic Household" in output
     assert "Payer 1 is already associated with rent account 1." in output
     assert "Rent account 1" in output
-    assert "Unit: Unit A" in output
+    assert "Property / Unit: Property A / Unit A" in output
     assert "Active from: 2026-05-01" in output
     assert "- Alex Example" in output
     assert "- Morgan Example" in output

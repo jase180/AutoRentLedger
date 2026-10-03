@@ -63,7 +63,7 @@
       <div class="review-list">
         {% for item in attention.partial_obligations %}
           <article class="review-card">
-            <h3>{{ item.unit_label }} / {{ item.account_display_name }}</h3>
+            <h3>{{ item.unit.property_name }} / {{ item.unit.unit_label }} / {{ item.account_display_name }}</h3>
             <p>{{ item.period }} · Obligation {{ item.reference_id }}</p>
             <dl class="review-values">
               <div><dt>Remaining</dt><dd>{{ item.amount_cents|money }}</dd></div>
@@ -82,7 +82,7 @@
       <div class="review-list">
         {% for item in attention.unpaid_obligations %}
           <article class="review-card">
-            <h3>{{ item.unit_label }} / {{ item.account_display_name }}</h3>
+            <h3>{{ item.unit.property_name }} / {{ item.unit.unit_label }} / {{ item.account_display_name }}</h3>
             <p>{{ item.period }} · Obligation {{ item.reference_id }}</p>
             <dl class="review-values">
               <div><dt>Remaining</dt><dd>{{ item.amount_cents|money }}</dd></div>

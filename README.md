@@ -57,7 +57,7 @@ The important distinctions are:
 | Payment evidence | Either immutable Gmail/raw-email evidence or an explicit manual record of an observed historical payment. |
 | Payment event | A normalized payment observation with exactly one evidence source. It is not a tenant. |
 | Payer | The identity that sent money. A payer is not a rent account. |
-| Property | The rental property that contains one or more units. |
+| Property | The rental property that contains one or more units; unit labels are unique only within a Property. |
 | Rent account | The household/account associated with a unit and eventual rent responsibility. |
 | Obligation | The authoritative fact that a specific account owed an amount for a month. |
 | Rent allocation | The explicit accounting link saying part of a payment satisfies a rent obligation. |
@@ -65,6 +65,8 @@ The important distinctions are:
 
 Schedules are instructions for explicitly creating future obligations; they are not debt. Reports,
 review items, suggestions, and the owner overview are read-only projections of existing facts.
+All user-facing rental reads include Property context, normally as `Property Name / Unit Label`,
+so identical unit labels at different Properties remain unambiguous.
 
 ## Quick start
 
@@ -236,7 +238,8 @@ allocated/unallocated amounts, and payment IDs open provenance, audit, and alloc
 Obligations shows month-scoped canonical reconciliation for actual obligations only; account links
 open associated payers, monthly obligations, and contributing payments. Allocation Plan renders
 the exact M26 CLI preview—including every proposed link and blocking issue—but cannot apply it.
-Schedules and missing-obligation warnings remain separate on Overview. Every screen is read-only;
+Schedules and missing-obligation warnings remain separate on Overview. Rental rows show live
+Property context alongside Unit identity. Every screen is read-only;
 none query Gmail, sync, generate obligations, create allocations, or expose ledger write routes.
 The UI requires one owner password configured through
 `AUTORENTLEDGER_WEB_PASSWORD_HASH` and `AUTORENTLEDGER_WEB_SECRET_KEY`; neither value belongs in

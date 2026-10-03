@@ -5,6 +5,7 @@ from enum import StrEnum
 
 from autorentledger.identity import unresolved_sender_counts
 from autorentledger.reconciliation import ReconciliationStatus, reconcile_all
+from autorentledger.rental_context import UnitContext
 from autorentledger.storage import SQLiteReconciliationRepository, SQLiteReviewRepository
 
 
@@ -27,7 +28,7 @@ class ReviewItem:
     summary: str
     amount_cents: int | None = None
     period: str | None = None
-    unit_label: str | None = None
+    unit: UnitContext | None = None
     account_display_name: str | None = None
     count: int | None = None
 
@@ -80,7 +81,7 @@ def collect_review_items(
                 summary="remaining",
                 amount_cents=obligation.remaining_cents,
                 period=obligation.period,
-                unit_label=obligation.unit_label,
+                unit=obligation.unit,
                 account_display_name=obligation.account_display_name,
             )
         )

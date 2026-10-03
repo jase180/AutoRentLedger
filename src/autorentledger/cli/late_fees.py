@@ -95,11 +95,11 @@ def run_late_fee_command(args: argparse.Namespace) -> int:
                 repository, period=args.period, account_id=args.account,
                 active_only=args.active_only,
             )
-            print("ID | Period | Unit | Account | Amount | Allocated | Remaining | Status")
+            print("ID | Period | Property / Unit | Account | Amount | Allocated | Remaining | Status")
             for fee in fees:
                 charge = fee.charge
                 print(
-                    f"{charge.id} | {fee.period} | {fee.unit_label} | "
+                    f"{charge.id} | {fee.period} | {fee.property_name} / {fee.unit_label} | "
                     f"{fee.account_display_name} | {_format_currency(charge.amount_cents)} | "
                     f"{_format_currency(fee.allocated_cents)} | "
                     f"{_format_currency(fee.remaining_cents)} | {fee.status.value}"
@@ -142,7 +142,7 @@ def _print_late_fee_history(history: LateFeeHistory) -> None:
     print(f"Obligation: {charge.rent_obligation_id}")
     print(f"Period: {history.period}")
     print(f"Account: {history.account_display_name}")
-    print(f"Unit: {history.unit_label}")
+    print(f"Property / Unit: {history.property_name} / {history.unit_label}")
     print(f"Amount: {_format_currency(charge.amount_cents)}")
     print(f"Assessed on: {charge.assessed_on}")
     print(f"Reason: {charge.reason}")

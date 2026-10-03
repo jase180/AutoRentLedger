@@ -57,16 +57,18 @@ duplicate schema definitions or move authoritative write checks outside their tr
 
 The rental hierarchy is `Property -> Unit -> Rent Account`. Every Unit belongs to exactly one
 Property, and a Unit label is unique only within that Property. Property ID is authoritative;
-duplicate Property display names are allowed. The v13 migration materializes one `Default
+duplicate Property display names are allowed. The v14 migration materializes one `Default
 Property` only when legacy Units exist and preserves every Unit ID and downstream accounting
 relationship.
 
 `UnitRecord` is the persisted unit entity with `id`, `property_id`, `label`, and `created_at`.
-`UnitContext` remains the reusable read-model identity (`unit_id` and `unit_label`) used
+`UnitContext` is the reusable read-model identity (`property_id`, `property_name`, `unit_id`, and
+`unit_label`) used
 when account, obligation, allocation, schedule, planning, reconciliation, suggestion, and late-fee
-queries project a unit. Compatibility accessors preserve existing output while giving future rental
-hierarchy work one explicit seam to extend. Property-aware presentation is intentionally deferred;
-Property IDs do not change the meaning of rent accounts, obligations, payments, or allocations.
+queries project a unit. Unit labels are only unique within a Property, so every user-facing read
+path carries Property context and renders `Property Name / Unit Label` where ambiguity matters.
+Property names remain live joined presentation metadata; Property IDs do not change the meaning of
+rent accounts, obligations, payments, or allocations and are not copied into accounting tables.
 
 ## Presentation and orchestration organization
 

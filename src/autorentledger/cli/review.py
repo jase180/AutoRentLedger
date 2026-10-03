@@ -52,7 +52,8 @@ def run_review(database_path: Path) -> int:
         }:
             reference = f"oblig. {item.reference_id}"
             details = (
-                f"{item.unit_label} / {item.account_display_name} / {item.period} / "
+                f"{item.unit.property_name} / {item.unit.unit_label} / "
+                f"{item.account_display_name} / {item.period} / "
                 f"{_format_currency(item.amount_cents)} remaining"
             )
         else:

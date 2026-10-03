@@ -296,7 +296,8 @@ def _print_sync_result(result: SyncResult) -> None:
     print(f"Actionable suggestions: {len(result.actionable_suggestions)}")
     for suggestion in result.actionable_suggestions:
         print(
-            f"Payment {suggestion.payment_event_id} -> {suggestion.unit_label} / "
+            f"Payment {suggestion.payment_event_id} -> {suggestion.property_name} / "
+            f"{suggestion.unit_label} / "
             f"{suggestion.account_display_name} / {suggestion.period}: "
             f"{_format_currency(suggestion.suggested_amount_cents)}"
         )

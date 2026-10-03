@@ -207,14 +207,29 @@ class SQLiteLateFeeRepository:
 
     @staticmethod
     def _history(connection: sqlite3.Connection, fee_id: int) -> LateFeeHistory:
+        has_properties = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'properties'"
+        ).fetchone() is not None
+        property_columns = (
+            "property.id AS property_id, property.display_name AS property_name,"
+            if has_properties
+            else "0 AS property_id, 'Legacy Property' AS property_name,"
+        )
+        property_join = (
+            "JOIN properties AS property ON property.id = unit.property_id"
+            if has_properties
+            else ""
+        )
         row = connection.execute(
-            """SELECT charge.*, obligation.period, obligation.rent_account_id,
+            f"""SELECT charge.*, obligation.period, obligation.rent_account_id,
+                      {property_columns}
                       account.unit_id,
                       account.display_name AS account_display_name, unit.label AS unit_label
                FROM late_fee_charges AS charge
                JOIN rent_obligations AS obligation ON obligation.id = charge.rent_obligation_id
                JOIN rent_accounts AS account ON account.id = obligation.rent_account_id
                JOIN units AS unit ON unit.id = account.unit_id
+               {property_join}
                WHERE charge.id = ?""",
             (fee_id,),
         ).fetchone()
@@ -271,7 +286,12 @@ class SQLiteLateFeeRepository:
             period=row["period"],
             rent_account_id=row["rent_account_id"],
             account_display_name=row["account_display_name"],
-            unit=UnitContext(row["unit_id"], row["unit_label"]),
+            unit=UnitContext(
+                row["property_id"],
+                row["property_name"],
+                row["unit_id"],
+                row["unit_label"],
+            ),
             allocated_cents=allocated,
             remaining_cents=remaining,
             status=status,

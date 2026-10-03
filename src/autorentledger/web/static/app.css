@@ -180,3 +180,9 @@ code { display: block; width: fit-content; max-width: 100%; margin: .35rem 0; pa
   .count-strip div, .attention-grid div { text-align: left; }
   .fact-grid, .compact-facts { grid-template-columns: 1fr; }
 }
+.property-context {
+  color: var(--muted);
+  display: block;
+  font-size: 0.85em;
+  margin-top: 0.15rem;
+}

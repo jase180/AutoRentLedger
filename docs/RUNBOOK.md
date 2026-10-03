@@ -1017,7 +1017,9 @@ autorentledger report --period 2026-09 --csv reports/2026-09.csv
 The command still prints the terminal report and refuses to overwrite an existing CSV. Reports and
 CSV files are derived projections, not sources of truth. Obligation totals use obligation period;
 payment intake uses payment occurrence date and includes allocations from those payments even when
-they target another month.
+they target another month. Terminal rows use `Property Name / Unit Label`; CSV rows expose separate
+`property_id`, `property_name`, `unit_id`, and `unit_label` columns. Property names are joined live,
+so a Property rename appears on the next read without rewriting accounting history.
 
 ## Late fees
 

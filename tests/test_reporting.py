@@ -214,7 +214,10 @@ def test_csv_is_exact_private_safe_and_refuses_overwrite(tmp_path, capsys):
     assert list(rows[0]) == [
         "period",
         "obligation_id",
-        "unit",
+        "property_id",
+        "property_name",
+        "unit_id",
+        "unit_label",
         "account",
         "due_date",
         "owed_cents",

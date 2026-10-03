@@ -93,6 +93,8 @@ class SQLiteSuggestionRepository:
                 SELECT
                     rent_account_payers.payer_id,
                     rent_accounts.id AS rent_account_id,
+                    properties.id AS property_id,
+                    properties.display_name AS property_name,
                     rent_accounts.unit_id,
                     units.label AS unit_label,
                     rent_accounts.display_name AS account_display_name
@@ -100,6 +102,7 @@ class SQLiteSuggestionRepository:
                 JOIN rent_accounts
                     ON rent_accounts.id = rent_account_payers.rent_account_id
                 JOIN units ON units.id = rent_accounts.unit_id
+                JOIN properties ON properties.id = units.property_id
                 ORDER BY rent_account_payers.payer_id, rent_accounts.id
                 """
             ).fetchall()

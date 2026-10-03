@@ -159,6 +159,8 @@ class SQLiteLateFeeAllocationRepository:
             rows = connection.execute(
                 """SELECT allocation.*, fee.rent_obligation_id,
                           obligation.rent_account_id, obligation.period,
+                          property.id AS property_id,
+                          property.display_name AS property_name,
                           account.unit_id,
                           unit.label AS unit_label,
                           account.display_name AS account_display_name
@@ -166,7 +168,8 @@ class SQLiteLateFeeAllocationRepository:
                    JOIN late_fee_charges AS fee ON fee.id = allocation.late_fee_charge_id
                    JOIN rent_obligations AS obligation ON obligation.id = fee.rent_obligation_id
                    JOIN rent_accounts AS account ON account.id = obligation.rent_account_id
-                   JOIN units AS unit ON unit.id = account.unit_id"""
+                   JOIN units AS unit ON unit.id = account.unit_id
+                   JOIN properties AS property ON property.id = unit.property_id"""
                 + where + " ORDER BY allocation.id", values,
             ).fetchall()
         summaries = []

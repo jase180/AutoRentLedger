@@ -371,9 +371,9 @@ def run_unit_add(database_path: Path, property_id: int, label: str) -> int:
 
 def run_unit_listing(database_path: Path) -> int:
     units = SQLiteRentalRepository(database_path).list_units()
-    print(f"{'ID':<4} {'PROPERTY ID':<12} UNIT")
+    print(f"{'ID':<4} {'PROPERTY / UNIT':<36}")
     for unit in units:
-        print(f"{unit.id:<4} {unit.property_id:<12} {unit.label}")
+        print(f"{unit.id:<4} {unit.property_name} / {unit.label}")
     return 0
 
 def run_rent_account_add(
@@ -396,12 +396,13 @@ def run_rent_account_add(
 
 def run_rent_account_listing(database_path: Path) -> int:
     accounts = SQLiteRentalRepository(database_path).list_rent_accounts()
-    print(f"{'ID':<4} {'UNIT':<12} {'ACCOUNT':<24} {'ACTIVE FROM':<12} ACTIVE TO")
+    print(f"{'ID':<4} {'PROPERTY / UNIT':<32} {'ACCOUNT':<24} {'ACTIVE FROM':<12} ACTIVE TO")
     for account in accounts:
         active_from = account.active_from or "-"
         active_to = account.active_to or "-"
         print(
-            f"{account.id:<4} {account.unit_label:<12} {account.display_name:<24} "
+            f"{account.id:<4} {account.property_name + ' / ' + account.unit_label:<32} "
+            f"{account.display_name:<24} "
             f"{active_from:<12} {active_to}"
         )
     return 0
@@ -429,7 +430,7 @@ def run_rent_account_show(database_path: Path, account_id: int) -> int:
         return 1
 
     print(f"Rent account {account.id}")
-    print(f"Unit: {account.unit_label}")
+    print(f"Property / Unit: {account.property_name} / {account.unit_label}")
     print(f"Name: {account.display_name}")
     print(f"Active from: {account.active_from or '-'}")
     print(f"Active to: {account.active_to or '-'}")

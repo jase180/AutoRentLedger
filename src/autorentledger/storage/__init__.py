@@ -131,6 +131,7 @@ from autorentledger.storage.rentals import (
     TenancySetupUnitLabelConflictStorageError,
     TenancySetupUnitNotFoundStorageError,
     UnitRecord,
+    UnitSummary,
 )
 from autorentledger.storage.reporting import PaymentIntakeSourceRecord, SQLiteReportingRepository
 from autorentledger.storage.review import (
@@ -284,5 +285,6 @@ __all__ = [
     "TenancySetupUnitNotFoundStorageError",
     "UnallocatedPaymentSourceRecord",
     "UnitRecord",
+    "UnitSummary",
     "UnparsedEmailSourceRecord",
 ]

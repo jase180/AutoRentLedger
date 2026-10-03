@@ -58,11 +58,11 @@
     {% if overview.accounts %}
       <div class="table-wrap rent-status-board">
         <table class="rent-status-table">
-          <thead><tr><th>Unit</th><th>Renter / Account</th><th class="money">Rent</th><th class="money">Paid</th><th class="money">Balance</th><th>Last payment</th><th>Status</th></tr></thead>
+          <thead><tr><th>Property / Unit</th><th>Renter / Account</th><th class="money">Rent</th><th class="money">Paid</th><th class="money">Balance</th><th>Last payment</th><th>Status</th></tr></thead>
           <tbody>
             {% for account in overview.accounts %}
               <tr class="{% if account.status.value == 'PAID' %}account-row-paid{% else %}account-row-open{% endif %}">
-                <td class="rent-unit" data-label="Unit"><strong>{{ account.unit_label }}</strong></td>
+                <td class="rent-unit" data-label="Property / Unit"><strong>{{ account.unit_label }}</strong><span class="property-context">{{ account.property_name }}</span></td>
                 <td class="rent-account" data-label="Renter / Account">
                   <a href="{{ url_for('web.rent_account_detail', rent_account_id=account.rent_account_id) }}#obligation-{{ account.rent_obligation_id }}">{{ account.account_display_name }}</a>
                   {% if account.payer_names|length != 1 or account.payer_names[0] != account.account_display_name %}
@@ -119,7 +119,7 @@
       <div class="panel-list">
         {% for missing in overview.missing_obligations %}
           <article class="warning-panel">
-            <h3>{{ missing.unit_label }} / {{ missing.account_display_name }}</h3>
+            <h3>{{ missing.property_name }} / {{ missing.unit_label }} / {{ missing.account_display_name }}</h3>
             <p>Expected {{ missing.amount_cents|money }} · due day {{ missing.due_day }} · {{ missing.period }}</p>
           </article>
         {% endfor %}
@@ -138,7 +138,7 @@
         {% for suggestion in overview.actionable_suggestions %}
           <article class="suggestion-panel">
             <h3><a href="{{ url_for('web.payment_detail', payment_event_id=suggestion.payment_event_id) }}">Payment {{ suggestion.payment_event_id }}</a></h3>
-            <p>{{ suggestion.unit_label }} / {{ suggestion.account_display_name }} / {{ suggestion.period }}</p>
+            <p>{{ suggestion.property_name }} / {{ suggestion.unit_label }} / {{ suggestion.account_display_name }} / {{ suggestion.period }}</p>
             <dl>
               <div><dt>Suggested amount</dt><dd>{{ suggestion.suggested_amount_cents|money }}</dd></div>
               <div><dt>Reason</dt><dd>{{ suggestion.reason.value }}</dd></div>

@@ -35,7 +35,7 @@
     {% for account in plan.accounts %}
       <section class="plan-account" aria-labelledby="plan-account-{{ account.rent_account_id }}">
         <div class="section-heading-row">
-          <h2 id="plan-account-{{ account.rent_account_id }}">{{ account.unit_label }} — <a href="{{ url_for('web.rent_account_detail', rent_account_id=account.rent_account_id) }}">{{ account.account_name }}</a></h2>
+          <h2 id="plan-account-{{ account.rent_account_id }}">{{ account.property_name }} / {{ account.unit_label }} — <a href="{{ url_for('web.rent_account_detail', rent_account_id=account.rent_account_id) }}">{{ account.account_name }}</a></h2>
           <span>Account {{ account.rent_account_id }}</span>
         </div>
 
