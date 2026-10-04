@@ -162,7 +162,9 @@ Each domain module under `src/autorentledger/cli/` owns both parser registration
 setup/end lifecycle commands live in `cli/tenancy.py`. The stable `autorentledger.cli:main`
 entrypoint explicitly assembles those modules, applies only the shared schema preflight, and invokes
 the registered leaf handler. Command adapters continue to delegate validation, business rules, and
-writes to existing services and repositories.
+writes to existing services and repositories. The Makefile is a convenience wrapper over these
+same CLI commands: its real-file sentinels make local environment setup repeatable, while `start`
+performs the existing database check before invoking the existing web command.
 
 Web read composition and route registration are grouped by screen under
 `src/autorentledger/web/composition/` and `src/autorentledger/web/routes/`. Focused route modules
@@ -204,7 +206,9 @@ thin and authenticated, and the web surface remains inspection-only.
   The planner remains rent-only but subtracts existing late-fee allocations from payment capacity.
 - The CLI owns explicit mutations. The authenticated Flask UI remains read-only and loopback-only;
   allocation-plan and drill-down pages compose the canonical planner, audit, allocation, and
-  reconciliation services used by terminal workflows.
+  reconciliation services used by terminal workflows. Web authentication values may come from
+  the process environment or the Git-ignored `.env.local`, with the environment taking precedence;
+  neither configuration path weakens mandatory authentication or loopback-only binding.
 - `sync` refreshes raw evidence and payment events only. After a verified backup and successful
   sync, `daily` also ensures current-month rent obligations, then recomputes review/suggestions.
   Neither operation creates aliases, allocations, or late fees, and neither rebuilds old payments.

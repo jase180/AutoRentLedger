@@ -3,19 +3,23 @@
 from autorentledger.web.app import create_app
 from autorentledger.web.auth import (
     AUTH_CONFIGURATION_ERROR,
+    LOCAL_WEB_CONFIG,
     PASSWORD_HASH_ENV,
     SECRET_KEY_ENV,
     WebAuthConfig,
     WebAuthConfigurationError,
     load_web_auth_config,
+    write_local_web_auth_config,
 )
 
 __all__ = [
     "AUTH_CONFIGURATION_ERROR",
+    "LOCAL_WEB_CONFIG",
     "PASSWORD_HASH_ENV",
     "SECRET_KEY_ENV",
     "WebAuthConfig",
     "WebAuthConfigurationError",
     "create_app",
     "load_web_auth_config",
+    "write_local_web_auth_config",
 ]

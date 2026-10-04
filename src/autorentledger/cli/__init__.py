@@ -90,7 +90,7 @@ from autorentledger.cli.rentals import (
 from autorentledger.cli.reporting import run_overview, run_report
 from autorentledger.cli.review import run_review
 from autorentledger.cli.tenancy import run_tenancy_end, run_tenancy_setup
-from autorentledger.cli.web import run_web
+from autorentledger.cli.web import run_web, run_web_config
 from autorentledger.daily import run_daily_operation
 from autorentledger.operations import run_sync
 from autorentledger.processing import process_raw_emails

@@ -74,103 +74,95 @@ so identical unit labels at different Properties remain unambiguous.
 Requirements:
 
 - Python 3.11 or newer
+- GNU Make is optional and is not bundled with Windows
 - A Google account and Google Cloud Desktop OAuth client only if you want to sync Gmail evidence
 
 The application runs directly on Windows PowerShell; WSL is not required. The web UI is local and
 read-only. These steps use the default database at `data/autorentledger.db`.
 
-### 1. Open the repository
+### First time with GNU Make
 
 ```powershell
 cd C:\path\to\AutoRentLedger
-py -3.11 --version
+make setup
+make web-config
+make start
 ```
 
-### 2. Create the virtual environment and install the app
+`make setup` selects an available Python 3 interpreter and verifies that it is Python 3.11 or
+newer. It creates `.venv` only when needed, reinstalls dependencies when `pyproject.toml` changes,
+then upgrades and checks the database. `make web-config` securely prompts for the owner password,
+stores only its hash plus a random Flask signing key in the Git-ignored `.env.local`, and refuses
+to overwrite that file unless `--force` is explicitly passed to the underlying command.
 
-PowerShell:
+`make start` checks database health and starts the existing authenticated server on
+`127.0.0.1:8000`. Leave that terminal running, open `http://127.0.0.1:8000/`, and sign in with the
+password chosen during `make web-config`. Stop it with `Ctrl+C`.
+
+Every later start is simply:
 
 ```powershell
-py -3.11 -m venv .venv
+cd C:\path\to\AutoRentLedger
+make start
+```
+
+The server remains read-only and accepts loopback hosts only. Startup never syncs Gmail, rotates
+web credentials, enables debug mode, or upgrades the database implicitly.
+
+### Manual setup without GNU Make
+
+GNU Make is only a convenience wrapper. The equivalent PowerShell flow is:
+
+```powershell
+cd C:\path\to\AutoRentLedger
+py -3 --version
+py -3 -m venv .venv
 .venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
-
 autorentledger db upgrade
 autorentledger db check
+autorentledger web-config
+autorentledger web --database data/autorentledger.db --host 127.0.0.1 --port 8000
 ```
 
-macOS or Linux:
+On macOS or Linux:
 
 ```bash
-python3.11 -m venv .venv
+cd /path/to/AutoRentLedger
+python3 --version
+python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e '.[dev]'
-
 autorentledger db upgrade
 autorentledger db check
+autorentledger web-config
+autorentledger web --database data/autorentledger.db --host 127.0.0.1 --port 8000
 ```
 
 `db upgrade` initializes the default database at `data/autorentledger.db` when it does not exist
 and explicitly migrates an older database. Normal commands never upgrade the schema implicitly.
 
-If GNU Make is installed, the entire environment/install/database sequence is:
+For a later manual restart, activate `.venv`, check the database, and start the server:
 
 ```powershell
-make setup
-```
-
-Make is optional and is not bundled with Windows. The explicit PowerShell commands above remain
-the supported fallback.
-
-### 3. Configure the local web login
-
-The web server refuses to start without a password hash and Flask signing key. Set both in the
-same PowerShell window that will run the app:
-
-```powershell
-$env:AUTORENTLEDGER_WEB_PASSWORD_HASH = python -c "from getpass import getpass; from werkzeug.security import generate_password_hash; print(generate_password_hash(getpass('AutoRentLedger password: ')))"
-$env:AUTORENTLEDGER_WEB_SECRET_KEY = python -c "import secrets; print(secrets.token_urlsafe(32))"
-```
-
-The first command prompts for the owner password without echoing it. Remember that password for
-the login screen. These environment variables live only in the current PowerShell session; do not
-put their values in Git, SQLite, the README, or shell history.
-
-### 4. Start the read-only web app
-
-With the virtual environment activated:
-
-```powershell
-autorentledger web --database data/autorentledger.db --host 127.0.0.1 --port 8000
-```
-
-Or, with GNU Make:
-
-```powershell
-make web
-```
-
-Leave that terminal running. Open `http://127.0.0.1:8000/` and sign in with the password chosen in
-step 3. The server intentionally accepts loopback hosts only. Stop it with `Ctrl+C`.
-
-### 5. Start it again later
-
-For each new PowerShell session:
-
-```powershell
-cd C:\path\to\AutoRentLedger
 .venv\Scripts\Activate.ps1
-$env:AUTORENTLEDGER_WEB_PASSWORD_HASH = python -c "from getpass import getpass; from werkzeug.security import generate_password_hash; print(generate_password_hash(getpass('AutoRentLedger password: ')))"
-$env:AUTORENTLEDGER_WEB_SECRET_KEY = python -c "import secrets; print(secrets.token_urlsafe(32))"
 autorentledger db check
 autorentledger web --database data/autorentledger.db --host 127.0.0.1 --port 8000
 ```
 
-Generating a new hash and signing key at startup is safe; use the password entered during that
-startup. If you deliberately persist the environment variables outside Git, you can reuse the
-same password and sessions instead.
+The web server loads `.env.local` from the working directory without executing it as shell code.
+Real process environment variables remain supported and take precedence over file values. For a
+temporary environment-only configuration, set both values before starting:
+
+```powershell
+$env:AUTORENTLEDGER_WEB_PASSWORD_HASH = python -c "from getpass import getpass; from werkzeug.security import generate_password_hash; print(generate_password_hash(getpass('AutoRentLedger password: ')))"
+$env:AUTORENTLEDGER_WEB_SECRET_KEY = python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+The first command prompts without echoing the password. Never commit `.env.local`, password hashes,
+secret keys, OAuth files, databases, backups, or reports.
 
 ### Optional: connect Gmail evidence
 
@@ -385,9 +377,10 @@ Schedules and missing-obligation warnings remain separate on Overview. Rental ro
 Property context alongside Unit identity. Every screen is read-only;
 none query Gmail, sync, generate obligations, create allocations, or expose ledger write routes.
 The UI requires one owner password configured through
-`AUTORENTLEDGER_WEB_PASSWORD_HASH` and `AUTORENTLEDGER_WEB_SECRET_KEY`; neither value belongs in
-Git or SQLite. Flask still accepts only `127.0.0.1`, `localhost`, or `::1` and rejects direct
-LAN, Tailscale-IP, and public binding. See the runbook for private Tailscale Serve access.
+`AUTORENTLEDGER_WEB_PASSWORD_HASH` and `AUTORENTLEDGER_WEB_SECRET_KEY`. They may come from the
+process environment or the ignored `.env.local`; process values win. Neither value belongs in Git
+or SQLite. Flask still accepts only `127.0.0.1`, `localhost`, or `::1` and rejects direct LAN,
+Tailscale-IP, and public binding. See the runbook for private Tailscale Serve access.
 
 ## Common commands
 
@@ -433,8 +426,9 @@ path. Override `DATABASE`, `PORT`, `PERIOD`, or `PROPERTY` at invocation time as
 | --- | --- |
 | Show available targets | `make help` |
 | Create `.venv`, install development dependencies, upgrade and check the database | `make setup` |
-| Start the local read-only web app | `make web` |
-| Start on another port | `make web PORT=8080` |
+| Securely create the ignored local web configuration | `make web-config` |
+| Check the database and start the local read-only web app | `make start` |
+| Start on another loopback port | `make start PORT=8080` |
 | Show, upgrade, or check schema health | `make db-status`, `make db-upgrade`, `make db-check` |
 | Create a verified database backup | `make backup` |
 | Sync Gmail evidence | `make sync` |
@@ -444,10 +438,13 @@ path. Override `DATABASE`, `PORT`, `PERIOD`, or `PROPERTY` at invocation time as
 | Show one Property's monthly cash | `make property-cash PERIOD=2026-10 PROPERTY=2` |
 | List active expenses | `make expenses` |
 | Run Ruff, tests, or both | `make lint`, `make test`, `make check` |
-| Apply Ruff's safe fixes | `make format` |
+| Apply Ruff's safe lint fixes | `make fix` |
+| Format Python source | `make format` |
 
 The Makefile defaults to `.venv/Scripts/python.exe` on Windows and `.venv/bin/python` elsewhere.
-You can override either interpreter, for example `make test PYTHON=python`.
+The bootstrap defaults are `py -3` on Windows and `python3` elsewhere; any Python 3.11 or newer is
+accepted. You can override either interpreter, for example
+`make setup BOOTSTRAP_PYTHON=python3.12` or `make test PYTHON=python`.
 
 ## Safety and privacy
 

@@ -192,20 +192,38 @@ local paths.
 
 ## Local read-only web view
 
-Configure single-owner authentication in the PowerShell session that will start the server. These
-commands prompt without echoing the password and generate a random Flask signing key:
+Create the persistent, local-only authentication configuration once:
+
+```powershell
+make web-config
+```
+
+Without GNU Make, activate `.venv` and run `autorentledger web-config`. The command prompts twice
+without echoing the password, stores only its password hash plus a random Flask signing key in
+`.env.local`, and refuses to overwrite that file unless you explicitly use `web-config --force`.
+The file is Git-ignored and must remain private.
+
+Process environment variables remain available for temporary or externally managed configuration:
 
 ```powershell
 $env:AUTORENTLEDGER_WEB_PASSWORD_HASH = python -c "from getpass import getpass; from werkzeug.security import generate_password_hash; print(generate_password_hash(getpass('AutoRentLedger password: ')))"
 $env:AUTORENTLEDGER_WEB_SECRET_KEY = python -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
 
-Keep both values private and outside the repository. AutoRentLedger stores neither value in
-SQLite and refuses to start the web server when either is absent.
+Environment values take precedence over `.env.local`. AutoRentLedger stores neither value in
+SQLite, never evaluates `.env.local` as shell code, and refuses to start when either value is
+absent.
 
-Start the local server:
+For normal startup, check the database and start the local server together:
 
 ```powershell
+make start
+```
+
+The equivalent manual commands are:
+
+```powershell
+autorentledger db check --database data/autorentledger.db
 autorentledger web `
   --database data/autorentledger.db `
   --host 127.0.0.1 `

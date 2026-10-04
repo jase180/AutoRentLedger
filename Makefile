@@ -9,12 +9,14 @@ HOST ?= 127.0.0.1
 PORT ?= 8000
 PERIOD ?=
 PROPERTY ?=
+VENV_CREATED = $(VENV)/.created
+VENV_INSTALLED = $(VENV)/.installed
 
 ifeq ($(OS),Windows_NT)
-BOOTSTRAP_PYTHON ?= py -3.11
+BOOTSTRAP_PYTHON ?= py -3
 PYTHON ?= $(VENV)/Scripts/python.exe
 else
-BOOTSTRAP_PYTHON ?= python3.11
+BOOTSTRAP_PYTHON ?= python3
 PYTHON ?= $(VENV)/bin/python
 endif
 
@@ -22,31 +24,52 @@ CLI = "$(PYTHON)" -m autorentledger.cli
 
 .DEFAULT_GOAL := help
 
-.PHONY: help venv install setup db-status db-upgrade db-check backup web run \
-	sync daily overview property-cash expenses lint format test check ci
+.PHONY: help python-check venv install setup web-config start db-status db-upgrade db-check \
+	backup web run sync daily overview property-cash expenses lint fix format test check ci
 
 help:
-	@echo "AutoRentLedger commands"
-	@echo "  make setup                         Create venv, install dev dependencies, upgrade/check DB"
-	@echo "  make web                           Start read-only UI at http://127.0.0.1:8000"
-	@echo "  make web PORT=8080                 Start UI on another loopback port"
-	@echo "  make db-status | db-upgrade | db-check | backup"
-	@echo "  make sync | daily                  Run normal evidence workflows"
-	@echo "  make overview PERIOD=YYYY-MM       Show the monthly rent overview"
-	@echo "  make property-cash PERIOD=YYYY-MM [PROPERTY=ID]"
-	@echo "  make expenses                      List active Property expenses"
-	@echo "  make lint | format | test | check  Developer verification"
+	@echo "AutoRentLedger"
+	@echo "First time:"
+	@echo "  make setup                         Create/install the environment and upgrade/check the DB"
+	@echo "  make web-config                    Securely create the ignored local web configuration"
+	@echo "Normal use:"
+	@echo "  make start                         Check the DB and start the authenticated loopback UI"
+	@echo "  make daily                         Run the backed-up daily workflow"
+	@echo "Checks and safety:"
+	@echo "  make check                         Run Ruff and the full test suite"
+	@echo "  make db-check                      Check database health without changing it"
+	@echo "  make backup                        Create a verified database backup"
+	@echo "Other shortcuts:"
+	@echo "  make sync | overview PERIOD=YYYY-MM | property-cash PERIOD=YYYY-MM"
+	@echo "  make db-status | db-upgrade | web | expenses"
+	@echo "  make lint | fix | format | test"
 
-venv:
+python-check:
+	$(BOOTSTRAP_PYTHON) -c "import sys; sys.exit('AutoRentLedger requires Python 3.11 or newer.') if sys.version_info < (3, 11) else None"
+
+$(VENV_CREATED): | python-check
 	$(BOOTSTRAP_PYTHON) -m venv "$(VENV)"
+	$(BOOTSTRAP_PYTHON) -c "from pathlib import Path; Path(r'$@').touch()"
 
-install: venv
+$(VENV_INSTALLED): $(VENV_CREATED) pyproject.toml
 	"$(PYTHON)" -m pip install --upgrade pip
 	"$(PYTHON)" -m pip install -e ".[dev]"
+	"$(PYTHON)" -c "from pathlib import Path; Path(r'$@').touch()"
+
+venv: $(VENV_CREATED)
+
+install: $(VENV_INSTALLED)
 
 setup: install
 	$(CLI) db upgrade --database "$(DATABASE)"
 	$(CLI) db check --database "$(DATABASE)"
+
+web-config: $(VENV_INSTALLED)
+	$(CLI) web-config
+
+start: $(VENV_INSTALLED)
+	$(CLI) db check --database "$(DATABASE)"
+	$(CLI) web --database "$(DATABASE)" --host "$(HOST)" --port "$(PORT)"
 
 db-status:
 	$(CLI) db status --database "$(DATABASE)"
@@ -63,7 +86,7 @@ backup:
 web:
 	$(CLI) web --database "$(DATABASE)" --host "$(HOST)" --port "$(PORT)"
 
-run: web
+run: start
 
 sync:
 	$(CLI) sync --database "$(DATABASE)"
@@ -85,8 +108,11 @@ expenses:
 lint:
 	"$(PYTHON)" -m ruff check .
 
-format:
+fix:
 	"$(PYTHON)" -m ruff check . --fix
+
+format:
+	"$(PYTHON)" -m ruff format .
 
 test:
 	"$(PYTHON)" -m pytest -q

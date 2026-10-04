@@ -10,6 +10,7 @@ build/
 
 # Local configuration and secrets
 .env
+.env.local
 .env.*
 credentials*.json
 client_secret*.json
