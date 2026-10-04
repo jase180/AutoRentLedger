@@ -14,6 +14,8 @@
           <nav class="site-nav" aria-label="Primary navigation">
             <a href="{{ url_for('web.root') }}"{% if active_page == "overview" %} aria-current="page"{% endif %}>Overview</a>
             <span aria-hidden="true">|</span>
+            <a href="{{ url_for('web.month_close') }}"{% if active_page == "month-close" %} aria-current="page"{% endif %}>Month Close</a>
+            <span aria-hidden="true">|</span>
             <a href="{{ url_for('web.attention') }}"{% if active_page == "attention" %} aria-current="page"{% endif %}>Attention</a>
             <span aria-hidden="true">|</span>
             <a href="{{ url_for('web.payments') }}"{% if active_page == "payments" %} aria-current="page"{% endif %}>Payments</a>

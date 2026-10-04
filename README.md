@@ -21,6 +21,7 @@ general property-management system.
 - Requires an explicit allocation before payment money satisfies an obligation.
 - Derives reconciliation, review items, conservative allocation suggestions, reports, and a
   monthly owner overview without persisting those projections.
+- Composes those canonical facts into a read-only Month Close owner review center.
 - Supports explicit parser rebuilds, schema upgrades, database health checks, verified backups,
   and conservative restores.
 
@@ -366,8 +367,9 @@ Serve the same canonical owner overview in a local browser:
 autorentledger web --database data/autorentledger.db --host 127.0.0.1 --port 8000
 ```
 
-Then open `http://127.0.0.1:8000/`. The local browser includes **Overview**, **Attention**,
-**Payments**, **Obligations**, **Expenses**, **Property Cash**, and **Allocation Plan**. Attention is the global/current derived review queue. Payments
+Then open `http://127.0.0.1:8000/`. The local browser includes **Overview**, **Month Close**,
+**Attention**, **Payments**, **Obligations**, **Expenses**, **Property Cash**, and
+**Allocation Plan**. Attention is the global/current derived review queue. Payments
 shows normalized payments with current exact-alias payer interpretation and payment-centric
 allocated/unallocated amounts, and payment IDs open provenance, audit, and allocation details.
 Obligations shows month-scoped canonical reconciliation for actual obligations only; account links
@@ -382,6 +384,25 @@ process environment or the ignored `.env.local`; process values win. Neither val
 or SQLite. Flask still accepts only `127.0.0.1`, `localhost`, or `::1` and rejects direct LAN,
 Tailscale-IP, and public binding. See the runbook for private Tailscale Serve access.
 
+## Month Close owner review
+
+Run one derived monthly review from the terminal:
+
+```powershell
+autorentledger month-close --period 2026-10
+```
+
+Or open `http://127.0.0.1:8000/month-close?period=2026-10`. Month Close combines canonical rent
+reconciliation, ledger-wide payment/evidence attention, selected-month allocation suggestions,
+recurring-schedule generation previews, active expenses, and Property Cash. `CLEAR` means none of
+the explicit attention conditions remain; `NEEDS ATTENTION` means at least one partial or unpaid
+obligation, unresolved sender, payment with unallocated money, actionable selected-month
+suggestion, unparsed evidence item, or missing expected obligation remains.
+
+Month Close is live and read-only. It does not create obligations or allocations, run Gmail sync,
+include late fees in rent, lock the month, or persist a "closed" status. Expenses and negative
+Property Cash do not by themselves create an attention status.
+
 ## Common commands
 
 | Task | Command |
@@ -395,6 +416,7 @@ Tailscale-IP, and public binding. See the runbook for private Tailscale Serve ac
 | Preview ending a tenancy without deleting history | `autorentledger tenancy end --account ID --active-to 2026-11-30` |
 | End a partial final month at an agreed amount | `autorentledger tenancy end --account ID --active-to 2027-03-18 --final-month-rent 780.00 --apply` |
 | Inspect the owner dashboard | `autorentledger overview --period YYYY-MM` |
+| Review whether a month is operationally clear | `autorentledger month-close --period YYYY-MM` |
 | Inspect focused exceptions | `autorentledger review` |
 | List normalized payments | `autorentledger payments` |
 | Record historical/manual payment evidence | `autorentledger payment manual-add --sender "Synthetic Tenant" --amount 1450.00 --date 2026-05-03` |
@@ -434,6 +456,7 @@ path. Override `DATABASE`, `PORT`, `PERIOD`, or `PROPERTY` at invocation time as
 | Sync Gmail evidence | `make sync` |
 | Run the normal backed-up daily workflow | `make daily` |
 | Show monthly owner overview | `make overview PERIOD=2026-10` |
+| Review Month Close | `make month-close PERIOD=2026-10` |
 | Show all-Property monthly cash | `make property-cash PERIOD=2026-10` |
 | Show one Property's monthly cash | `make property-cash PERIOD=2026-10 PROPERTY=2` |
 | List active expenses | `make expenses` |

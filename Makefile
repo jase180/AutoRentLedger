@@ -25,7 +25,7 @@ CLI = "$(PYTHON)" -m autorentledger.cli
 .DEFAULT_GOAL := help
 
 .PHONY: help python-check venv install setup web-config start db-status db-upgrade db-check \
-	backup web run sync daily overview property-cash expenses lint fix format test check ci
+	backup web run sync daily overview month-close property-cash expenses lint fix format test check ci
 
 help:
 	@echo "AutoRentLedger"
@@ -40,7 +40,8 @@ help:
 	@echo "  make db-check                      Check database health without changing it"
 	@echo "  make backup                        Create a verified database backup"
 	@echo "Other shortcuts:"
-	@echo "  make sync | overview PERIOD=YYYY-MM | property-cash PERIOD=YYYY-MM"
+	@echo "  make sync | overview PERIOD=YYYY-MM | month-close PERIOD=YYYY-MM"
+	@echo "  make property-cash PERIOD=YYYY-MM [PROPERTY=ID]"
 	@echo "  make db-status | db-upgrade | web | expenses"
 	@echo "  make lint | fix | format | test"
 
@@ -97,6 +98,10 @@ daily:
 overview:
 	$(if $(strip $(PERIOD)),,$(error PERIOD is required; use make overview PERIOD=YYYY-MM))
 	$(CLI) overview --database "$(DATABASE)" --period "$(PERIOD)"
+
+month-close:
+	$(if $(strip $(PERIOD)),,$(error PERIOD is required; use make month-close PERIOD=YYYY-MM))
+	$(CLI) month-close --database "$(DATABASE)" --period "$(PERIOD)"
 
 property-cash:
 	$(if $(strip $(PERIOD)),,$(error PERIOD is required; use make property-cash PERIOD=YYYY-MM))

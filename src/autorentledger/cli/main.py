@@ -12,6 +12,7 @@ from autorentledger.cli import (
     expenses,
     identity,
     late_fees,
+    month_close,
     obligations,
     operations,
     payments,
@@ -32,6 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
     operations.register_commands(subparsers)
     payments.register_commands(subparsers)
     late_fees.register_commands(subparsers)
+    month_close.register_commands(subparsers)
     tenancy.register_commands(subparsers)
     discovery.register_commands(subparsers)
     expenses.register_commands(subparsers)

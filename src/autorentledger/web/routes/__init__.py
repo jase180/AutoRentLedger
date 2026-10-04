@@ -6,6 +6,7 @@ from autorentledger.web.routes import (
     allocation_plan,
     attention,
     expenses,
+    month_close,
     obligations,
     overview,
     payments,
@@ -18,6 +19,7 @@ web_blueprint = Blueprint("web", __name__)
 
 root.register_routes(web_blueprint)
 overview.register_routes(web_blueprint)
+month_close.register_routes(web_blueprint)
 attention.register_routes(web_blueprint)
 expenses.register_routes(web_blueprint)
 payments.register_routes(web_blueprint)

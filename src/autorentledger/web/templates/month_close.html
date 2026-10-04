@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+
+{% block title %}Month Close - {{ summary.period|month_heading }} | AutoRentLedger{% endblock %}
+
+{% block content %}
+  <section class="page-heading">
+    <div>
+      <p class="eyebrow">Derived owner review center</p>
+      <h1>Month Close - {{ summary.period|month_heading }}</h1>
+      <p class="section-note">Live, read-only review. No closed state is stored and no repair is applied.</p>
+    </div>
+    <form class="period-form" method="get" action="{{ url_for('web.month_close') }}">
+      <label for="period">Month</label>
+      <input id="period" type="month" name="period" value="{{ summary.period }}" required>
+      <button type="submit">Review</button>
+    </form>
+  </section>
+
+  <p><span class="status {% if summary.status.value == 'CLEAR' %}status-paid{% else %}status-unpaid{% endif %}">{{ summary.status.value|replace('_', ' ') }}</span></p>
+
+  <section aria-labelledby="close-rent-heading">
+    <div class="section-heading-row">
+      <h2 id="close-rent-heading">Rent</h2>
+      <a href="{{ url_for('web.obligations', period=summary.period) }}">View obligations</a>
+    </div>
+    <div class="summary-grid">
+      <article class="summary-card"><span>Owed</span><strong>{{ summary.rent.owed_cents|money }}</strong></article>
+      <article class="summary-card summary-card-paid"><span>Allocated</span><strong>{{ summary.rent.allocated_cents|money }}</strong></article>
+      <article class="summary-card{% if summary.rent.remaining_cents %} summary-card-open{% endif %}"><span>Remaining</span><strong>{{ summary.rent.remaining_cents|money }}</strong></article>
+      <article class="summary-card"><span>Obligations</span><strong>{{ summary.rent.obligation_count }}</strong></article>
+    </div>
+    <dl class="count-strip rent-counts">
+      <div><dt>Total</dt><dd>{{ summary.rent.obligation_count }}</dd></div>
+      <div class="count-paid"><dt>Paid</dt><dd>{{ summary.rent.paid_count }}</dd></div>
+      <div class="count-partial"><dt>Partial</dt><dd>{{ summary.rent.partial_count }}</dd></div>
+      <div class="count-unpaid"><dt>Unpaid</dt><dd>{{ summary.rent.unpaid_count }}</dd></div>
+    </dl>
+  </section>
+
+  <section aria-labelledby="close-attention-heading">
+    <div class="section-heading-row">
+      <div><h2 id="close-attention-heading">Global attention</h2><p class="section-note">Ledger-wide evidence and available-money issues; not limited by payment occurrence date.</p></div>
+      <a href="{{ url_for('web.attention') }}">Open Attention</a>
+    </div>
+    <dl class="attention-grid">
+      <div><dt>Active payments</dt><dd>{{ summary.attention.active_payment_count }}</dd></div>
+      <div><dt>Unresolved senders</dt><dd>{{ summary.attention.unresolved_sender_count }}</dd></div>
+      <div><dt>Unallocated payments</dt><dd>{{ summary.attention.payments_with_unallocated_count }}</dd></div>
+      <div><dt>Unallocated money</dt><dd>{{ summary.attention.unallocated_cents|money }}</dd></div>
+      <div><dt>Unparsed evidence</dt><dd>{{ summary.attention.unparsed_evidence_count }}</dd></div>
+    </dl>
+    <p><a href="{{ url_for('web.payments', unresolved=1) }}">Unresolved payments</a> · <a href="{{ url_for('web.payments', unallocated=1) }}">Payments with money remaining</a></p>
+  </section>
+
+  <section aria-labelledby="close-suggestions-heading">
+    <div class="section-heading-row">
+      <h2 id="close-suggestions-heading">Suggestions for {{ summary.period|month_heading }}</h2>
+      <a href="{{ url_for('web.allocation_plan', **{'from': summary.period, 'to': summary.period}) }}">Open Allocation Plan</a>
+    </div>
+    {% if summary.attention.actionable_suggestions %}
+      <div class="panel-list">{% for suggestion in summary.attention.actionable_suggestions %}
+        <article class="suggestion-panel">
+          <h3><a href="{{ url_for('web.payment_detail', payment_event_id=suggestion.payment_event_id) }}">Payment {{ suggestion.payment_event_id }}</a> → obligation {{ suggestion.rent_obligation_id }}</h3>
+          <p>{{ suggestion.property_name }} / {{ suggestion.unit_label }} / {{ suggestion.account_display_name }} · {{ suggestion.suggested_amount_cents|money }}</p>
+        </article>
+      {% endfor %}</div>
+    {% else %}<p class="empty-state">No actionable allocation suggestions target this month.</p>{% endif %}
+  </section>
+
+  <section aria-labelledby="close-recurring-heading">
+    <h2 id="close-recurring-heading">Recurring rent</h2>
+    {% if summary.recurring_rent.missing_expected_obligations %}
+      <div class="panel-list">{% for item in summary.recurring_rent.missing_expected_obligations %}
+        <article class="warning-panel">
+          <h3>{{ item.property_name }} / {{ item.unit_label }} / {{ item.account_display_name }}</h3>
+          <p>Account {{ item.rent_account_id }} · schedule {{ item.schedule_id }} · expected {{ item.amount_cents|money }} · due {{ item.due_date }}</p>
+        </article>
+      {% endfor %}</div>
+      <p>This is a setup/operational warning, not rent owed. Review before generating an obligation.</p>
+    {% else %}<p class="empty-state">No missing expected obligations.</p>{% endif %}
+  </section>
+
+  <section aria-labelledby="close-expenses-heading">
+    <div class="section-heading-row">
+      <h2 id="close-expenses-heading">Expenses</h2>
+      <a href="{{ url_for('web.expenses') }}">View expenses</a>
+    </div>
+    <div class="summary-grid three-up">
+      <article class="summary-card"><span>Operating</span><strong>{{ summary.expenses.operating_expense_cents|money }}</strong></article>
+      <article class="summary-card"><span>Capital improvements</span><strong>{{ summary.expenses.capital_improvement_cents|money }}</strong></article>
+      <article class="summary-card"><span>Active expense rows</span><strong>{{ summary.expenses.active_expense_count }}</strong></article>
+    </div>
+    <p class="section-note">Expenses and negative cash do not by themselves make Month Close need attention.</p>
+  </section>
+
+  <section aria-labelledby="close-cash-heading">
+    <h2 id="close-cash-heading">Property Cash</h2>
+    {% if summary.property_cash %}<div class="table-wrap"><table>
+      <thead><tr><th>Property</th><th class="money">Rent owed</th><th class="money">Rent collected</th><th class="money">Operating</th><th class="money">Capital</th><th class="money">Net cash before debt</th></tr></thead>
+      <tbody>{% for item in summary.property_cash %}<tr>
+        <td><a href="{{ url_for('web.property_cash', period=summary.period, property=item.property_id) }}">{{ item.property_name }}</a></td>
+        <td class="money">{{ item.rent_owed_cents|money }}</td><td class="money">{{ item.rent_collected_cents|money }}</td><td class="money">{{ item.operating_expense_cents|money }}</td><td class="money">{{ item.capital_improvement_cents|money }}</td><td class="money">{{ item.net_cash_before_debt_cents|money }}</td>
+      </tr>{% endfor %}</tbody>
+    </table></div>{% else %}<p class="empty-state">No Properties found.</p>{% endif %}
+    <p class="section-note">Late fees remain separate from rent and are not included in Month Close totals.</p>
+  </section>
+{% endblock %}

@@ -10,6 +10,7 @@ from autorentledger.web.composition.expenses import (
     build_web_expense_detail,
     build_web_expenses,
 )
+from autorentledger.web.composition.month_close import build_web_month_close
 from autorentledger.web.composition.obligations import ObligationsPage, build_web_obligations
 from autorentledger.web.composition.overview import build_web_owner_overview
 from autorentledger.web.composition.payments import (

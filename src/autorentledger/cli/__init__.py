@@ -43,6 +43,7 @@ from autorentledger.cli.identity import (
 )
 from autorentledger.cli.late_fees import run_late_fee_command
 from autorentledger.cli.main import build_parser, main
+from autorentledger.cli.month_close import run_month_close
 from autorentledger.cli.obligations import (
     run_obligation_add,
     run_obligation_generation,

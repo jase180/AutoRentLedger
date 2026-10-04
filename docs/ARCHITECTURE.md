@@ -171,6 +171,12 @@ Web read composition and route registration are grouped by screen under
 register on the same `web` blueprint, preserving established URLs and endpoint names. Routes stay
 thin and authenticated, and the web surface remains inspection-only.
 
+`month_close.py` is a composed read model rather than a new source of truth. It combines canonical
+period reconciliation, global review items, conservative suggestions targeting the selected
+obligation month, schedule-generation planning, and Property Cash. Its `CLEAR` or
+`NEEDS_ATTENTION` status is derived on every read. There is no persisted close status, month lock,
+approval, automatic repair, or alternate accounting calculation.
+
 ## Invariants to preserve
 
 - Evidence origin is not accounting meaning. Raw MIME stays immutable; manual evidence records a
@@ -209,6 +215,9 @@ thin and authenticated, and the web surface remains inspection-only.
   reconciliation services used by terminal workflows. Web authentication values may come from
   the process environment or the Git-ignored `.env.local`, with the environment taking precedence;
   neither configuration path weakens mandatory authentication or loopback-only binding.
+- Month Close is a read-only operational workflow. Schedules surfaced there remain previews rather
+  than debt, payment occurrence dates do not determine rent months, and expenses or negative cash
+  do not independently create an attention condition.
 - `sync` refreshes raw evidence and payment events only. After a verified backup and successful
   sync, `daily` also ensures current-month rent obligations, then recomputes review/suggestions.
   Neither operation creates aliases, allocations, or late fees, and neither rebuilds old payments.

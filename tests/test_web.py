@@ -332,6 +332,7 @@ def test_app_factory_is_side_effect_free_and_registers_auth_and_ledger_routes(tm
             "/expenses/<int:expense_id>",
         "/login",
         "/logout",
+        "/month-close",
         "/obligations",
         "/overview",
         "/payments",
@@ -347,6 +348,7 @@ def test_app_factory_is_side_effect_free_and_registers_auth_and_ledger_routes(tm
         "/",
         "/overview",
         "/attention",
+        "/month-close",
         "/payments",
         "/obligations",
         "/allocation-plan",
@@ -374,7 +376,14 @@ def test_login_is_public_and_protected_routes_preserve_safe_next(tmp_path, monke
     assert login_response.status_code == 200
     assert 'type="password"' in login_output
     assert "Sign in" in login_output
-    for ledger_link in ("Overview", "Attention", "Payments", "Obligations", "Sign out"):
+    for ledger_link in (
+        "Overview",
+        "Month Close",
+        "Attention",
+        "Payments",
+        "Obligations",
+        "Sign out",
+    ):
         assert f">{ledger_link}<" not in login_output
     assert TEST_PASSWORD not in login_output
     assert TEST_AUTH_CONFIG.password_hash not in login_output
@@ -382,6 +391,7 @@ def test_login_is_public_and_protected_routes_preserve_safe_next(tmp_path, monke
     protected_paths = (
         "/",
         "/overview?period=2026-09",
+        "/month-close?period=2026-09",
         "/attention",
         "/payments?unallocated=1",
         "/obligations?period=2026-09",
@@ -1473,6 +1483,7 @@ def test_all_web_pages_share_final_navigation(tmp_path):
     client = create_app(database_path).test_client()
     paths = {
         "/overview?period=2026-09": "Overview",
+        "/month-close?period=2026-09": "Month Close",
         "/attention": "Attention",
         "/payments": "Payments",
         "/obligations?period=2026-09": "Obligations",
