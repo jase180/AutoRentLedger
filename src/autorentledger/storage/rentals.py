@@ -21,6 +21,7 @@ from autorentledger.storage.migrations import (
     create_rental_schema,
     create_rental_v4_schema,
 )
+from autorentledger.storage.obligations import RentObligationRecord
 from autorentledger.storage.schedules import RentScheduleRecord
 
 
@@ -102,6 +103,7 @@ class TenancySetupStorageResult:
     payer_reused: bool
     aliases: tuple[TenancySetupAliasStorageResult, ...]
     association: RentAccountPayerRecord
+    first_month_obligation: RentObligationRecord | None
     schedule: RentScheduleRecord | None
 
 
@@ -131,6 +133,12 @@ class TenancySetupAliasConflictStorageError(Exception):
     def __init__(self, alias: str, owner_id: int) -> None:
         self.alias = alias
         self.owner_id = owner_id
+
+
+class TenancySetupObligationConflictStorageError(Exception):
+    def __init__(self, rent_account_id: int, period: str) -> None:
+        self.rent_account_id = rent_account_id
+        self.period = period
 
 
 class SQLiteTenancySetupRepository:
@@ -192,8 +200,12 @@ class SQLiteTenancySetupRepository:
         payer_id: int | None,
         payer_name: str | None,
         aliases: tuple[TenancySetupAliasInput, ...],
+        first_month_period: str | None,
+        first_month_rent_cents: int | None,
+        first_month_due: date | None,
         rent_cents: int | None,
         due_day: int | None,
+        rent_effective: date | None,
     ) -> TenancySetupStorageResult:
         """Revalidate create/reuse choices and apply every insert in one transaction."""
         created_at = datetime.now(UTC).isoformat()
@@ -239,6 +251,40 @@ class SQLiteTenancySetupRepository:
                 (account.id, payer.id, created_at),
             )
             association = RentAccountPayerRecord(account.id, payer.id, created_at)
+            first_month_obligation = None
+            if first_month_rent_cents is not None:
+                if connection.execute(
+                    """
+                    SELECT 1 FROM rent_obligations
+                    WHERE rent_account_id = ? AND period = ?
+                    """,
+                    (account.id, first_month_period),
+                ).fetchone() is not None:
+                    raise TenancySetupObligationConflictStorageError(
+                        account.id, str(first_month_period)
+                    )
+                obligation_cursor = connection.execute(
+                    """
+                    INSERT INTO rent_obligations (
+                        rent_account_id, period, amount_cents, due_date, created_at
+                    ) VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        account.id,
+                        first_month_period,
+                        first_month_rent_cents,
+                        first_month_due.isoformat(),
+                        created_at,
+                    ),
+                )
+                first_month_obligation = RentObligationRecord(
+                    int(obligation_cursor.lastrowid),
+                    account.id,
+                    str(first_month_period),
+                    first_month_rent_cents,
+                    first_month_due.isoformat(),
+                    created_at,
+                )
             schedule = None
             if rent_cents is not None:
                 schedule_cursor = connection.execute(
@@ -252,7 +298,7 @@ class SQLiteTenancySetupRepository:
                         account.id,
                         rent_cents,
                         due_day,
-                        active_from_text,
+                        rent_effective.isoformat(),
                         active_to_text,
                         created_at,
                     ),
@@ -262,7 +308,7 @@ class SQLiteTenancySetupRepository:
                     account.id,
                     rent_cents,
                     int(due_day),
-                    str(active_from_text),
+                    rent_effective.isoformat(),
                     active_to_text,
                     created_at,
                 )
@@ -274,6 +320,7 @@ class SQLiteTenancySetupRepository:
             payer_reused,
             alias_results,
             association,
+            first_month_obligation,
             schedule,
         )
 

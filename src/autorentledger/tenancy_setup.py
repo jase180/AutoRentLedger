@@ -16,11 +16,13 @@ from autorentledger.storage import (
     PayerRecord,
     RentAccountPayerRecord,
     RentAccountRecord,
+    RentObligationRecord,
     RentScheduleRecord,
     SQLiteTenancySetupRepository,
     TenancySetupAliasConflictStorageError,
     TenancySetupAliasInput,
     TenancySetupAliasStorageResult,
+    TenancySetupObligationConflictStorageError,
     TenancySetupPayerNotFoundStorageError,
     TenancySetupPropertyNotFoundStorageError,
     TenancySetupStorageResult,
@@ -60,6 +62,9 @@ class TenancySetupRequest:
     aliases: tuple[str, ...] = ()
     rent: str | None = None
     due_day: int | None = None
+    rent_effective: str | None = None
+    first_month_rent: str | None = None
+    first_month_due: str | None = None
 
 
 @dataclass(frozen=True)
@@ -85,6 +90,10 @@ class TenancySetupPreview:
     aliases: tuple[TenancySetupAliasPlan, ...]
     rent_cents: int | None
     due_day: int | None
+    rent_effective: date | None
+    first_month_period: str | None
+    first_month_rent_cents: int | None
+    first_month_due: date | None
 
 
 @dataclass(frozen=True)
@@ -96,6 +105,7 @@ class TenancySetupResult:
     payer_reused: bool
     aliases: tuple[TenancySetupAliasStorageResult, ...]
     association: RentAccountPayerRecord
+    first_month_obligation: RentObligationRecord | None
     schedule: RentScheduleRecord | None
 
 
@@ -183,6 +193,20 @@ def preview_tenancy_setup(
             else None
         ),
         due_day=validated.due_day,
+        rent_effective=_optional_date(validated.rent_effective, "rent-effective"),
+        first_month_period=(
+            validated.active_from[:7]
+            if validated.first_month_rent is not None
+            else None
+        ),
+        first_month_rent_cents=(
+            parse_currency_cents(validated.first_month_rent)
+            if validated.first_month_rent is not None
+            else None
+        ),
+        first_month_due=_optional_date(
+            validated.first_month_due, "first-month-due"
+        ),
     )
 
 
@@ -219,8 +243,12 @@ def apply_tenancy_setup(
                 else None
             ),
             aliases=aliases,
+            first_month_period=preview.first_month_period,
+            first_month_rent_cents=preview.first_month_rent_cents,
+            first_month_due=preview.first_month_due,
             rent_cents=preview.rent_cents,
             due_day=preview.due_day,
+            rent_effective=preview.rent_effective,
         )
     except TenancySetupUnitNotFoundStorageError as error:
         raise TenancySetupNotFoundError(f"Unit {error.unit_id} does not exist.") from error
@@ -241,6 +269,12 @@ def apply_tenancy_setup(
     except TenancySetupAliasConflictStorageError as error:
         raise TenancySetupConflictError(
             f'Alias "{error.alias}" already belongs to payer {error.owner_id}. '
+            "Setup aborted."
+        ) from error
+    except TenancySetupObligationConflictStorageError as error:
+        raise TenancySetupConflictError(
+            "Rent account "
+            f"{error.rent_account_id} already has an obligation for {error.period}. "
             "Setup aborted."
         ) from error
     return _result_from_storage(result)
@@ -280,6 +314,18 @@ def _validate_request(request: TenancySetupRequest) -> TenancySetupRequest:
         raise TenancySetupValidationError(
             "Schedule creation requires --active-from."
         )
+    if request.rent_effective is not None and request.rent is None:
+        raise TenancySetupValidationError(
+            "--rent-effective requires recurring --rent and --due-day."
+        )
+    if request.first_month_due is not None and request.first_month_rent is None:
+        raise TenancySetupValidationError(
+            "--first-month-due requires --first-month-rent."
+        )
+    if request.first_month_rent is not None and request.active_from is None:
+        raise TenancySetupValidationError(
+            "First-month rent requires --active-from."
+        )
     start = _optional_date(request.active_from, "active-from")
     end = _optional_date(request.active_to, "active-to")
     if start is not None and end is not None and end < start:
@@ -293,6 +339,48 @@ def _validate_request(request: TenancySetupRequest) -> TenancySetupRequest:
             raise TenancySetupValidationError(str(error)) from error
         if request.due_day is None or not 1 <= request.due_day <= 28:
             raise TenancySetupValidationError("Due day must be between 1 and 28.")
+    rent_effective = _optional_date(request.rent_effective, "rent-effective")
+    if request.rent is not None:
+        if rent_effective is None:
+            if start.day != 1:
+                raise TenancySetupValidationError(
+                    "Mid-month tenancy start requires --rent-effective YYYY-MM-01. "
+                    "Use --first-month-rent if a partial first-month charge should "
+                    "be recorded."
+                )
+            rent_effective = start
+        if rent_effective.day != 1:
+            raise TenancySetupValidationError(
+                "Rent-effective date must be the first day of a month."
+            )
+        if rent_effective < start:
+            raise TenancySetupValidationError(
+                "Rent-effective date must not be before active-from date."
+            )
+        if end is not None and rent_effective > end:
+            raise TenancySetupValidationError(
+                "Rent-effective date must not be after active-to date."
+            )
+    first_month_due = _optional_date(
+        request.first_month_due, "first-month-due"
+    )
+    if request.first_month_rent is not None:
+        try:
+            parse_currency_cents(request.first_month_rent)
+        except ObligationValidationError as error:
+            raise TenancySetupValidationError(str(error)) from error
+        first_month_due = first_month_due or start
+        if (first_month_due.year, first_month_due.month) != (start.year, start.month):
+            raise TenancySetupValidationError(
+                "First-month due date must be inside the first tenancy month."
+            )
+        if rent_effective is not None and (
+            rent_effective.year,
+            rent_effective.month,
+        ) == (start.year, start.month):
+            raise TenancySetupValidationError(
+                "Recurring rent must begin after the explicit first-month rent period."
+            )
     cleaned_aliases: list[str] = []
     for alias in request.aliases:
         if not normalize_alias(alias):
@@ -310,6 +398,9 @@ def _validate_request(request: TenancySetupRequest) -> TenancySetupRequest:
         aliases=tuple(cleaned_aliases),
         rent=request.rent,
         due_day=request.due_day,
+        rent_effective=(rent_effective.isoformat() if rent_effective else None),
+        first_month_rent=request.first_month_rent,
+        first_month_due=(first_month_due.isoformat() if first_month_due else None),
     )
 
 
@@ -345,6 +436,7 @@ def _result_from_storage(result: TenancySetupStorageResult) -> TenancySetupResul
         result.payer_reused,
         result.aliases,
         result.association,
+        result.first_month_obligation,
         result.schedule,
     )
 

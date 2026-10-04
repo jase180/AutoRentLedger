@@ -88,6 +88,31 @@ Expense categories are controlled machine values: `repairs_maintenance`, `utilit
 `legal_professional`, `capital_improvement`, `supplies`, and `other`. Capital improvements remain
 distinct from repairs and maintenance; no depreciation or tax interpretation is performed.
 
+Tenancy setup keeps three facts separate:
+
+```text
+Tenancy active_from
+    -> actual relationship start
+
+First-month obligation
+    -> optional explicit one-off rent charge
+
+Recurring rent schedule
+    -> starts on a first-of-month boundary
+```
+
+For a mid-month tenancy, recurring rent requires an explicit first-of-month `rent_effective`.
+Any agreed partial-month charge is stored as an ordinary `rent_obligations` row; no proration
+formula or special accounting state exists. The setup preview is read-only, while apply inserts the
+account, optional first-month obligation, and optional recurring schedule in the same checked
+transaction. A first-of-month tenancy remains backward compatible: omitted `rent_effective`
+defaults to `active_from`.
+
+The generic schedule rule is unchanged: a schedule overlapping any part of a month may generate a
+full monthly obligation. Normal setup prevents accidental partial-month generation by placing the
+recurring schedule on the intended month boundary. Existing unique account/period obligation
+identity prevents replacement or duplication.
+
 Property Cash Summary is a derived, read-only model over the same canonical facts. It persists no
 snapshots, cached totals, or rollups and leaves the schema at v15. For one Property and month:
 

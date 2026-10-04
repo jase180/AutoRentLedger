@@ -351,8 +351,9 @@ automatically. There is no Gmail correction or unvoid command.
 ## Bootstrap a tenancy
 
 `setup tenancy` is the normal preview-first workflow over the existing unit, rent-account,
-payer, alias, payer-association, and rent-schedule primitives. It does not introduce a tenant or
-occupant model. It also never creates obligations, payments, or allocations.
+payer, alias, payer-association, rent-obligation, and rent-schedule primitives. It does not
+introduce a tenant or occupant model. It creates an obligation only when an explicit
+`--first-month-rent` is supplied and never creates payments or allocations.
 
 Preview a setup using a new unit and a new payer:
 
@@ -416,6 +417,57 @@ none. For normal setup, provide both. When requested, both
 are required along with `--active-from`, and the schedule inherits the rent account's active
 dates. Normal `autorentledger daily` operation then ensures the current month's rent. Manual
 generation is reserved for repair/backfill.
+
+### Mid-month start with an explicit first-month charge
+
+Tenancy start and recurring-rent start are distinct. Record the actual agreed first-month rent;
+AutoRentLedger does not calculate a daily, 30-day, actual-days, or other proration formula:
+
+```powershell
+autorentledger setup tenancy `
+  --property 1 `
+  --unit-label "2F" `
+  --account-name "Synthetic Household" `
+  --active-from 2026-10-21 `
+  --payer-name "Synthetic Tenant" `
+  --first-month-rent 460.00 `
+  --first-month-due 2026-10-21 `
+  --rent 1300.00 `
+  --rent-effective 2026-11-01 `
+  --due-day 1
+```
+
+Preview is still the default. On `--apply`, one atomic transaction creates the configuration, an
+October obligation for exactly `$460.00`, and a `$1,300.00` recurring schedule beginning November
+1. Omit `--first-month-due` to default it to `active_from`; a supplied due date must remain inside
+the first tenancy month.
+
+### Mid-month start with no first-month charge
+
+For a free partial period or other explicit no-charge agreement, omit the first-month amount:
+
+```powershell
+autorentledger setup tenancy `
+  --property 1 `
+  --unit-label "2F" `
+  --account-name "Synthetic Household" `
+  --active-from 2026-10-21 `
+  --payer-name "Synthetic Tenant" `
+  --rent 1300.00 `
+  --rent-effective 2026-11-01 `
+  --due-day 1
+```
+
+This creates no October obligation. For a normal first-of-month tenancy, omit
+`--rent-effective`; it defaults to `active_from`. A mid-month start with recurring rent but without
+an explicit first-of-month `--rent-effective` fails before mutation.
+
+A schedule that overlaps any part of a requested month can still generate a full monthly
+obligation; M31 does not change that generic schedule rule. Normal tenancy setup avoids partial
+month overlap by requiring the recurring schedule to begin on an explicit first-of-month boundary.
+The optional first-month charge is a normal durable obligation, so downstream reconciliation,
+review, suggestions, planning, reports, Overview, web obligations, and Property Cash need no
+special handling.
 
 A payer is the observed sender identity and is not necessarily the tenant or occupant. The rent
 account remains the household/account configuration, and allocation remains a separate explicit

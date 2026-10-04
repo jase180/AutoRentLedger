@@ -78,6 +78,9 @@ def register_commands(subparsers) -> None:
     tenancy.add_argument("--alias", action="append", default=[])
     tenancy.add_argument("--rent")
     tenancy.add_argument("--due-day", type=int)
+    tenancy.add_argument("--rent-effective")
+    tenancy.add_argument("--first-month-rent")
+    tenancy.add_argument("--first-month-due")
     tenancy.add_argument("--apply", action="store_true")
     tenancy.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
 
@@ -109,6 +112,9 @@ def run_tenancy_setup(
     aliases: Sequence[str],
     rent: str | None,
     due_day: int | None,
+    rent_effective: str | None,
+    first_month_rent: str | None,
+    first_month_due: str | None,
     apply: bool,
 ) -> int:
     request = TenancySetupRequest(
@@ -123,6 +129,9 @@ def run_tenancy_setup(
         aliases=tuple(aliases),
         rent=rent,
         due_day=due_day,
+        rent_effective=rent_effective,
+        first_month_rent=first_month_rent,
+        first_month_due=first_month_due,
     )
     repository = SQLiteTenancySetupRepository(database_path)
     try:
@@ -168,7 +177,16 @@ def _print_tenancy_preview(preview: TenancySetupPreview) -> None:
         print("  None.")
     print("Association:")
     print("  CREATE payer -> new rent account")
-    print("Schedule:")
+    print("First-month rent obligation:")
+    if preview.first_month_rent_cents is None:
+        print("  None.")
+    else:
+        print(
+            f"  CREATE {preview.first_month_period}: "
+            f"{_format_currency(preview.first_month_rent_cents)}"
+        )
+        print(f"  Due: {preview.first_month_due}")
+    print("Recurring rent schedule:")
     if preview.rent_cents is None:
         print("  None.")
     else:
@@ -176,9 +194,12 @@ def _print_tenancy_preview(preview: TenancySetupPreview) -> None:
             f"  CREATE {_format_currency(preview.rent_cents)} "
             f"due day {preview.due_day}"
         )
-        print(f"  Active from: {preview.active_from}")
+        print(f"  Effective: {preview.rent_effective}")
         print(f"  Active to: {preview.active_to or '-'}")
-    print("No obligations, payments, or allocations will be created.")
+    if preview.first_month_rent_cents is None:
+        print("No obligations, payments, or allocations will be created.")
+    else:
+        print("Preview only; no records will be created.")
     print("Re-run with --apply to create this setup.")
 
 def _print_tenancy_result(result: TenancySetupResult) -> None:
@@ -196,6 +217,15 @@ def _print_tenancy_result(result: TenancySetupResult) -> None:
             print(f"  {item.alias.alias}{suffix}")
     else:
         print("  None.")
+    if result.first_month_obligation is None:
+        print("First-month rent obligation: none")
+    else:
+        print(
+            "Created first-month rent obligation for "
+            f"{result.first_month_obligation.period}: "
+            f"{_format_currency(result.first_month_obligation.amount_cents)}"
+        )
+        print(f"First-month due: {result.first_month_obligation.due_date}")
     if result.schedule is None:
         print("Schedule: none")
     else:
@@ -204,7 +234,18 @@ def _print_tenancy_result(result: TenancySetupResult) -> None:
             f"{_format_currency(result.schedule.amount_cents)} "
             f"due day {result.schedule.due_day}"
         )
-    print("No obligations, payments, or allocations were created.")
+        print(
+            f"Recurring rent begins {result.schedule.active_from} at "
+            f"{_format_currency(result.schedule.amount_cents)}/month."
+        )
+    if result.first_month_obligation is None:
+        print("No obligations, payments, or allocations were created.")
+        if (
+            result.account.active_from is not None
+            and result.schedule is not None
+            and result.schedule.active_from[:7] > result.account.active_from[:7]
+        ):
+            print("No rent obligation was created for the partial first month.")
     if result.schedule is not None:
         print("Current-month rent will be created automatically by `autorentledger daily`.")
 

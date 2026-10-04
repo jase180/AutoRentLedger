@@ -69,13 +69,24 @@ review items, suggestions, and the owner overview are read-only projections of e
 All user-facing rental reads include Property context, normally as `Property Name / Unit Label`,
 so identical unit labels at different Properties remain unambiguous.
 
-## Quick start
+## Start the app: complete first-run flow
 
 Requirements:
 
 - Python 3.11 or newer
-- A Google account with Gmail
-- A Google Cloud project with the Gmail API and a Desktop OAuth client
+- A Google account and Google Cloud Desktop OAuth client only if you want to sync Gmail evidence
+
+The application runs directly on Windows PowerShell; WSL is not required. The web UI is local and
+read-only. These steps use the default database at `data/autorentledger.db`.
+
+### 1. Open the repository
+
+```powershell
+cd C:\path\to\AutoRentLedger
+py -3.11 --version
+```
+
+### 2. Create the virtual environment and install the app
 
 PowerShell:
 
@@ -104,7 +115,66 @@ autorentledger db check
 `db upgrade` initializes the default database at `data/autorentledger.db` when it does not exist
 and explicitly migrates an older database. Normal commands never upgrade the schema implicitly.
 
-### Gmail OAuth setup
+If GNU Make is installed, the entire environment/install/database sequence is:
+
+```powershell
+make setup
+```
+
+Make is optional and is not bundled with Windows. The explicit PowerShell commands above remain
+the supported fallback.
+
+### 3. Configure the local web login
+
+The web server refuses to start without a password hash and Flask signing key. Set both in the
+same PowerShell window that will run the app:
+
+```powershell
+$env:AUTORENTLEDGER_WEB_PASSWORD_HASH = python -c "from getpass import getpass; from werkzeug.security import generate_password_hash; print(generate_password_hash(getpass('AutoRentLedger password: ')))"
+$env:AUTORENTLEDGER_WEB_SECRET_KEY = python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+The first command prompts for the owner password without echoing it. Remember that password for
+the login screen. These environment variables live only in the current PowerShell session; do not
+put their values in Git, SQLite, the README, or shell history.
+
+### 4. Start the read-only web app
+
+With the virtual environment activated:
+
+```powershell
+autorentledger web --database data/autorentledger.db --host 127.0.0.1 --port 8000
+```
+
+Or, with GNU Make:
+
+```powershell
+make web
+```
+
+Leave that terminal running. Open `http://127.0.0.1:8000/` and sign in with the password chosen in
+step 3. The server intentionally accepts loopback hosts only. Stop it with `Ctrl+C`.
+
+### 5. Start it again later
+
+For each new PowerShell session:
+
+```powershell
+cd C:\path\to\AutoRentLedger
+.venv\Scripts\Activate.ps1
+$env:AUTORENTLEDGER_WEB_PASSWORD_HASH = python -c "from getpass import getpass; from werkzeug.security import generate_password_hash; print(generate_password_hash(getpass('AutoRentLedger password: ')))"
+$env:AUTORENTLEDGER_WEB_SECRET_KEY = python -c "import secrets; print(secrets.token_urlsafe(32))"
+autorentledger db check
+autorentledger web --database data/autorentledger.db --host 127.0.0.1 --port 8000
+```
+
+Generating a new hash and signing key at startup is safe; use the password entered during that
+startup. If you deliberately persist the environment variables outside Git, you can reuse the
+same password and sessions instead.
+
+### Optional: connect Gmail evidence
+
+The web app and manually entered ledger data do not require Gmail authorization. To sync Gmail:
 
 1. Create or select a Google Cloud project and enable the Gmail API.
 2. Configure the Google Auth Platform consent screen. For a personal Gmail account, an External app
@@ -135,7 +205,8 @@ the search with `--max-results`.
 ## Normal operating workflow
 
 First-time configuration is preview-first and establishes the unit, rent account, payer identity,
-aliases, association, and recurring rent schedule in one reviewed operation:
+aliases, association, optional explicit first-month obligation, and recurring rent schedule in one
+reviewed operation:
 
 ```powershell
 autorentledger setup tenancy ...
@@ -220,9 +291,40 @@ autorentledger setup tenancy `
 
 Preview is the default and writes nothing. Add `--apply` only after reviewing each CREATE or REUSE
 action. The command is a convenience wrapper over the existing primitives; it creates no tenant
-model, obligations, payments, or allocations. Payers remain distinct from rent accounts, and
+model, payments, or allocations. It creates an obligation only when `--first-month-rent` is
+explicitly supplied. Payers remain distinct from rent accounts, and
 sender resolution remains exact after conservative alias normalization. See the runbook for new
 and reused-record examples. After setup, `daily` creates missing current-month rent automatically.
+
+#### Mid-month tenancy starts
+
+Tenancy `active_from` records the actual relationship start. Recurring rent starts separately on a
+first-of-month boundary. AutoRentLedger never calculates proration; record the exact first-month
+rent that was agreed:
+
+```powershell
+autorentledger setup tenancy `
+  --property 1 `
+  --unit-label "2F" `
+  --account-name "Synthetic Household" `
+  --active-from 2026-10-21 `
+  --payer-name "Synthetic Tenant" `
+  --first-month-rent 460.00 `
+  --first-month-due 2026-10-21 `
+  --rent 1300.00 `
+  --rent-effective 2026-11-01 `
+  --due-day 1
+```
+
+Omit `--first-month-due` to use `active_from`. For a free/no-charge partial month, omit
+`--first-month-rent` but still provide the next first-of-month `--rent-effective`. For a normal
+first-of-month tenancy, `--rent-effective` may be omitted and defaults to `active_from`. A
+mid-month tenancy with recurring rent and no `--rent-effective` is rejected as ambiguous.
+
+A schedule overlapping any part of a month can generate a full monthly obligation. Normal setup
+avoids that existing behavior by starting recurring rent after the partial first month. The
+first-month charge is an ordinary durable rent obligation and participates automatically in
+reconciliation, allocation, reporting, Overview, and Property Cash.
 
 ### Local read-only web view
 
@@ -233,7 +335,7 @@ autorentledger web --database data/autorentledger.db --host 127.0.0.1 --port 800
 ```
 
 Then open `http://127.0.0.1:8000/`. The local browser includes **Overview**, **Attention**,
-**Payments**, **Obligations**, and **Allocation Plan**. Attention is the global/current derived review queue. Payments
+**Payments**, **Obligations**, **Expenses**, **Property Cash**, and **Allocation Plan**. Attention is the global/current derived review queue. Payments
 shows normalized payments with current exact-alias payer interpretation and payment-centric
 allocated/unallocated amounts, and payment IDs open provenance, audit, and allocation details.
 Obligations shows month-scoped canonical reconciliation for actual obligations only; account links
@@ -280,6 +382,31 @@ LAN, Tailscale-IP, and public binding. See the runbook for private Tailscale Ser
 Most database-backed commands accept `--database`; the default is `data/autorentledger.db`.
 Detailed setup, corrections, troubleshooting, rebuild, and recovery procedures are in the
 [operational runbook](docs/RUNBOOK.md).
+
+## Make command shortcuts
+
+The repository `Makefile` wraps the same Python CLI; it does not introduce a second execution
+path. Override `DATABASE`, `PORT`, `PERIOD`, or `PROPERTY` at invocation time as needed.
+
+| Task | Make command |
+| --- | --- |
+| Show available targets | `make help` |
+| Create `.venv`, install development dependencies, upgrade and check the database | `make setup` |
+| Start the local read-only web app | `make web` |
+| Start on another port | `make web PORT=8080` |
+| Show, upgrade, or check schema health | `make db-status`, `make db-upgrade`, `make db-check` |
+| Create a verified database backup | `make backup` |
+| Sync Gmail evidence | `make sync` |
+| Run the normal backed-up daily workflow | `make daily` |
+| Show monthly owner overview | `make overview PERIOD=2026-10` |
+| Show all-Property monthly cash | `make property-cash PERIOD=2026-10` |
+| Show one Property's monthly cash | `make property-cash PERIOD=2026-10 PROPERTY=2` |
+| List active expenses | `make expenses` |
+| Run Ruff, tests, or both | `make lint`, `make test`, `make check` |
+| Apply Ruff's safe fixes | `make format` |
+
+The Makefile defaults to `.venv/Scripts/python.exe` on Windows and `.venv/bin/python` elsewhere.
+You can override either interpreter, for example `make test PYTHON=python`.
 
 ## Safety and privacy
 

@@ -266,6 +266,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 aliases=args.alias,
                 rent=args.rent,
                 due_day=args.due_day,
+                rent_effective=args.rent_effective,
+                first_month_rent=args.first_month_rent,
+                first_month_due=args.first_month_due,
                 apply=args.apply,
             )
         raise AssertionError(f"Unhandled setup command: {args.setup_command}")
