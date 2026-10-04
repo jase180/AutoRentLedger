@@ -24,7 +24,12 @@ from autorentledger.storage import (
 
 def register_commands(subparsers) -> None:
     review = subparsers.add_parser("review", help="show ledger items needing attention")
+    review.set_defaults(handler=_handle_review)
     review.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+
+def _handle_review(args) -> int:
+    return run_review(args.database)
 
 
 def run_review(database_path: Path) -> int:

@@ -29,9 +29,14 @@ def register_commands(subparsers) -> None:
     discovery_payments = discovery_commands.add_parser(
         "payments", help="inventory observed payment and unparsed email evidence"
     )
+    discovery_payments.set_defaults(handler=_handle_payments)
     discovery_payments.add_argument(
         "--database", type=Path, default=DEFAULT_DATABASE
     )
+
+
+def _handle_payments(args) -> int:
+    return run_payment_discovery(args.database)
 
 
 def run_payment_discovery(database_path: Path) -> int:

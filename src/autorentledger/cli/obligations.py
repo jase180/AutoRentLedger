@@ -52,6 +52,7 @@ def register_commands(subparsers) -> None:
     obligation = subparsers.add_parser("obligation", help="manage monthly rent obligations")
     obligation_commands = obligation.add_subparsers(dest="obligation_command", required=True)
     obligation_add = obligation_commands.add_parser("add", help="create a rent obligation")
+    obligation_add.set_defaults(handler=_handle_obligation_add)
     obligation_add.add_argument("--account", type=int, required=True)
     obligation_add.add_argument("--period", required=True)
     obligation_add.add_argument("--amount", required=True)
@@ -59,10 +60,12 @@ def register_commands(subparsers) -> None:
     obligation_add.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
 
     obligation_show = obligation_commands.add_parser("show", help="inspect a rent obligation")
+    obligation_show.set_defaults(handler=_handle_obligation_show)
     obligation_show.add_argument("obligation_id", type=int)
     obligation_show.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
 
     obligations = subparsers.add_parser("obligations", help="list or generate rent obligations")
+    obligations.set_defaults(handler=_handle_obligation_listing)
     obligations.add_argument("--account", type=int)
     obligations.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
     obligation_list_commands = obligations.add_subparsers(dest="obligations_command")
@@ -70,6 +73,7 @@ def register_commands(subparsers) -> None:
         "generate",
         help="advanced/backfill: ensure scheduled rent exists for one month",
     )
+    obligations_generate.set_defaults(handler=_handle_obligation_generation)
     obligations_generate.add_argument("--period", required=True)
     obligations_generate.add_argument("--dry-run", action="store_true")
     obligations_generate.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
@@ -79,6 +83,7 @@ def register_commands(subparsers) -> None:
     rent_change = rent_commands.add_parser(
         "change", help="change recurring rent from a future month"
     )
+    rent_change.set_defaults(handler=_handle_rent_change)
     rent_change.add_argument("--account", type=int, required=True)
     rent_change.add_argument("--amount", required=True)
     rent_change.add_argument("--effective", required=True)
@@ -91,6 +96,7 @@ def register_commands(subparsers) -> None:
         dest="rent_schedule_command", required=True
     )
     schedule_add = rent_schedule_commands.add_parser("add", help="create a rent schedule")
+    schedule_add.set_defaults(handler=_handle_rent_schedule_add)
     schedule_add.add_argument("--account", type=int, required=True)
     schedule_add.add_argument("--amount", required=True)
     schedule_add.add_argument("--due-day", type=int, required=True)
@@ -99,13 +105,56 @@ def register_commands(subparsers) -> None:
     schedule_add.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
 
     schedule_end = rent_schedule_commands.add_parser("end", help="end a rent schedule")
+    schedule_end.set_defaults(handler=_handle_rent_schedule_end)
     schedule_end.add_argument("schedule_id", type=int)
     schedule_end.add_argument("--active-to", required=True)
     schedule_end.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
 
     rent_schedules = subparsers.add_parser("rent-schedules", help="list rent schedules")
+    rent_schedules.set_defaults(handler=_handle_rent_schedule_listing)
     rent_schedules.add_argument("--account", type=int)
     rent_schedules.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+
+def _handle_obligation_add(args) -> int:
+    return run_obligation_add(
+        args.database, args.account, args.period, args.amount, args.due_date
+    )
+
+
+def _handle_obligation_show(args) -> int:
+    return run_obligation_show(args.database, args.obligation_id)
+
+
+def _handle_obligation_listing(args) -> int:
+    return run_obligation_listing(args.database, args.account)
+
+
+def _handle_obligation_generation(args) -> int:
+    return run_obligation_generation(args.database, args.period, dry_run=args.dry_run)
+
+
+def _handle_rent_change(args) -> int:
+    return run_rent_change(args.database, args.account, args.amount, args.effective)
+
+
+def _handle_rent_schedule_add(args) -> int:
+    return run_rent_schedule_add(
+        args.database,
+        args.account,
+        args.amount,
+        args.due_day,
+        args.active_from,
+        args.active_to,
+    )
+
+
+def _handle_rent_schedule_end(args) -> int:
+    return run_rent_schedule_end(args.database, args.schedule_id, args.active_to)
+
+
+def _handle_rent_schedule_listing(args) -> int:
+    return run_rent_schedule_listing(args.database, args.account)
 
 
 def run_obligation_add(

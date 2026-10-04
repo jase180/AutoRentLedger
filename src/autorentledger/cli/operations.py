@@ -41,12 +41,14 @@ from autorentledger.storage.migrations import (
 
 def register_commands(subparsers) -> None:
     search = subparsers.add_parser("search", help="find candidate payment notification emails")
+    search.set_defaults(handler=_handle_search, requires_schema=False)
     search.add_argument("--query", default=DEFAULT_QUERY, help="Gmail search query")
     search.add_argument("--max-results", type=int, default=100)
     search.add_argument("--credentials", type=Path, default=Path("credentials.json"))
     search.add_argument("--token", type=Path, default=Path("token.json"))
 
     ingest = subparsers.add_parser("ingest", help="store matching raw emails in SQLite")
+    ingest.set_defaults(handler=_handle_ingest)
     ingest.add_argument("--query", default=DEFAULT_QUERY, help="Gmail search query")
     ingest.add_argument("--max-results", type=int, default=100)
     ingest.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
@@ -56,6 +58,7 @@ def register_commands(subparsers) -> None:
     sync = subparsers.add_parser(
         "sync", help="refresh Gmail evidence and summarize current attention"
     )
+    sync.set_defaults(handler=_handle_sync)
     sync.add_argument("--query", default=DEFAULT_QUERY, help="Gmail search query")
     sync.add_argument("--max-results", type=int, default=100)
     sync.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
@@ -66,6 +69,7 @@ def register_commands(subparsers) -> None:
         "daily",
         help="back up, ensure current rent, sync Gmail, and summarize attention",
     )
+    daily.set_defaults(handler=_handle_daily, requires_schema=False)
     daily.add_argument("--query", default=DEFAULT_QUERY, help="Gmail search query")
     daily.add_argument("--max-results", type=int, default=100)
     daily.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
@@ -80,10 +84,52 @@ def register_commands(subparsers) -> None:
     )
 
     parse = subparsers.add_parser("parse", help="parse locally stored raw emails")
+    parse.set_defaults(handler=_handle_parse)
     parse.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
 
     process = subparsers.add_parser("process", help="persist parsed payment events")
+    process.set_defaults(handler=_handle_process)
     process.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+
+def _handle_search(args) -> int:
+    source = GmailSource.authenticate(args.credentials, args.token)
+    return print_search_results(source, args.query, args.max_results)
+
+
+def _handle_ingest(args) -> int:
+    source = GmailSource.authenticate(args.credentials, args.token)
+    return run_ingestion(source, args.database, args.query, args.max_results)
+
+
+def _handle_sync(args) -> int:
+    try:
+        source = GmailSource.authenticate(args.credentials, args.token)
+    except Exception:  # noqa: BLE001 - external OAuth boundary
+        _print_gmail_access_failure()
+        return 1
+    return run_sync_command(source, args.database, args.query, args.max_results)
+
+
+def _handle_daily(args) -> int:
+    return run_daily_command(
+        args.database,
+        args.backup_dir,
+        args.credentials,
+        args.token,
+        args.query,
+        args.max_results,
+        args.keep_backups,
+        args.skip_obligations,
+    )
+
+
+def _handle_parse(args) -> int:
+    return run_parsing(args.database)
+
+
+def _handle_process(args) -> int:
+    return run_processing(args.database)
 
 
 def print_search_results(source: EmailSource, query: str, max_results: int) -> int:

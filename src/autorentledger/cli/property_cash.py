@@ -20,9 +20,14 @@ def register_commands(subparsers) -> None:
     command = subparsers.add_parser(
         "property-cash", help="show derived monthly cash by Property"
     )
+    command.set_defaults(handler=_handle_property_cash)
     command.add_argument("--period", required=True, help="canonical month YYYY-MM")
     command.add_argument("--property", type=int, dest="property_id")
     command.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+
+def _handle_property_cash(args) -> int:
+    return run_property_cash(args.database, args.period, args.property_id)
 
 
 def run_property_cash(

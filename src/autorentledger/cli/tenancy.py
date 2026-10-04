@@ -10,17 +10,6 @@ from autorentledger.cli.common import (
     DEFAULT_DATABASE,
     _format_currency,
 )
-from autorentledger.identity import normalize_alias, unresolved_senders
-from autorentledger.maintenance import (
-    MaintenanceConflictError,
-    MaintenanceNotFoundError,
-    MaintenanceValidationError,
-    end_rent_account,
-    remove_payer_alias,
-    remove_rent_account_payer,
-    rename_payer,
-    rename_rent_account,
-)
 from autorentledger.rent_operations import (
     RentOperationConflictError,
     RentOperationNotFoundError,
@@ -30,22 +19,7 @@ from autorentledger.rent_operations import (
     end_tenancy,
     preview_tenancy_end,
 )
-from autorentledger.rental import (
-    DuplicateAssociationError,
-    DuplicateUnitError,
-    RentalEntityNotFoundError,
-    RentalValidationError,
-    associate_payer,
-    create_rent_account,
-    create_unit,
-)
 from autorentledger.storage import (
-    PropertyNotFoundError,
-    PropertyValidationError,
-    SQLitePayerRepository,
-    SQLitePaymentEventRepository,
-    SQLitePropertyRepository,
-    SQLiteRentalRepository,
     SQLiteRentScheduleRepository,
     SQLiteTenancySetupRepository,
 )
@@ -68,6 +42,7 @@ def register_commands(subparsers) -> None:
     tenancy = setup_commands.add_parser(
         "tenancy", help="preview or create one tenancy configuration"
     )
+    tenancy.set_defaults(handler=_handle_tenancy_setup)
     unit_choice = tenancy.add_mutually_exclusive_group(required=True)
     unit_choice.add_argument("--unit", type=int)
     unit_choice.add_argument("--unit-label")
@@ -96,6 +71,7 @@ def register_commands(subparsers) -> None:
     tenancy_end = tenancy_commands.add_parser(
         "end", help="end recurring rent without deleting ledger history"
     )
+    tenancy_end.set_defaults(handler=_handle_tenancy_end)
     tenancy_end.add_argument("--account", type=int, required=True)
     tenancy_end.add_argument("--active-to", required=True)
     final_rent = tenancy_end.add_mutually_exclusive_group()
@@ -104,6 +80,39 @@ def register_commands(subparsers) -> None:
     tenancy_end.add_argument("--final-month-due")
     tenancy_end.add_argument("--apply", action="store_true")
     tenancy_end.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+
+def _handle_tenancy_setup(args) -> int:
+    return run_tenancy_setup(
+        args.database,
+        unit_id=args.unit,
+        property_id=args.property,
+        unit_label=args.unit_label,
+        account_name=args.account_name,
+        active_from=args.active_from,
+        active_to=args.active_to,
+        payer_id=args.payer,
+        payer_name=args.payer_name,
+        aliases=args.alias,
+        rent=args.rent,
+        due_day=args.due_day,
+        rent_effective=args.rent_effective,
+        first_month_rent=args.first_month_rent,
+        first_month_due=args.first_month_due,
+        apply=args.apply,
+    )
+
+
+def _handle_tenancy_end(args) -> int:
+    return run_tenancy_end(
+        args.database,
+        args.account,
+        args.active_to,
+        final_month_rent=args.final_month_rent,
+        final_month_due=args.final_month_due,
+        no_final_month_rent=args.no_final_month_rent,
+        apply=args.apply,
+    )
 
 
 def run_tenancy_setup(
@@ -348,259 +357,3 @@ def _print_tenancy_end_preview(preview: TenancyEndPreview, account_id: int) -> N
     print(f"  No recurring rent after {preview.final_month_period}")
     print("Preview only; no records will be changed.")
     print("Re-run with --apply to end this tenancy.")
-
-def run_payer_add(database_path: Path, display_name: str) -> int:
-    if not display_name.strip():
-        print("Payer display name must not be empty.")
-        return 1
-    payer = SQLitePayerRepository(database_path).create_payer(display_name)
-    print(f"Created payer {payer.id}: {payer.display_name}")
-    return 0
-
-def run_payer_listing(database_path: Path) -> int:
-    payers = SQLitePayerRepository(database_path).list_payers()
-    print(f"{'ID':<4} NAME")
-    for payer in payers:
-        print(f"{payer.id:<4} {payer.display_name}")
-    return 0
-
-def run_alias_add(database_path: Path, payer_id: int, alias: str) -> int:
-    repository = SQLitePayerRepository(database_path)
-    payer = repository.get_payer(payer_id)
-    if payer is None:
-        print(f"Payer {payer_id} does not exist.")
-        return 1
-
-    normalized_alias = normalize_alias(alias)
-    if not normalized_alias:
-        print("Alias must not be empty.")
-        return 1
-
-    existing = repository.get_alias(normalized_alias)
-    if existing is not None:
-        print(f"Alias already assigned to payer {existing.payer_id}.")
-        return 1
-
-    try:
-        repository.add_alias(payer_id, alias, normalized_alias)
-    except sqlite3.IntegrityError:
-        existing = repository.get_alias(normalized_alias)
-        if existing is None:
-            raise
-        print(f"Alias already assigned to payer {existing.payer_id}.")
-        return 1
-
-    print(f'Added alias "{alias}" -> {payer.display_name}')
-    return 0
-
-def run_alias_listing(database_path: Path, payer_id: int) -> int:
-    repository = SQLitePayerRepository(database_path)
-    payer = repository.get_payer(payer_id)
-    if payer is None:
-        print(f"Payer {payer_id} does not exist.")
-        return 1
-
-    print(f"Aliases for payer {payer.id}: {payer.display_name}")
-    print(f"{'ID':<4} ALIAS")
-    for alias in repository.list_aliases(payer_id):
-        print(f"{alias.id:<4} {alias.alias}")
-    return 0
-
-def run_payer_rename(database_path: Path, payer_id: int, display_name: str) -> int:
-    try:
-        previous, updated = rename_payer(
-            SQLitePayerRepository(database_path), payer_id, display_name
-        )
-    except (MaintenanceNotFoundError, MaintenanceValidationError) as error:
-        print(error)
-        return 1
-    print(f'Renamed payer {payer_id}: "{previous.display_name}" -> "{updated.display_name}"')
-    return 0
-
-def run_alias_remove(database_path: Path, payer_id: int, alias: str) -> int:
-    try:
-        removed = remove_payer_alias(SQLitePayerRepository(database_path), payer_id, alias)
-    except (
-        MaintenanceConflictError,
-        MaintenanceNotFoundError,
-        MaintenanceValidationError,
-    ) as error:
-        print(error)
-        return 1
-    print(f'Removed alias "{removed.alias}" from payer {payer_id}.')
-    return 0
-
-def run_unresolved_payers(database_path: Path) -> int:
-    payments = SQLitePaymentEventRepository(database_path)
-    payers = SQLitePayerRepository(database_path)
-    unresolved = unresolved_senders(payments, payers)
-    print(f"{'SENDER':<32} COUNT")
-    for sender in unresolved:
-        print(f"{sender.sender_name:<32} {sender.count}")
-    return 0
-
-def run_property_add(database_path: Path, display_name: str) -> int:
-    try:
-        property_record = SQLitePropertyRepository(database_path).create_property(
-            display_name
-        )
-    except PropertyValidationError as error:
-        print(error)
-        return 1
-    print(f"Created property {property_record.id}: {property_record.display_name}")
-    return 0
-
-
-def run_property_listing(database_path: Path) -> int:
-    properties = SQLitePropertyRepository(database_path).list_properties()
-    print(f"{'ID':<4} NAME")
-    for property_record in properties:
-        print(f"{property_record.id:<4} {property_record.display_name}")
-    return 0
-
-
-def run_property_rename(
-    database_path: Path, property_id: int, display_name: str
-) -> int:
-    try:
-        previous, updated = SQLitePropertyRepository(
-            database_path
-        ).rename_property_checked(property_id, display_name)
-    except (PropertyNotFoundError, PropertyValidationError) as error:
-        print(error)
-        return 1
-    print(
-        f'Renamed property {property_id}: "{previous.display_name}" '
-        f'-> "{updated.display_name}"'
-    )
-    return 0
-
-
-def run_unit_add(database_path: Path, property_id: int, label: str) -> int:
-    repository = SQLiteRentalRepository(database_path)
-    try:
-        unit = create_unit(repository, property_id, label)
-    except (
-        DuplicateUnitError,
-        RentalEntityNotFoundError,
-        RentalValidationError,
-    ) as error:
-        print(error)
-        return 1
-    print(f"Created unit {unit.id}: Property {unit.property_id} / {unit.label}")
-    return 0
-
-def run_unit_listing(database_path: Path) -> int:
-    units = SQLiteRentalRepository(database_path).list_units()
-    print(f"{'ID':<4} {'PROPERTY / UNIT':<36}")
-    for unit in units:
-        print(f"{unit.id:<4} {unit.property_name} / {unit.label}")
-    return 0
-
-def run_rent_account_add(
-    database_path: Path,
-    unit_id: int,
-    name: str,
-    active_from: str | None,
-    active_to: str | None,
-) -> int:
-    repository = SQLiteRentalRepository(database_path)
-    try:
-        account = create_rent_account(
-            repository, unit_id, name, active_from=active_from, active_to=active_to
-        )
-    except (RentalEntityNotFoundError, RentalValidationError) as error:
-        print(error)
-        return 1
-    print(f"Created rent account {account.id}: {account.display_name}")
-    return 0
-
-def run_rent_account_listing(database_path: Path) -> int:
-    accounts = SQLiteRentalRepository(database_path).list_rent_accounts()
-    print(f"{'ID':<4} {'PROPERTY / UNIT':<32} {'ACCOUNT':<24} {'ACTIVE FROM':<12} ACTIVE TO")
-    for account in accounts:
-        active_from = account.active_from or "-"
-        active_to = account.active_to or "-"
-        print(
-            f"{account.id:<4} {account.property_name + ' / ' + account.unit_label:<32} "
-            f"{account.display_name:<24} "
-            f"{active_from:<12} {active_to}"
-        )
-    return 0
-
-def run_rent_account_add_payer(database_path: Path, account_id: int, payer_id: int) -> int:
-    rentals = SQLiteRentalRepository(database_path)
-    payers = SQLitePayerRepository(database_path)
-    try:
-        associate_payer(rentals, payers, account_id, payer_id)
-    except (DuplicateAssociationError, RentalEntityNotFoundError) as error:
-        print(error)
-        return 1
-    payer = payers.get_payer(payer_id)
-    print(
-        f"Associated payer {payer.id} ({payer.display_name}) "
-        f"with rent account {account_id}."
-    )
-    return 0
-
-def run_rent_account_show(database_path: Path, account_id: int) -> int:
-    repository = SQLiteRentalRepository(database_path)
-    account = repository.get_rent_account_summary(account_id)
-    if account is None:
-        print(f"Rent account {account_id} does not exist.")
-        return 1
-
-    print(f"Rent account {account.id}")
-    print(f"Property / Unit: {account.property_name} / {account.unit_label}")
-    print(f"Name: {account.display_name}")
-    print(f"Active from: {account.active_from or '-'}")
-    print(f"Active to: {account.active_to or '-'}")
-    print("Payers:")
-    for payer in repository.list_account_payers(account_id):
-        print(f"- {payer.display_name}")
-    return 0
-
-def run_rent_account_rename(
-    database_path: Path, account_id: int, display_name: str
-) -> int:
-    try:
-        previous, updated = rename_rent_account(
-            SQLiteRentalRepository(database_path), account_id, display_name
-        )
-    except (MaintenanceNotFoundError, MaintenanceValidationError) as error:
-        print(error)
-        return 1
-    print(
-        f'Renamed rent account {account_id}: "{previous.display_name}" '
-        f'-> "{updated.display_name}"'
-    )
-    return 0
-
-def run_rent_account_remove_payer(
-    database_path: Path, account_id: int, payer_id: int
-) -> int:
-    try:
-        remove_rent_account_payer(
-            SQLiteRentalRepository(database_path), account_id, payer_id
-        )
-    except MaintenanceNotFoundError as error:
-        print(error)
-        return 1
-    print(f"Removed payer {payer_id} from rent account {account_id}.")
-    return 0
-
-def run_rent_account_end(database_path: Path, account_id: int, active_to: str) -> int:
-    try:
-        previous, updated = end_rent_account(
-            SQLiteRentalRepository(database_path), account_id, active_to
-        )
-    except (
-        MaintenanceConflictError,
-        MaintenanceNotFoundError,
-        MaintenanceValidationError,
-    ) as error:
-        print(error)
-        return 1
-    print(f"Ended rent account {account_id}:")
-    print(f"active_to: {previous.active_to or 'NULL'} -> {updated.active_to}")
-    return 0

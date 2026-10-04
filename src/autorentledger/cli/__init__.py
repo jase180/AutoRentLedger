@@ -32,6 +32,15 @@ from autorentledger.cli.expenses import (
     run_expense_show,
     run_expense_void,
 )
+from autorentledger.cli.identity import (
+    run_alias_add,
+    run_alias_listing,
+    run_alias_remove,
+    run_payer_add,
+    run_payer_listing,
+    run_payer_rename,
+    run_unresolved_payers,
+)
 from autorentledger.cli.late_fees import run_late_fee_command
 from autorentledger.cli.main import build_parser, main
 from autorentledger.cli.obligations import (
@@ -64,15 +73,7 @@ from autorentledger.cli.payments import (
     run_payment_rebuild,
 )
 from autorentledger.cli.property_cash import run_property_cash
-from autorentledger.cli.reporting import run_overview, run_report
-from autorentledger.cli.review import run_review
-from autorentledger.cli.tenancy import (
-    run_alias_add,
-    run_alias_listing,
-    run_alias_remove,
-    run_payer_add,
-    run_payer_listing,
-    run_payer_rename,
+from autorentledger.cli.rentals import (
     run_property_add,
     run_property_listing,
     run_property_rename,
@@ -83,12 +84,12 @@ from autorentledger.cli.tenancy import (
     run_rent_account_remove_payer,
     run_rent_account_rename,
     run_rent_account_show,
-    run_tenancy_end,
-    run_tenancy_setup,
     run_unit_add,
     run_unit_listing,
-    run_unresolved_payers,
 )
+from autorentledger.cli.reporting import run_overview, run_report
+from autorentledger.cli.review import run_review
+from autorentledger.cli.tenancy import run_tenancy_end, run_tenancy_setup
 from autorentledger.cli.web import run_web
 from autorentledger.daily import run_daily_operation
 from autorentledger.operations import run_sync

@@ -19,9 +19,14 @@ from autorentledger.web import WebAuthConfigurationError
 
 def register_commands(subparsers) -> None:
     web = subparsers.add_parser("web", help="serve the read-only owner overview locally")
+    web.set_defaults(handler=_handle_web, requires_schema=False)
     web.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
     web.add_argument("--host", default=DEFAULT_WEB_HOST)
     web.add_argument("--port", type=int, default=DEFAULT_WEB_PORT)
+
+
+def _handle_web(args) -> int:
+    return run_web(args.database, args.host, args.port)
 
 
 def run_web(database_path: Path, host: str, port: int) -> int:

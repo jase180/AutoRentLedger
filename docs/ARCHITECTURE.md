@@ -149,10 +149,13 @@ tax semantics. Property Cash is not profit, NOI, taxable income, or cash after d
 
 ## Presentation and orchestration organization
 
-CLI parser registration and handlers are grouped by domain under `src/autorentledger/cli/`, behind
-the stable `autorentledger.cli:main` entrypoint and compatibility facade. The top-level parser is
-assembled explicitly; command modules continue to delegate business rules and writes to the
-existing services and repositories.
+Each domain module under `src/autorentledger/cli/` owns both parser registration and the thin
+`argparse.Namespace` adapter that dispatches its commands. Identity commands live in
+`cli/identity.py`, Property/Unit/rent-account structure lives in `cli/rentals.py`, and tenancy
+setup/end lifecycle commands live in `cli/tenancy.py`. The stable `autorentledger.cli:main`
+entrypoint explicitly assembles those modules, applies only the shared schema preflight, and invokes
+the registered leaf handler. Command adapters continue to delegate validation, business rules, and
+writes to existing services and repositories.
 
 Web read composition and route registration are grouped by screen under
 `src/autorentledger/web/composition/` and `src/autorentledger/web/routes/`. Focused route modules

@@ -69,6 +69,7 @@ def register_commands(subparsers) -> None:
         assess, fee_void, fee_history, fee_list,
         fee_allocation_add, fee_allocation_remove,
     ):
+        fee_parser.set_defaults(handler=run_late_fee_command)
         fee_parser.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
 
 

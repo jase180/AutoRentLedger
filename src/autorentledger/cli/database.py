@@ -24,23 +24,49 @@ from autorentledger.storage.migrations import (
 
 def register_commands(subparsers) -> None:
     database = subparsers.add_parser("db", help="inspect or upgrade the database schema")
+    database.set_defaults(requires_schema=False)
     database_commands = database.add_subparsers(dest="database_command", required=True)
     database_status = database_commands.add_parser("status", help="show schema compatibility")
+    database_status.set_defaults(handler=_handle_status)
     database_status.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
     database_upgrade = database_commands.add_parser("upgrade", help="upgrade schema explicitly")
+    database_upgrade.set_defaults(handler=_handle_upgrade)
     database_upgrade.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
     database_check = database_commands.add_parser("check", help="verify database health")
+    database_check.set_defaults(handler=_handle_check)
     database_check.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
     database_backup = database_commands.add_parser(
         "backup", help="create a verified SQLite backup"
     )
+    database_backup.set_defaults(handler=_handle_backup)
     database_backup.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
     database_backup.add_argument("--output", type=Path, dest="output_path")
     database_restore = database_commands.add_parser(
         "restore", help="restore a verified SQLite backup"
     )
+    database_restore.set_defaults(handler=_handle_restore)
     database_restore.add_argument("backup_path", type=Path)
     database_restore.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+
+def _handle_status(args) -> int:
+    return run_database_status(args.database)
+
+
+def _handle_upgrade(args) -> int:
+    return run_database_upgrade(args.database)
+
+
+def _handle_check(args) -> int:
+    return run_database_check(args.database)
+
+
+def _handle_backup(args) -> int:
+    return run_database_backup(args.database, args.output_path)
+
+
+def _handle_restore(args) -> int:
+    return run_database_restore(args.backup_path, args.database)
 
 def run_database_status(database_path: Path) -> int:
     try:

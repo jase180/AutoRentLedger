@@ -37,13 +37,8 @@ from autorentledger.suggestions import (
 
 
 def register_commands(subparsers) -> None:
-    reconcile = subparsers.add_parser(
-        "reconcile", help="derive obligation payment state for a period"
-    )
-    reconcile.add_argument("--period", required=True)
-    reconcile.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
-
     report = subparsers.add_parser("report", help="show a read-only monthly rent report")
+    report.set_defaults(handler=_handle_report)
     report.add_argument("--period", required=True)
     report.add_argument("--csv", type=Path, dest="csv_path")
     report.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
@@ -51,8 +46,17 @@ def register_commands(subparsers) -> None:
     overview = subparsers.add_parser(
         "overview", help="show a consolidated read-only monthly owner snapshot"
     )
+    overview.set_defaults(handler=_handle_overview)
     overview.add_argument("--period", required=True)
     overview.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+
+def _handle_report(args) -> int:
+    return run_report(args.database, args.period, args.csv_path)
+
+
+def _handle_overview(args) -> int:
+    return run_overview(args.database, args.period)
 
 
 def run_report(database_path: Path, period: str, csv_path: Path | None = None) -> int:

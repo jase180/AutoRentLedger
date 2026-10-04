@@ -53,33 +53,73 @@ def register_commands(subparsers) -> None:
     allocation = subparsers.add_parser("allocation", help="manage payment allocations")
     allocation_commands = allocation.add_subparsers(dest="allocation_command", required=True)
     allocation_add = allocation_commands.add_parser("add", help="create an allocation")
+    allocation_add.set_defaults(handler=_handle_add)
     allocation_add.add_argument("--payment", type=int, required=True)
     allocation_add.add_argument("--obligation", type=int, required=True)
     allocation_add.add_argument("--amount", required=True)
     allocation_add.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
 
     allocation_remove = allocation_commands.add_parser("remove", help="remove an allocation")
+    allocation_remove.set_defaults(handler=_handle_remove)
     allocation_remove.add_argument("allocation_id", type=int)
     allocation_remove.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
 
     allocation_suggestions = allocation_commands.add_parser(
         "suggestions", help="derive conservative allocation suggestions"
     )
+    allocation_suggestions.set_defaults(handler=_handle_suggestions)
     allocation_suggestions.add_argument("--payment", type=int)
     allocation_suggestions.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
 
     allocation_plan = allocation_commands.add_parser(
         "plan", help="preview or apply deterministic historical allocations"
     )
+    allocation_plan.set_defaults(handler=_handle_plan)
     allocation_plan.add_argument("--from", required=True, dest="period_from")
     allocation_plan.add_argument("--to", required=True, dest="period_to")
     allocation_plan.add_argument("--apply", action="store_true")
     allocation_plan.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
 
     allocations = subparsers.add_parser("allocations", help="list payment allocations")
+    allocations.set_defaults(handler=_handle_listing)
     allocations.add_argument("--payment", type=int)
     allocations.add_argument("--obligation", type=int)
     allocations.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+    reconcile = subparsers.add_parser(
+        "reconcile", help="derive obligation payment state for a period"
+    )
+    reconcile.set_defaults(handler=_handle_reconciliation)
+    reconcile.add_argument("--period", required=True)
+    reconcile.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+
+def _handle_add(args) -> int:
+    return run_allocation_add(
+        args.database, args.payment, args.obligation, args.amount
+    )
+
+
+def _handle_remove(args) -> int:
+    return run_allocation_remove(args.database, args.allocation_id)
+
+
+def _handle_suggestions(args) -> int:
+    return run_allocation_suggestions(args.database, args.payment)
+
+
+def _handle_plan(args) -> int:
+    return run_allocation_plan(
+        args.database, args.period_from, args.period_to, apply=args.apply
+    )
+
+
+def _handle_listing(args) -> int:
+    return run_allocation_listing(args.database, args.payment, args.obligation)
+
+
+def _handle_reconciliation(args) -> int:
+    return run_reconciliation(args.database, args.period)
 
 
 def _allocation_repository(database_path: Path) -> SQLiteAllocationRepository:

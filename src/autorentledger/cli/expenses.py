@@ -25,6 +25,7 @@ def register_commands(subparsers) -> None:
     commands = expense.add_subparsers(dest="expense_command", required=True)
 
     add = commands.add_parser("add", help="record an owner-entered Property expense")
+    add.set_defaults(handler=_handle_add)
     add.add_argument("--property", type=int, required=True)
     add.add_argument("--unit", type=int)
     add.add_argument("--date", required=True, dest="occurred_on")
@@ -40,18 +41,22 @@ def register_commands(subparsers) -> None:
     add.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
 
     show = commands.add_parser("show", help="inspect one expense and its void audit")
+    show.set_defaults(handler=_handle_show)
     show.add_argument("expense_id", type=int)
     show.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
 
     void = commands.add_parser("void", help="void an expense without deleting it")
+    void.set_defaults(handler=_handle_void)
     void.add_argument("expense_id", type=int)
     void.add_argument("--reason", required=True)
     void.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
 
     categories = commands.add_parser("categories", help="list controlled categories")
+    categories.set_defaults(handler=_handle_categories)
     categories.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
 
     expenses = subparsers.add_parser("expenses", help="list Property expenses")
+    expenses.set_defaults(handler=_handle_listing)
     expenses.add_argument("--property", type=int)
     expenses.add_argument("--unit", type=int)
     expenses.add_argument("--from", dest="occurred_from")
@@ -61,6 +66,43 @@ def register_commands(subparsers) -> None:
     )
     expenses.add_argument("--include-voided", action="store_true")
     expenses.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+
+def _handle_add(args) -> int:
+    return run_expense_add(
+        args.database,
+        property_id=args.property,
+        unit_id=args.unit,
+        occurred_on=args.occurred_on,
+        amount=args.amount,
+        category=args.category,
+        vendor=args.vendor,
+        note=args.note,
+    )
+
+
+def _handle_show(args) -> int:
+    return run_expense_show(args.database, args.expense_id)
+
+
+def _handle_void(args) -> int:
+    return run_expense_void(args.database, args.expense_id, args.reason)
+
+
+def _handle_categories(args) -> int:
+    return run_expense_categories()
+
+
+def _handle_listing(args) -> int:
+    return run_expense_listing(
+        args.database,
+        property_id=args.property,
+        unit_id=args.unit,
+        occurred_from=args.occurred_from,
+        occurred_to=args.occurred_to,
+        category=args.category,
+        include_voided=args.include_voided,
+    )
 
 
 def run_expense_add(

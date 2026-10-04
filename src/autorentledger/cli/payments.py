@@ -53,11 +53,13 @@ from autorentledger.storage import (
 
 def register_commands(subparsers) -> None:
     payments = subparsers.add_parser("payments", help="list persisted payment events")
+    payments.set_defaults(handler=_handle_payment_listing)
     payments.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
     payment_commands = payments.add_subparsers(dest="payments_command")
     payments_rebuild = payment_commands.add_parser(
         "rebuild", help="re-derive existing payments from immutable raw evidence"
     )
+    payments_rebuild.set_defaults(handler=_handle_payment_rebuild)
     payments_rebuild.add_argument("--dry-run", action="store_true")
     payments_rebuild.add_argument("--payment", type=int)
     payments_rebuild.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
@@ -67,6 +69,7 @@ def register_commands(subparsers) -> None:
     manual_add = payment_commands.add_parser(
         "manual-add", help="create payment evidence that did not originate in Gmail"
     )
+    manual_add.set_defaults(handler=_handle_manual_add)
     manual_add.add_argument("--sender", required=True)
     manual_add.add_argument("--amount", required=True)
     manual_add.add_argument("--date", required=True, dest="payment_date")
@@ -77,6 +80,7 @@ def register_commands(subparsers) -> None:
     manual_correct = payment_commands.add_parser(
         "manual-correct", help="append a correction to manual payment evidence"
     )
+    manual_correct.set_defaults(handler=_handle_manual_correct)
     manual_correct.add_argument("payment_id", type=int)
     manual_correct.add_argument("--sender")
     manual_correct.add_argument("--amount")
@@ -89,6 +93,7 @@ def register_commands(subparsers) -> None:
     manual_void = payment_commands.add_parser(
         "manual-void", help="append a void revision for a manual payment"
     )
+    manual_void.set_defaults(handler=_handle_manual_void)
     manual_void.add_argument("payment_id", type=int)
     manual_void.add_argument("--reason", required=True)
     manual_void.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
@@ -96,12 +101,14 @@ def register_commands(subparsers) -> None:
     manual_history = payment_commands.add_parser(
         "manual-history", help="show original manual evidence and all revisions"
     )
+    manual_history.set_defaults(handler=_handle_manual_history)
     manual_history.add_argument("payment_id", type=int)
     manual_history.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
 
     gmail_void = payment_commands.add_parser(
         "gmail-void", help="deactivate a Gmail-derived payment with an audit reason"
     )
+    gmail_void.set_defaults(handler=_handle_gmail_void)
     gmail_void.add_argument("payment_id", type=int)
     gmail_void.add_argument("--reason", required=True)
     gmail_void.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
@@ -109,8 +116,59 @@ def register_commands(subparsers) -> None:
     gmail_history = payment_commands.add_parser(
         "gmail-history", help="show a Gmail payment and its void audit state"
     )
+    gmail_history.set_defaults(handler=_handle_gmail_history)
     gmail_history.add_argument("payment_id", type=int)
     gmail_history.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+
+
+def _handle_payment_listing(args) -> int:
+    return run_payment_listing(args.database)
+
+
+def _handle_payment_rebuild(args) -> int:
+    return run_payment_rebuild(
+        args.database, dry_run=args.dry_run, payment_event_id=args.payment
+    )
+
+
+def _handle_manual_add(args) -> int:
+    return run_manual_payment_add(
+        args.database,
+        args.sender,
+        args.amount,
+        args.payment_date,
+        args.note,
+        confirm_duplicate=args.confirm_duplicate,
+    )
+
+
+def _handle_manual_correct(args) -> int:
+    return run_manual_payment_correct(
+        args.database,
+        args.payment_id,
+        sender_name=args.sender,
+        amount=args.amount,
+        payment_date=args.payment_date,
+        note=args.note,
+        reason=args.reason,
+        confirm_duplicate=args.confirm_duplicate,
+    )
+
+
+def _handle_manual_void(args) -> int:
+    return run_manual_payment_void(args.database, args.payment_id, reason=args.reason)
+
+
+def _handle_manual_history(args) -> int:
+    return run_manual_payment_history(args.database, args.payment_id)
+
+
+def _handle_gmail_void(args) -> int:
+    return run_gmail_payment_void(args.database, args.payment_id, reason=args.reason)
+
+
+def _handle_gmail_history(args) -> int:
+    return run_gmail_payment_history(args.database, args.payment_id)
 
 
 def run_payment_listing(database_path: Path) -> int:
