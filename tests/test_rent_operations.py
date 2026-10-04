@@ -116,7 +116,12 @@ def test_end_tenancy_future_schedule_conflict_is_atomic(tmp_path):
     before_schedules = schedules.list_summaries(account.id)
 
     with pytest.raises(RentOperationConflictError, match="schedule beginning after"):
-        end_tenancy(schedules, account.id, "2026-10-15")
+        end_tenancy(
+            schedules,
+            account.id,
+            "2026-10-15",
+            no_final_month_rent=True,
+        )
 
     assert SQLiteRentalRepository(database_path).get_rent_account(account.id) == before_account
     assert schedules.list_summaries(account.id) == before_schedules
@@ -149,10 +154,11 @@ def test_high_level_cli_rent_change_and_tenancy_end(tmp_path, capsys):
             str(account.id),
             "--active-to",
             "2026-11-30",
+            "--apply",
             "--database",
             str(database_path),
         ]
     ) == 0
     output = capsys.readouterr().out
-    assert "Tenancy ended." in output
+    assert "Ended tenancy for Synthetic Household" in output
     assert "Existing obligations, payments, and allocations were not changed." in output

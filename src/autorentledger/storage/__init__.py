@@ -168,7 +168,9 @@ from autorentledger.storage.schedules import (
     RentScheduleRecord,
     RentScheduleSummary,
     SQLiteRentScheduleRepository,
+    TenancyEndExistingObligationStorageError,
     TenancyEndFutureScheduleStorageError,
+    TenancyEndStoragePreview,
     TenancyEndStorageResult,
 )
 from autorentledger.storage.suggestions import (
@@ -304,7 +306,9 @@ __all__ = [
     "SuggestionAccountSourceRecord",
     "SuggestionAliasSourceRecord",
     "SuggestionPaymentSourceRecord",
+    "TenancyEndExistingObligationStorageError",
     "TenancyEndFutureScheduleStorageError",
+    "TenancyEndStoragePreview",
     "TenancyEndStorageResult",
     "TenancySetupAliasConflictStorageError",
     "TenancySetupAliasInput",

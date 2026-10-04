@@ -326,6 +326,46 @@ avoids that existing behavior by starting recurring rent after the partial first
 first-month charge is an ordinary durable rent obligation and participates automatically in
 reconciliation, allocation, reporting, Overview, and Property Cash.
 
+#### Mid-month tenancy ends
+
+Tenancy `active_to` records the actual move-out date. AutoRentLedger does not calculate final-month
+proration. For a partial final month, explicitly choose either the exact agreed charge or that no
+final-month rent is due. The command is preview-first:
+
+```powershell
+autorentledger tenancy end `
+  --account 1 `
+  --active-to 2027-03-18 `
+  --final-month-rent 780.00 `
+  --final-month-due 2027-03-01
+
+autorentledger tenancy end `
+  --account 1 `
+  --active-to 2027-03-18 `
+  --final-month-rent 780.00 `
+  --final-month-due 2027-03-01 `
+  --apply
+```
+
+Omit `--final-month-due` to use the first day of the final month. For an explicitly free/waived
+partial month, use `--no-final-month-rent` instead. Omission is not treated as zero: a mid-month
+end with neither choice is rejected. For a normal end-of-month termination, no override is needed:
+
+```powershell
+autorentledger tenancy end --account 1 --active-to 2027-03-18 --no-final-month-rent --apply
+autorentledger tenancy end --account 1 --active-to 2027-03-31 --apply
+```
+
+Final-month overrides are limited to partial-month endings in M32. The explicit charge is an
+ordinary durable rent obligation. The recurring schedule is ended on the prior month-end while
+the rent account retains the actual move-out date, preventing a second/full final-month charge and
+all later recurring charges. If an obligation for the final month already exists, the operation
+fails without changing anything; it never rewrites allocated or unallocated accounting history.
+
+A rent schedule overlapping any part of a month can generate a full monthly obligation. The generic
+schedule rule is unchanged; high-level tenancy end avoids that overlap for an explicit partial final
+month or explicit no-charge month.
+
 ### Local read-only web view
 
 Serve the same canonical owner overview in a local browser:
@@ -359,7 +399,8 @@ LAN, Tailscale-IP, and public binding. See the runbook for private Tailscale Ser
 | Inventory historical payment evidence before setup | `autorentledger discovery payments` |
 | Preview one guided tenancy setup | `autorentledger setup tenancy ...` |
 | Change recurring rent from a future month | `autorentledger rent change --account ID --amount 1350.00 --effective 2026-11-01` |
-| End recurring rent without deleting history | `autorentledger tenancy end --account ID --active-to 2026-11-30` |
+| Preview ending a tenancy without deleting history | `autorentledger tenancy end --account ID --active-to 2026-11-30` |
+| End a partial final month at an agreed amount | `autorentledger tenancy end --account ID --active-to 2027-03-18 --final-month-rent 780.00 --apply` |
 | Inspect the owner dashboard | `autorentledger overview --period YYYY-MM` |
 | Inspect focused exceptions | `autorentledger review` |
 | List normalized payments | `autorentledger payments` |

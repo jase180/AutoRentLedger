@@ -788,15 +788,57 @@ it refuses to change a month whose obligation already exists.
 
 ## Tenant or account ends
 
-Use the high-level tenancy end operation:
+Use the preview-first high-level tenancy end operation for a normal end-of-month departure:
 
 ```powershell
 autorentledger tenancy end --account 1 --active-to 2027-04-30
+autorentledger tenancy end --account 1 --active-to 2027-04-30 --apply
 ```
 
-This atomically aligns the account and applicable schedule end date. It preserves payer
-associations, obligations, allocations, and historical schedule facts. A conflicting future
-schedule is reported rather than guessed or deleted.
+For a partial final month, AutoRentLedger never calculates proration. Record the exact amount that
+was agreed, preview it, and then apply it:
+
+```powershell
+autorentledger tenancy end `
+  --account 1 `
+  --active-to 2027-03-18 `
+  --final-month-rent 780.00 `
+  --final-month-due 2027-03-01
+
+autorentledger tenancy end `
+  --account 1 `
+  --active-to 2027-03-18 `
+  --final-month-rent 780.00 `
+  --final-month-due 2027-03-01 `
+  --apply
+```
+
+The due date defaults to the first day of the final month when omitted. To record an explicitly
+free/waived partial final month, use:
+
+```powershell
+autorentledger tenancy end `
+  --account 1 `
+  --active-to 2027-03-18 `
+  --no-final-month-rent `
+  --apply
+```
+
+A partial-month end requires exactly one of `--final-month-rent` or
+`--no-final-month-rent`; omission is never interpreted as a zero charge. M32 restricts override
+options to partial-month endings. End-of-month termination remains the normal recurring-rent path.
+
+Apply records the actual move-out date on the account, ends recurring schedule applicability on the
+prior month-end for a partial final month, and optionally creates the exact ordinary rent obligation
+in one transaction. It preserves payer associations, prior obligations, allocations, and historical
+schedule terms. A conflicting future schedule or existing final-month obligation is reported rather
+than guessed, deleted, or overwritten. If the existing obligation has allocations, reconcile/remove
+those allocations through the advanced repair workflow first.
+
+A rent schedule overlapping any part of a month can generate a full monthly obligation. That generic
+engine rule is unchanged. The high-level partial-month end prevents overlap by ending recurring rent
+before the explicit/no-charge final month; running generation afterward therefore cannot create a
+duplicate final-month obligation or any later obligation.
 
 ## Wrong payer or account configuration
 

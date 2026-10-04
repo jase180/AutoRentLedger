@@ -88,17 +88,26 @@ Expense categories are controlled machine values: `repairs_maintenance`, `utilit
 `legal_professional`, `capital_improvement`, `supplies`, and `other`. Capital improvements remain
 distinct from repairs and maintenance; no depreciation or tax interpretation is performed.
 
-Tenancy setup keeps three facts separate:
+The tenancy lifecycle keeps accounting boundaries separate from actual relationship dates:
 
 ```text
-Tenancy active_from
-    -> actual relationship start
-
-First-month obligation
-    -> optional explicit one-off rent charge
-
-Recurring rent schedule
-    -> starts on a first-of-month boundary
+START
+    Tenancy active_from
+        -> actual relationship start
+    First-month obligation
+        -> optional explicit one-off rent charge
+    Recurring rent schedule
+        -> starts on a first-of-month boundary
+MIDDLE
+    Recurring schedule
+        -> normal durable monthly obligations
+END
+    Tenancy active_to
+        -> actual move-out date
+    Final-month obligation
+        -> optional explicit one-off rent charge
+    Recurring rent schedule
+        -> stops before an explicit partial final month
 ```
 
 For a mid-month tenancy, recurring rent requires an explicit first-of-month `rent_effective`.
@@ -108,10 +117,19 @@ account, optional first-month obligation, and optional recurring schedule in the
 transaction. A first-of-month tenancy remains backward compatible: omitted `rent_effective`
 defaults to `active_from`.
 
+For a partial-month end, the business operation requires either an exact final-month amount or an
+explicit no-charge choice. It stores `rent_accounts.active_to` as the actual move-out date while
+ending recurring schedule applicability on the preceding month-end. An explicit amount becomes a
+normal `rent_obligations` row for the final period. Account update, schedule shortening, and optional
+obligation insert share one checked transaction. Existing final-period obligations are never
+overwritten, and all older schedules, obligations, payments, and allocations remain historical facts.
+End-of-month termination keeps the schedule applicable through the final full month.
+
 The generic schedule rule is unchanged: a schedule overlapping any part of a month may generate a
-full monthly obligation. Normal setup prevents accidental partial-month generation by placing the
-recurring schedule on the intended month boundary. Existing unique account/period obligation
-identity prevents replacement or duplication.
+full monthly obligation. Normal setup and high-level tenancy end prevent accidental partial-month
+generation by placing recurring applicability outside the explicit first/final month. Existing
+unique account/period obligation identity prevents replacement or duplication. No first- or
+final-month proration formula exists.
 
 Property Cash Summary is a derived, read-only model over the same canonical facts. It persists no
 snapshots, cached totals, or rollups and leaves the schema at v15. For one Property and month:

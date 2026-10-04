@@ -338,7 +338,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_rent_account_listing(args.database)
     if args.command == "tenancy":
         if args.tenancy_command == "end":
-            return run_tenancy_end(args.database, args.account, args.active_to)
+            return run_tenancy_end(
+                args.database,
+                args.account,
+                args.active_to,
+                final_month_rent=args.final_month_rent,
+                final_month_due=args.final_month_due,
+                no_final_month_rent=args.no_final_month_rent,
+                apply=args.apply,
+            )
         raise AssertionError(f"Unhandled tenancy command: {args.tenancy_command}")
     if args.command == "obligation":
         if args.obligation_command == "add":

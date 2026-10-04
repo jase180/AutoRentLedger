@@ -21,6 +21,7 @@ from autorentledger.storage.maintenance_errors import (
 )
 
 if TYPE_CHECKING:
+    from autorentledger.storage.obligations import RentObligationRecord
     from autorentledger.storage.rentals import RentAccountRecord
 
 
@@ -70,6 +71,14 @@ class TenancyEndStorageResult:
     previous_account: RentAccountRecord
     updated_account: RentAccountRecord
     ended_schedule_ids: tuple[int, ...]
+    schedule_active_to: str
+    final_month_obligation: RentObligationRecord | None
+
+
+@dataclass(frozen=True)
+class TenancyEndStoragePreview:
+    account: RentAccountRecord
+    ended_schedule_ids: tuple[int, ...]
 
 
 def _rent_schedule_summary(row: sqlite3.Row) -> RentScheduleSummary:
@@ -104,6 +113,15 @@ class RentChangeScheduleStorageError(Exception):
 
 class TenancyEndFutureScheduleStorageError(Exception):
     """A future schedule cannot be safely shortened to the tenancy end date."""
+
+
+class TenancyEndExistingObligationStorageError(Exception):
+    """The final tenancy month already has a durable obligation."""
+
+    def __init__(self, period: str, *, has_allocations: bool) -> None:
+        self.period = period
+        self.has_allocations = has_allocations
+        super().__init__(period)
 
 
 class SQLiteScheduleGenerationTransaction:
@@ -434,12 +452,23 @@ class SQLiteRentScheduleRepository:
         return RentChangeStorageResult(ended_previous, replacement)
 
     def end_tenancy_checked(
-        self, rent_account_id: int, active_to: date
+        self,
+        rent_account_id: int,
+        active_to: date,
+        *,
+        schedule_active_to: date | None = None,
+        final_month_amount_cents: int | None = None,
+        final_month_due: date | None = None,
     ) -> TenancyEndStorageResult:
-        """Atomically end an account and its currently applicable schedules."""
+        """Atomically end an account, recurring schedules, and optional final rent."""
+        from autorentledger.storage.obligations import RentObligationRecord
         from autorentledger.storage.rentals import RentAccountRecord
 
         active_to_text = active_to.isoformat()
+        schedule_active_to = schedule_active_to or active_to
+        schedule_active_to_text = schedule_active_to.isoformat()
+        final_period = active_to_text[:7]
+        created_at = datetime.now(UTC).isoformat()
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
@@ -460,10 +489,39 @@ class SQLiteRentScheduleRepository:
                 ORDER BY id
                 LIMIT 1
                 """,
-                (rent_account_id, active_to_text),
+                (rent_account_id, schedule_active_to_text),
             ).fetchone()
             if future is not None:
                 raise TenancyEndFutureScheduleStorageError
+            obligation = connection.execute(
+                """
+                SELECT id
+                FROM rent_obligations
+                WHERE rent_account_id = ? AND period = ?
+                """,
+                (rent_account_id, final_period),
+            ).fetchone()
+            if obligation is not None and (
+                final_month_amount_cents is not None
+                or schedule_active_to_text < active_to_text
+            ):
+                has_allocations = connection.execute(
+                    """
+                    SELECT 1
+                    FROM payment_allocations
+                    WHERE rent_obligation_id = ?
+                    LIMIT 1
+                    """,
+                    (int(obligation["id"]),),
+                ).fetchone() is not None
+                raise TenancyEndExistingObligationStorageError(
+                    final_period, has_allocations=has_allocations
+                )
+
+            connection.execute(
+                "UPDATE rent_accounts SET active_to = ? WHERE id = ?",
+                (active_to_text, rent_account_id),
+            )
             affected = connection.execute(
                 """
                 SELECT id
@@ -473,7 +531,11 @@ class SQLiteRentScheduleRepository:
                     AND (active_to IS NULL OR active_to > ?)
                 ORDER BY id
                 """,
-                (rent_account_id, active_to_text, active_to_text),
+                (
+                    rent_account_id,
+                    schedule_active_to_text,
+                    schedule_active_to_text,
+                ),
             ).fetchall()
             ended_schedule_ids = tuple(int(item["id"]) for item in affected)
             connection.execute(
@@ -484,12 +546,38 @@ class SQLiteRentScheduleRepository:
                     AND active_from <= ?
                     AND (active_to IS NULL OR active_to > ?)
                 """,
-                (active_to_text, rent_account_id, active_to_text, active_to_text),
+                (
+                    schedule_active_to_text,
+                    rent_account_id,
+                    schedule_active_to_text,
+                    schedule_active_to_text,
+                ),
             )
-            connection.execute(
-                "UPDATE rent_accounts SET active_to = ? WHERE id = ?",
-                (active_to_text, rent_account_id),
-            )
+            final_month_obligation = None
+            if final_month_amount_cents is not None:
+                assert final_month_due is not None
+                cursor = connection.execute(
+                    """
+                    INSERT INTO rent_obligations (
+                        rent_account_id, period, amount_cents, due_date, created_at
+                    ) VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        rent_account_id,
+                        final_period,
+                        final_month_amount_cents,
+                        final_month_due.isoformat(),
+                        created_at,
+                    ),
+                )
+                final_month_obligation = RentObligationRecord(
+                    int(cursor.lastrowid),
+                    rent_account_id,
+                    final_period,
+                    final_month_amount_cents,
+                    final_month_due.isoformat(),
+                    created_at,
+                )
         updated = RentAccountRecord(
             previous.id,
             previous.unit_id,
@@ -498,7 +586,84 @@ class SQLiteRentScheduleRepository:
             active_to_text,
             previous.created_at,
         )
-        return TenancyEndStorageResult(previous, updated, ended_schedule_ids)
+        return TenancyEndStorageResult(
+            previous,
+            updated,
+            ended_schedule_ids,
+            schedule_active_to_text,
+            final_month_obligation,
+        )
+
+    def preview_tenancy_end_checked(
+        self,
+        rent_account_id: int,
+        active_to: date,
+        *,
+        schedule_active_to: date,
+        final_month_override: bool,
+    ) -> TenancyEndStoragePreview:
+        """Read and validate the durable state used by a tenancy-end preview."""
+        from autorentledger.storage.rentals import RentAccountRecord
+
+        active_to_text = active_to.isoformat()
+        schedule_active_to_text = schedule_active_to.isoformat()
+        with self._connect_read_only() as connection:
+            row = connection.execute(
+                "SELECT * FROM rent_accounts WHERE id = ?", (rent_account_id,)
+            ).fetchone()
+            if row is None:
+                raise MaintenanceRentAccountNotFoundError
+            account = RentAccountRecord(**dict(row))
+            if account.active_from is not None and active_to_text < account.active_from:
+                raise MaintenanceDateRangeError
+            if account.active_to is not None and active_to_text > account.active_to:
+                raise MaintenanceDateRangeError
+            if connection.execute(
+                """
+                SELECT 1 FROM rent_schedules
+                WHERE rent_account_id = ? AND active_from > ?
+                LIMIT 1
+                """,
+                (rent_account_id, schedule_active_to_text),
+            ).fetchone() is not None:
+                raise TenancyEndFutureScheduleStorageError
+            obligation = connection.execute(
+                """
+                SELECT id FROM rent_obligations
+                WHERE rent_account_id = ? AND period = ?
+                """,
+                (rent_account_id, active_to_text[:7]),
+            ).fetchone()
+            if obligation is not None and (
+                final_month_override or schedule_active_to_text < active_to_text
+            ):
+                has_allocations = connection.execute(
+                    """
+                    SELECT 1 FROM payment_allocations
+                    WHERE rent_obligation_id = ? LIMIT 1
+                    """,
+                    (int(obligation["id"]),),
+                ).fetchone() is not None
+                raise TenancyEndExistingObligationStorageError(
+                    active_to_text[:7], has_allocations=has_allocations
+                )
+            rows = connection.execute(
+                """
+                SELECT id FROM rent_schedules
+                WHERE rent_account_id = ?
+                    AND active_from <= ?
+                    AND (active_to IS NULL OR active_to > ?)
+                ORDER BY id
+                """,
+                (
+                    rent_account_id,
+                    schedule_active_to_text,
+                    schedule_active_to_text,
+                ),
+            ).fetchall()
+        return TenancyEndStoragePreview(
+            account, tuple(int(item["id"]) for item in rows)
+        )
 
     def list_generation_sources(
         self, period: str, month_start: str, month_end: str
