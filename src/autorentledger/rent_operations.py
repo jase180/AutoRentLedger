@@ -7,19 +7,23 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 
 from autorentledger.obligations import ObligationValidationError, parse_currency_cents
-from autorentledger.storage import (
+from autorentledger.storage.maintenance_errors import (
     MaintenanceDateRangeError,
     MaintenanceRentAccountNotFoundError,
+)
+from autorentledger.storage.rent_operations import (
     RentChangeExistingObligationStorageError,
     RentChangeScheduleStorageError,
+    SQLiteRentOperationRepository,
+    TenancyEndExistingObligationStorageError,
+    TenancyEndFutureScheduleStorageError,
+    TenancyEndStorageResult,
+)
+from autorentledger.storage.schedules import (
     RentScheduleAccountNotFoundError,
     RentScheduleOutsideAccountRangeError,
     RentScheduleOverlapStorageError,
     RentScheduleRecord,
-    SQLiteRentScheduleRepository,
-    TenancyEndExistingObligationStorageError,
-    TenancyEndFutureScheduleStorageError,
-    TenancyEndStorageResult,
 )
 
 
@@ -74,7 +78,7 @@ class _TenancyEndPlan:
 
 
 def change_recurring_rent(
-    repository: SQLiteRentScheduleRepository,
+    repository: SQLiteRentOperationRepository,
     rent_account_id: int,
     amount: str,
     effective: str,
@@ -119,7 +123,7 @@ def change_recurring_rent(
 
 
 def preview_tenancy_end(
-    repository: SQLiteRentScheduleRepository,
+    repository: SQLiteRentOperationRepository,
     request: TenancyEndRequest,
 ) -> TenancyEndPreview:
     """Build a read-only, checked tenancy-end plan."""
@@ -155,7 +159,7 @@ def preview_tenancy_end(
 
 
 def end_tenancy(
-    repository: SQLiteRentScheduleRepository,
+    repository: SQLiteRentOperationRepository,
     rent_account_id: int,
     active_to: str,
     *,

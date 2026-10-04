@@ -47,9 +47,16 @@ tie-breaker.
 
 SQLite persistence adapters are grouped by existing domain concern under
 `src/autorentledger/storage/`: payments and evidence, manual and Gmail audit history, identity,
-rentals and tenancy setup, obligations, schedules, allocations, reconciliation, reporting,
-review, discovery, suggestions, and allocation planning. `storage/db.py` contains only the shared
-connection setup for row access, foreign-key enforcement, and read-only URI handling.
+rentals, obligations, schedules, allocations, reconciliation, reporting, review, discovery,
+suggestions, and allocation planning. Rental-lifecycle persistence has four focused owners:
+
+- `storage/rentals.py` owns structural Unit, Rent Account, and payer-association persistence.
+- `storage/tenancy_setup.py` owns the checked atomic guided-tenancy setup transaction.
+- `storage/schedules.py` owns recurring schedule persistence and obligation generation.
+- `storage/rent_operations.py` owns checked rent-change and tenancy-end lifecycle mutations.
+
+`storage/db.py` contains only the shared connection setup for row access, foreign-key enforcement,
+and read-only URI handling.
 
 `storage/__init__.py` remains the compatibility facade for established imports. Schema lifecycle
 and historical upgrades remain centralized in `storage/migrations.py`; repository modules must not

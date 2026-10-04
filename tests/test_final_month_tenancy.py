@@ -27,6 +27,7 @@ from autorentledger.storage import (
     SQLiteRawEmailRepository,
     SQLiteReconciliationRepository,
     SQLiteRentalRepository,
+    SQLiteRentOperationRepository,
     SQLiteRentScheduleRepository,
     SQLiteReportingRepository,
     SQLiteReviewRepository,
@@ -62,6 +63,10 @@ def durable_state(database_path, account_id):
     )
 
 
+def lifecycle(database_path):
+    return SQLiteRentOperationRepository(database_path)
+
+
 def create_synthetic_payment(database_path, message_id, amount_cents):
     raws = SQLiteRawEmailRepository(database_path)
     raws.insert(
@@ -94,7 +99,7 @@ def test_mid_month_override_uses_exact_amount_and_excludes_final_month_schedule(
     database_path, _, account, schedules = create_tenancy(tmp_path)
 
     result = end_tenancy(
-        schedules,
+        lifecycle(database_path),
         account.id,
         "2027-03-18",
         final_month_rent="780.00",
@@ -118,7 +123,10 @@ def test_mid_month_no_charge_stops_before_final_month(tmp_path):
     database_path, _, account, schedules = create_tenancy(tmp_path)
 
     result = end_tenancy(
-        schedules, account.id, "2027-03-18", no_final_month_rent=True
+        lifecycle(database_path),
+        account.id,
+        "2027-03-18",
+        no_final_month_rent=True,
     )
 
     assert result.updated_account.active_to == "2027-03-18"
@@ -150,11 +158,11 @@ def test_mid_month_no_charge_stops_before_final_month(tmp_path):
     ],
 )
 def test_invalid_partial_month_choices_fail_before_mutation(tmp_path, kwargs, message):
-    database_path, _, account, schedules = create_tenancy(tmp_path)
+    database_path, _, account, _ = create_tenancy(tmp_path)
     before = durable_state(database_path, account.id)
 
     with pytest.raises(RentOperationValidationError, match=message):
-        end_tenancy(schedules, account.id, "2027-03-18", **kwargs)
+        end_tenancy(lifecycle(database_path), account.id, "2027-03-18", **kwargs)
 
     assert durable_state(database_path, account.id) == before
 
@@ -162,7 +170,7 @@ def test_invalid_partial_month_choices_fail_before_mutation(tmp_path, kwargs, me
 def test_end_of_month_keeps_normal_final_month_and_blocks_april(tmp_path):
     database_path, _, account, schedules = create_tenancy(tmp_path)
 
-    result = end_tenancy(schedules, account.id, "2027-03-31")
+    result = end_tenancy(lifecycle(database_path), account.id, "2027-03-31")
     march = generate_obligations(schedules, "2027-03")
     april = generate_obligations(schedules, "2027-04")
 
@@ -181,7 +189,10 @@ def test_end_of_month_override_is_intentionally_restricted(tmp_path):
 
     with pytest.raises(RentOperationValidationError, match="partial final month"):
         end_tenancy(
-            schedules, account.id, "2027-03-31", final_month_rent="780.00"
+            lifecycle(schedules.database_path),
+            account.id,
+            "2027-03-31",
+            final_month_rent="780.00",
         )
 
 
@@ -192,7 +203,10 @@ def test_existing_final_obligation_rejects_without_any_mutation(tmp_path):
 
     with pytest.raises(RentOperationConflictError, match="already exists"):
         end_tenancy(
-            schedules, account.id, "2027-03-18", final_month_rent="780.00"
+            lifecycle(database_path),
+            account.id,
+            "2027-03-18",
+            final_month_rent="780.00",
         )
 
     assert durable_state(database_path, account.id) == before
@@ -214,7 +228,10 @@ def test_allocated_final_obligation_has_specific_conflict(tmp_path):
 
     with pytest.raises(RentOperationConflictError, match="already has allocations"):
         end_tenancy(
-            schedules, account.id, "2027-03-18", final_month_rent="780.00"
+            lifecycle(database_path),
+            account.id,
+            "2027-03-18",
+            final_month_rent="780.00",
         )
 
     assert durable_state(database_path, account.id) == before
@@ -241,14 +258,17 @@ def test_allocated_final_obligation_has_specific_conflict(tmp_path):
     ],
 )
 def test_checked_end_rolls_back_every_step(tmp_path, trigger_sql):
-    database_path, _, account, schedules = create_tenancy(tmp_path)
+    database_path, _, account, _ = create_tenancy(tmp_path)
     with sqlite3.connect(database_path) as connection:
         connection.execute(trigger_sql)
     before = durable_state(database_path, account.id)
 
     with pytest.raises(sqlite3.IntegrityError):
         end_tenancy(
-            schedules, account.id, "2027-03-18", final_month_rent="780.00"
+            lifecycle(database_path),
+            account.id,
+            "2027-03-18",
+            final_month_rent="780.00",
         )
 
     assert durable_state(database_path, account.id) == before
@@ -257,7 +277,9 @@ def test_checked_end_rolls_back_every_step(tmp_path, trigger_sql):
 def test_prior_history_and_rent_change_schedules_are_preserved(tmp_path):
     database_path, _, account, schedules = create_tenancy(tmp_path)
     generate_obligations(schedules, "2027-02")
-    change_recurring_rent(schedules, account.id, "1350.00", "2027-07-01")
+    change_recurring_rent(
+        lifecycle(database_path), account.id, "1350.00", "2027-07-01"
+    )
     before_obligation = SQLiteObligationRepository(database_path).get_for_account_period(
         account.id, "2027-02"
     )
@@ -271,7 +293,10 @@ def test_prior_history_and_rent_change_schedules_are_preserved(tmp_path):
     before_old_schedule = schedules.get(1)
 
     result = end_tenancy(
-        schedules, account.id, "2027-09-18", final_month_rent="810.00"
+        lifecycle(database_path),
+        account.id,
+        "2027-09-18",
+        final_month_rent="810.00",
     )
 
     assert result.ended_schedule_ids == (2,)
@@ -283,13 +308,13 @@ def test_prior_history_and_rent_change_schedules_are_preserved(tmp_path):
 
 
 def test_preview_and_cli_are_read_only_until_apply(tmp_path, capsys):
-    database_path, _, account, schedules = create_tenancy(tmp_path)
+    database_path, _, account, _ = create_tenancy(tmp_path)
     request = TenancyEndRequest(
         account.id, "2027-03-18", final_month_rent="780.00"
     )
     before = durable_state(database_path, account.id)
 
-    preview = preview_tenancy_end(schedules, request)
+    preview = preview_tenancy_end(lifecycle(database_path), request)
     assert preview.schedule_active_to.isoformat() == "2027-02-28"
     assert durable_state(database_path, account.id) == before
 
@@ -346,9 +371,12 @@ def test_no_charge_cli_message_is_explicit(tmp_path, capsys):
 
 
 def test_final_month_obligation_flows_through_read_models(tmp_path):
-    database_path, property_record, account, schedules = create_tenancy(tmp_path)
+    database_path, property_record, account, _ = create_tenancy(tmp_path)
     result = end_tenancy(
-        schedules, account.id, "2027-03-18", final_month_rent="780.00"
+        lifecycle(database_path),
+        account.id,
+        "2027-03-18",
+        final_month_rent="780.00",
     )
 
     reconciliation = reconcile_period(

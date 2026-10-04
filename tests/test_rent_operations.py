@@ -16,6 +16,7 @@ from autorentledger.schedules import (
 from autorentledger.storage import (
     SQLiteObligationRepository,
     SQLiteRentalRepository,
+    SQLiteRentOperationRepository,
     SQLiteRentScheduleRepository,
 )
 from autorentledger.storage.migrations import CURRENT_SCHEMA_VERSION, upgrade_database
@@ -60,7 +61,10 @@ def test_rent_change_preserves_prior_obligation_and_changes_future_month(tmp_pat
     october = obligations.get_for_account_period(account.id, "2026-10")
 
     result = change_recurring_rent(
-        schedules, account.id, "1350.00", "2026-11-01"
+        SQLiteRentOperationRepository(database_path),
+        account.id,
+        "1350.00",
+        "2026-11-01",
     )
     november_plan = ensure_monthly_rent(schedules, "2026-11")
 
@@ -80,17 +84,27 @@ def test_rent_change_rejects_existing_effective_month_without_mutation(tmp_path)
     before = schedules.list_summaries(account.id)
 
     with pytest.raises(RentOperationConflictError, match="was not rewritten"):
-        change_recurring_rent(schedules, account.id, "1350.00", "2026-11-01")
+        change_recurring_rent(
+            SQLiteRentOperationRepository(database_path),
+            account.id,
+            "1350.00",
+            "2026-11-01",
+        )
 
     assert schedules.list_summaries(account.id) == before
     assert obligations.get_for_account_period(account.id, "2026-11").amount_cents == 130000
 
 
 def test_rent_change_requires_month_boundary(tmp_path):
-    _, account, schedules = create_recurring_rent(tmp_path)
+    database_path, account, _ = create_recurring_rent(tmp_path)
 
     with pytest.raises(RentOperationValidationError, match="first day"):
-        change_recurring_rent(schedules, account.id, "1350.00", "2026-11-15")
+        change_recurring_rent(
+            SQLiteRentOperationRepository(database_path),
+            account.id,
+            "1350.00",
+            "2026-11-15",
+        )
 
 
 def test_end_tenancy_aligns_schedule_and_blocks_future_rent(tmp_path):
@@ -99,7 +113,9 @@ def test_end_tenancy_aligns_schedule_and_blocks_future_rent(tmp_path):
     ensure_monthly_rent(schedules, "2026-11")
     november = obligations.get_for_account_period(account.id, "2026-11")
 
-    result = end_tenancy(schedules, account.id, "2026-11-30")
+    result = end_tenancy(
+        SQLiteRentOperationRepository(database_path), account.id, "2026-11-30"
+    )
     december = ensure_monthly_rent(schedules, "2026-12")
 
     assert result.updated_account.active_to == "2026-11-30"
@@ -111,13 +127,14 @@ def test_end_tenancy_aligns_schedule_and_blocks_future_rent(tmp_path):
 
 def test_end_tenancy_future_schedule_conflict_is_atomic(tmp_path):
     database_path, account, schedules = create_recurring_rent(tmp_path)
-    change_recurring_rent(schedules, account.id, "1350.00", "2026-11-01")
+    operations = SQLiteRentOperationRepository(database_path)
+    change_recurring_rent(operations, account.id, "1350.00", "2026-11-01")
     before_account = SQLiteRentalRepository(database_path).get_rent_account(account.id)
     before_schedules = schedules.list_summaries(account.id)
 
     with pytest.raises(RentOperationConflictError, match="schedule beginning after"):
         end_tenancy(
-            schedules,
+            operations,
             account.id,
             "2026-10-15",
             no_final_month_rent=True,

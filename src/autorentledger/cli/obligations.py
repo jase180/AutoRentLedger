@@ -46,6 +46,7 @@ from autorentledger.storage import (
     SQLiteRentalRepository,
     SQLiteRentScheduleRepository,
 )
+from autorentledger.storage.rent_operations import SQLiteRentOperationRepository
 
 
 def register_commands(subparsers) -> None:
@@ -263,7 +264,7 @@ def run_rent_change(
 ) -> int:
     try:
         result = change_recurring_rent(
-            SQLiteRentScheduleRepository(database_path),
+            SQLiteRentOperationRepository(database_path),
             account_id,
             amount,
             effective,

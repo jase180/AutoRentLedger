@@ -133,21 +133,21 @@ from autorentledger.storage.reconciliation import (
     ReconciliationSourceRecord,
     SQLiteReconciliationRepository,
 )
+from autorentledger.storage.rent_operations import (
+    RentChangeExistingObligationStorageError,
+    RentChangeScheduleStorageError,
+    RentChangeStorageResult,
+    SQLiteRentOperationRepository,
+    TenancyEndExistingObligationStorageError,
+    TenancyEndFutureScheduleStorageError,
+    TenancyEndStoragePreview,
+    TenancyEndStorageResult,
+)
 from autorentledger.storage.rentals import (
     RentAccountPayerRecord,
     RentAccountRecord,
     RentAccountSummary,
     SQLiteRentalRepository,
-    SQLiteTenancySetupRepository,
-    TenancySetupAliasConflictStorageError,
-    TenancySetupAliasInput,
-    TenancySetupAliasStorageResult,
-    TenancySetupObligationConflictStorageError,
-    TenancySetupPayerNotFoundStorageError,
-    TenancySetupPropertyNotFoundStorageError,
-    TenancySetupStorageResult,
-    TenancySetupUnitLabelConflictStorageError,
-    TenancySetupUnitNotFoundStorageError,
     UnitRecord,
     UnitSummary,
 )
@@ -159,25 +159,30 @@ from autorentledger.storage.review import (
 )
 from autorentledger.storage.schedules import (
     ObligationGenerationSourceRecord,
-    RentChangeExistingObligationStorageError,
-    RentChangeScheduleStorageError,
-    RentChangeStorageResult,
     RentScheduleAccountNotFoundError,
     RentScheduleOutsideAccountRangeError,
     RentScheduleOverlapStorageError,
     RentScheduleRecord,
     RentScheduleSummary,
     SQLiteRentScheduleRepository,
-    TenancyEndExistingObligationStorageError,
-    TenancyEndFutureScheduleStorageError,
-    TenancyEndStoragePreview,
-    TenancyEndStorageResult,
 )
 from autorentledger.storage.suggestions import (
     SQLiteSuggestionRepository,
     SuggestionAccountSourceRecord,
     SuggestionAliasSourceRecord,
     SuggestionPaymentSourceRecord,
+)
+from autorentledger.storage.tenancy_setup import (
+    SQLiteTenancySetupRepository,
+    TenancySetupAliasConflictStorageError,
+    TenancySetupAliasInput,
+    TenancySetupAliasStorageResult,
+    TenancySetupObligationConflictStorageError,
+    TenancySetupPayerNotFoundStorageError,
+    TenancySetupPropertyNotFoundStorageError,
+    TenancySetupStorageResult,
+    TenancySetupUnitLabelConflictStorageError,
+    TenancySetupUnitNotFoundStorageError,
 )
 
 __all__ = [
@@ -297,6 +302,7 @@ __all__ = [
     "SQLitePropertyRepository",
     "SQLiteRawEmailRepository",
     "SQLiteReconciliationRepository",
+    "SQLiteRentOperationRepository",
     "SQLiteRentScheduleRepository",
     "SQLiteRentalRepository",
     "SQLiteReportingRepository",

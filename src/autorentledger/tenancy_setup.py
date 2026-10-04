@@ -12,12 +12,15 @@ from autorentledger.obligations import (
     parse_currency_cents,
     parse_iso_date,
 )
-from autorentledger.storage import (
-    PayerRecord,
+from autorentledger.storage.identity import PayerRecord
+from autorentledger.storage.obligations import RentObligationRecord
+from autorentledger.storage.rentals import (
     RentAccountPayerRecord,
     RentAccountRecord,
-    RentObligationRecord,
-    RentScheduleRecord,
+    UnitRecord,
+)
+from autorentledger.storage.schedules import RentScheduleRecord
+from autorentledger.storage.tenancy_setup import (
     SQLiteTenancySetupRepository,
     TenancySetupAliasConflictStorageError,
     TenancySetupAliasInput,
@@ -28,7 +31,6 @@ from autorentledger.storage import (
     TenancySetupStorageResult,
     TenancySetupUnitLabelConflictStorageError,
     TenancySetupUnitNotFoundStorageError,
-    UnitRecord,
 )
 
 

@@ -19,10 +19,8 @@ from autorentledger.rent_operations import (
     end_tenancy,
     preview_tenancy_end,
 )
-from autorentledger.storage import (
-    SQLiteRentScheduleRepository,
-    SQLiteTenancySetupRepository,
-)
+from autorentledger.storage.rent_operations import SQLiteRentOperationRepository
+from autorentledger.storage.tenancy_setup import SQLiteTenancySetupRepository
 from autorentledger.tenancy_setup import (
     SetupAction,
     TenancySetupConflictError,
@@ -277,7 +275,7 @@ def run_tenancy_end(
     no_final_month_rent: bool,
     apply: bool,
 ) -> int:
-    repository = SQLiteRentScheduleRepository(database_path)
+    repository = SQLiteRentOperationRepository(database_path)
     try:
         if not apply:
             preview = preview_tenancy_end(
