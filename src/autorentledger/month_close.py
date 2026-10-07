@@ -33,6 +33,21 @@ class MonthCloseStatus(StrEnum):
     NEEDS_ATTENTION = "NEEDS_ATTENTION"
 
 
+class MonthCloseCheckStatus(StrEnum):
+    PASS = "PASS"
+    ATTENTION = "ATTENTION"
+    NOT_APPLICABLE = "NOT_APPLICABLE"
+
+
+@dataclass(frozen=True)
+class MonthCloseCheck:
+    key: str
+    label: str
+    status: MonthCloseCheckStatus
+    detail: str
+    count: int | None = None
+
+
 @dataclass(frozen=True)
 class MonthCloseRentSummary:
     obligation_count: int
@@ -84,6 +99,7 @@ class MonthCloseExpenseSummary:
 class MonthCloseSummary:
     period: str
     status: MonthCloseStatus
+    checks: tuple[MonthCloseCheck, ...]
     rent: MonthCloseRentSummary
     attention: MonthCloseAttentionSummary
     recurring_rent: MonthCloseRecurringRentSummary
@@ -145,10 +161,12 @@ def build_month_close(
         operating_expense_cents=sum(item.operating_expense_cents for item in property_cash),
         capital_improvement_cents=sum(item.capital_improvement_cents for item in property_cash),
     )
+    checks = _build_checks(rent, attention, recurring_rent, expenses, property_cash)
 
     return MonthCloseSummary(
         period=canonical_period,
-        status=_derive_status(rent, attention, recurring_rent),
+        status=_derive_status(checks),
+        checks=checks,
         rent=rent,
         attention=attention,
         recurring_rent=recurring_rent,
@@ -176,27 +194,208 @@ def _review_items(items: list[ReviewItem], kind: ReviewKind) -> tuple[ReviewItem
     return tuple(item for item in items if item.kind is kind)
 
 
-def _derive_status(
+def _build_checks(
     rent: MonthCloseRentSummary,
     attention: MonthCloseAttentionSummary,
     recurring_rent: MonthCloseRecurringRentSummary,
-) -> MonthCloseStatus:
-    needs_attention = (
-        rent.partial_count > 0
-        or rent.unpaid_count > 0
-        or attention.unresolved_sender_count > 0
-        or attention.payments_with_unallocated_count > 0
-        or attention.actionable_suggestion_count > 0
-        or attention.unparsed_evidence_count > 0
-        or recurring_rent.missing_expected_obligation_count > 0
+    expenses: MonthCloseExpenseSummary,
+    property_cash: tuple[PropertyCashSummary, ...],
+) -> tuple[MonthCloseCheck, ...]:
+    if rent.obligation_count == 0:
+        rent_check = MonthCloseCheck(
+            "rent_balances",
+            "Rent balances",
+            MonthCloseCheckStatus.NOT_APPLICABLE,
+            "No rent obligations for this month",
+            0,
+        )
+    elif rent.partial_count or rent.unpaid_count:
+        rent_check = MonthCloseCheck(
+            "rent_balances",
+            "Rent balances",
+            MonthCloseCheckStatus.ATTENTION,
+            f"{rent.partial_count} partial, {rent.unpaid_count} unpaid",
+            rent.partial_count + rent.unpaid_count,
+        )
+    else:
+        rent_check = MonthCloseCheck(
+            "rent_balances",
+            "Rent balances",
+            MonthCloseCheckStatus.PASS,
+            f"{rent.obligation_count} "
+            f"{'obligation' if rent.obligation_count == 1 else 'obligations'} fully paid",
+            rent.obligation_count,
+        )
+
+    recurring_count = (
+        recurring_rent.existing_obligation_count + recurring_rent.missing_expected_obligation_count
     )
-    if needs_attention:
+    if recurring_rent.missing_expected_obligation_count:
+        recurring_check = MonthCloseCheck(
+            "recurring_rent",
+            "Recurring rent coverage",
+            MonthCloseCheckStatus.ATTENTION,
+            (
+                f"{recurring_rent.missing_expected_obligation_count} expected obligation is missing"
+                if recurring_rent.missing_expected_obligation_count == 1
+                else (
+                    f"{recurring_rent.missing_expected_obligation_count} "
+                    "expected obligations are missing"
+                )
+            ),
+            recurring_rent.missing_expected_obligation_count,
+        )
+    elif recurring_count:
+        recurring_check = MonthCloseCheck(
+            "recurring_rent",
+            "Recurring rent coverage",
+            MonthCloseCheckStatus.PASS,
+            f"{recurring_rent.existing_obligation_count} expected "
+            f"{'obligation already exists' if recurring_rent.existing_obligation_count == 1 else 'obligations already exist'}",
+            recurring_rent.existing_obligation_count,
+        )
+    else:
+        recurring_check = MonthCloseCheck(
+            "recurring_rent",
+            "Recurring rent coverage",
+            MonthCloseCheckStatus.NOT_APPLICABLE,
+            "No recurring rent applies this month",
+            0,
+        )
+
+    if attention.active_payment_count == 0:
+        unallocated_check = MonthCloseCheck(
+            "unallocated_payments",
+            "Unallocated payment money",
+            MonthCloseCheckStatus.NOT_APPLICABLE,
+            "No active observed payments",
+            0,
+        )
+        identity_check = MonthCloseCheck(
+            "payer_identity",
+            "Sender identity resolution",
+            MonthCloseCheckStatus.NOT_APPLICABLE,
+            "No active observed payments",
+            0,
+        )
+    else:
+        unallocated_count = attention.payments_with_unallocated_count
+        unallocated_check = MonthCloseCheck(
+            "unallocated_payments",
+            "Unallocated payment money",
+            (MonthCloseCheckStatus.ATTENTION if unallocated_count else MonthCloseCheckStatus.PASS),
+            (
+                f"{unallocated_count} "
+                f"{'payment' if unallocated_count == 1 else 'payments'}, "
+                f"{_format_cents(attention.unallocated_cents)} remaining"
+                if unallocated_count
+                else "No active payment money remains unallocated"
+            ),
+            unallocated_count,
+        )
+        unresolved_count = attention.unresolved_sender_count
+        identity_check = MonthCloseCheck(
+            "payer_identity",
+            "Sender identity resolution",
+            (MonthCloseCheckStatus.ATTENTION if unresolved_count else MonthCloseCheckStatus.PASS),
+            (
+                f"{unresolved_count} unresolved {'sender' if unresolved_count == 1 else 'senders'}"
+                if unresolved_count
+                else "All active payment senders resolved"
+            ),
+            unresolved_count,
+        )
+
+    suggestion_count = attention.actionable_suggestion_count
+    suggestion_check = MonthCloseCheck(
+        "allocation_suggestions",
+        "Allocation suggestions",
+        (MonthCloseCheckStatus.ATTENTION if suggestion_count else MonthCloseCheckStatus.PASS),
+        (
+            f"{suggestion_count} actionable suggestions"
+            if suggestion_count != 1
+            else "1 actionable suggestion"
+        ),
+        suggestion_count,
+    )
+    if not suggestion_count:
+        suggestion_check = MonthCloseCheck(
+            "allocation_suggestions",
+            "Allocation suggestions",
+            MonthCloseCheckStatus.PASS,
+            "No actionable suggestions",
+            0,
+        )
+
+    unparsed_count = attention.unparsed_evidence_count
+    evidence_check = MonthCloseCheck(
+        "evidence_parsing",
+        "Evidence parsing",
+        MonthCloseCheckStatus.ATTENTION if unparsed_count else MonthCloseCheckStatus.PASS,
+        (
+            "1 unparsed email"
+            if unparsed_count == 1
+            else (f"{unparsed_count} unparsed emails" if unparsed_count else "No unparsed evidence")
+        ),
+        unparsed_count,
+    )
+
+    expense_count = expenses.active_expense_count
+    expense_check = MonthCloseCheck(
+        "expenses",
+        "Expense review",
+        (MonthCloseCheckStatus.PASS if expense_count else MonthCloseCheckStatus.NOT_APPLICABLE),
+        (
+            f"{expense_count} active expenses recorded"
+            if expense_count != 1
+            else "1 active expense recorded"
+        )
+        if expense_count
+        else "No active expenses recorded",
+        expense_count,
+    )
+
+    property_count = len(property_cash)
+    property_cash_check = MonthCloseCheck(
+        "property_cash",
+        "Property cash review",
+        (MonthCloseCheckStatus.PASS if property_count else MonthCloseCheckStatus.NOT_APPLICABLE),
+        (
+            f"{property_count} Properties summarized"
+            if property_count != 1
+            else "1 Property summarized"
+        )
+        if property_count
+        else "No Properties configured",
+        property_count,
+    )
+
+    return (
+        rent_check,
+        recurring_check,
+        unallocated_check,
+        identity_check,
+        suggestion_check,
+        evidence_check,
+        expense_check,
+        property_cash_check,
+    )
+
+
+def _derive_status(checks: tuple[MonthCloseCheck, ...]) -> MonthCloseStatus:
+    if any(check.status is MonthCloseCheckStatus.ATTENTION for check in checks):
         return MonthCloseStatus.NEEDS_ATTENTION
     return MonthCloseStatus.CLEAR
 
 
+def _format_cents(amount_cents: int) -> str:
+    return f"${amount_cents / 100:,.2f}"
+
+
 __all__ = [
     "MonthCloseAttentionSummary",
+    "MonthCloseCheck",
+    "MonthCloseCheckStatus",
     "MonthCloseExpenseSummary",
     "MonthCloseRecurringRentSummary",
     "MonthCloseRentSummary",

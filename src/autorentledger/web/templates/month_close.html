@@ -18,6 +18,43 @@
 
   <p><span class="status {% if summary.status.value == 'CLEAR' %}status-paid{% else %}status-unpaid{% endif %}">{{ summary.status.value|replace('_', ' ') }}</span></p>
 
+  <section aria-labelledby="close-readiness-heading">
+    <div class="section-heading-row">
+      <div>
+        <h2 id="close-readiness-heading">Readiness</h2>
+        <p class="section-note">Live review gates derived from the detailed Month Close facts below.</p>
+      </div>
+    </div>
+    <div class="panel-list">
+      {% for check in summary.checks %}
+        <article class="{% if check.status.value == 'ATTENTION' %}warning-panel{% else %}suggestion-panel{% endif %}">
+          <h3>
+            <span class="status {% if check.status.value == 'PASS' %}status-paid{% elif check.status.value == 'ATTENTION' %}status-unpaid{% endif %}">{% if check.status.value == 'NOT_APPLICABLE' %}N/A{% else %}{{ check.status.value }}{% endif %}</span>
+            {{ check.label }}
+          </h3>
+          <p>{{ check.detail }}</p>
+          <p>
+            {% if check.key == 'rent_balances' %}
+              <a href="{{ url_for('web.obligations', period=summary.period) }}">View obligations</a>
+            {% elif check.key == 'recurring_rent' %}
+              <a href="{{ url_for('web.overview', period=summary.period) }}">View monthly overview</a>
+            {% elif check.key == 'unallocated_payments' %}
+              <a href="{{ url_for('web.payments', unallocated=1) }}">View payments with money remaining</a>
+            {% elif check.key == 'payer_identity' or check.key == 'evidence_parsing' %}
+              <a href="{{ url_for('web.attention') }}">Open Attention</a>
+            {% elif check.key == 'allocation_suggestions' %}
+              <a href="{{ url_for('web.allocation_plan', **{'from': summary.period, 'to': summary.period}) }}">Open Allocation Plan</a>
+            {% elif check.key == 'expenses' %}
+              <a href="{{ url_for('web.expenses') }}">View expenses</a>
+            {% elif check.key == 'property_cash' %}
+              <a href="{{ url_for('web.property_cash', period=summary.period) }}">View Property Cash</a>
+            {% endif %}
+          </p>
+        </article>
+      {% endfor %}
+    </div>
+  </section>
+
   <section aria-labelledby="close-rent-heading">
     <div class="section-heading-row">
       <h2 id="close-rent-heading">Rent</h2>

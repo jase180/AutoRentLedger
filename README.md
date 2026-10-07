@@ -394,14 +394,15 @@ autorentledger month-close --period 2026-10
 
 Or open `http://127.0.0.1:8000/month-close?period=2026-10`. Month Close combines canonical rent
 reconciliation, ledger-wide payment/evidence attention, selected-month allocation suggestions,
-recurring-schedule generation previews, active expenses, and Property Cash. `CLEAR` means none of
-the explicit attention conditions remain; `NEEDS ATTENTION` means at least one partial or unpaid
-obligation, unresolved sender, payment with unallocated money, actionable selected-month
-suggestion, unparsed evidence item, or missing expected obligation remains.
+recurring-schedule generation previews, active expenses, and Property Cash. Its readiness checklist
+shows each derived review gate as `PASS`, `ATTENTION`, or `N/A`, followed by the detailed totals.
+`CLEAR` means no checklist gate currently needs attention; `NEEDS ATTENTION` means at least one
+gate does.
 
-Month Close is live and read-only. It does not create obligations or allocations, run Gmail sync,
-include late fees in rent, lock the month, or persist a "closed" status. Expenses and negative
-Property Cash do not by themselves create an attention status.
+The checklist is live and read-only, not a saved acknowledgment or formal accounting-period close.
+Month Close does not create obligations or allocations, run Gmail sync, include late fees in rent,
+lock the month, or persist a "closed" status. Expenses and negative Property Cash do not by
+themselves create an attention status.
 
 ## Common commands
 

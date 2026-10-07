@@ -174,8 +174,10 @@ thin and authenticated, and the web surface remains inspection-only.
 `month_close.py` is a composed read model rather than a new source of truth. It combines canonical
 period reconciliation, global review items, conservative suggestions targeting the selected
 obligation month, schedule-generation planning, and Property Cash. Its `CLEAR` or
-`NEEDS_ATTENTION` status is derived on every read. There is no persisted close status, month lock,
-approval, automatic repair, or alternate accounting calculation.
+`NEEDS_ATTENTION` status is derived on every read from an ordered checklist built from those same
+component summaries. Checklist gates are `PASS`, `ATTENTION`, or `NOT_APPLICABLE`; they do not
+re-query or create a parallel source of truth. There is no persisted checklist or close status,
+month lock, approval, automatic repair, or alternate accounting calculation.
 
 ## Invariants to preserve
 

@@ -6,7 +6,12 @@ import sqlite3
 from pathlib import Path
 
 from autorentledger.cli.common import DEFAULT_DATABASE, _format_currency
-from autorentledger.month_close import MonthCloseStatus, MonthCloseSummary, build_month_close
+from autorentledger.month_close import (
+    MonthCloseCheckStatus,
+    MonthCloseStatus,
+    MonthCloseSummary,
+    build_month_close,
+)
 from autorentledger.obligations import ObligationValidationError
 from autorentledger.reconciliation import ReconciliationInvariantError
 from autorentledger.review import ReviewInvariantError
@@ -62,34 +67,47 @@ def render_month_close_terminal(summary: MonthCloseSummary) -> str:
     lines = [
         f"MONTH CLOSE - {summary.period}",
         f"STATUS: {summary.status.value.replace('_', ' ')}",
-        "RENT",
-        f"Obligations: {summary.rent.obligation_count}",
-        f"Paid: {summary.rent.paid_count}",
-        f"Partial: {summary.rent.partial_count}",
-        f"Unpaid: {summary.rent.unpaid_count}",
-        f"Owed: {_format_currency(summary.rent.owed_cents)}",
-        f"Allocated: {_format_currency(summary.rent.allocated_cents)}",
-        f"Remaining: {_format_currency(summary.rent.remaining_cents)}",
-        "GLOBAL ATTENTION",
-        f"Active observed payments: {summary.attention.active_payment_count}",
-        f"Unresolved senders: {summary.attention.unresolved_sender_count}",
-        f"Payments from unresolved senders: {summary.attention.unresolved_payment_count}",
-        (f"Payments with unallocated money: {summary.attention.payments_with_unallocated_count}"),
-        f"Unallocated money: {_format_currency(summary.attention.unallocated_cents)}",
-        f"Unparsed evidence: {summary.attention.unparsed_evidence_count}",
-        "SELECTED-MONTH SUGGESTIONS",
-        (f"Actionable allocation suggestions: {summary.attention.actionable_suggestion_count}"),
-        "RECURRING RENT",
-        (
-            "Missing expected obligations: "
-            f"{summary.recurring_rent.missing_expected_obligation_count}"
-        ),
-        "EXPENSES",
-        f"Operating: {_format_currency(summary.expenses.operating_expense_cents)}",
-        (f"Capital improvements: {_format_currency(summary.expenses.capital_improvement_cents)}"),
-        f"Active expenses: {summary.expenses.active_expense_count}",
-        "PROPERTY CASH",
+        "READINESS",
     ]
+    lines.extend(
+        f"[{_check_marker(check.status)}] {check.label} - {check.detail}"
+        for check in summary.checks
+    )
+    lines.extend(
+        [
+            "RENT",
+            f"Obligations: {summary.rent.obligation_count}",
+            f"Paid: {summary.rent.paid_count}",
+            f"Partial: {summary.rent.partial_count}",
+            f"Unpaid: {summary.rent.unpaid_count}",
+            f"Owed: {_format_currency(summary.rent.owed_cents)}",
+            f"Allocated: {_format_currency(summary.rent.allocated_cents)}",
+            f"Remaining: {_format_currency(summary.rent.remaining_cents)}",
+            "GLOBAL ATTENTION",
+            f"Active observed payments: {summary.attention.active_payment_count}",
+            f"Unresolved senders: {summary.attention.unresolved_sender_count}",
+            f"Payments from unresolved senders: {summary.attention.unresolved_payment_count}",
+            (
+                f"Payments with unallocated money: {summary.attention.payments_with_unallocated_count}"
+            ),
+            f"Unallocated money: {_format_currency(summary.attention.unallocated_cents)}",
+            f"Unparsed evidence: {summary.attention.unparsed_evidence_count}",
+            "SELECTED-MONTH SUGGESTIONS",
+            (f"Actionable allocation suggestions: {summary.attention.actionable_suggestion_count}"),
+            "RECURRING RENT",
+            (
+                "Missing expected obligations: "
+                f"{summary.recurring_rent.missing_expected_obligation_count}"
+            ),
+            "EXPENSES",
+            f"Operating: {_format_currency(summary.expenses.operating_expense_cents)}",
+            (
+                f"Capital improvements: {_format_currency(summary.expenses.capital_improvement_cents)}"
+            ),
+            f"Active expenses: {summary.expenses.active_expense_count}",
+            "PROPERTY CASH",
+        ]
+    )
     if summary.property_cash:
         lines.extend(
             f"{item.property_name} (Property {item.property_id}): "
@@ -104,6 +122,12 @@ def render_month_close_terminal(summary: MonthCloseSummary) -> str:
         lines.append("No Properties found.")
     _append_details(lines, summary)
     return "\n".join(lines)
+
+
+def _check_marker(status: MonthCloseCheckStatus) -> str:
+    if status is MonthCloseCheckStatus.NOT_APPLICABLE:
+        return "N/A"
+    return status.value
 
 
 def _append_details(lines: list[str], summary: MonthCloseSummary) -> None:

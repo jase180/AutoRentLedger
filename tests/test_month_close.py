@@ -8,7 +8,11 @@ from autorentledger.cli import build_parser, main
 from autorentledger.email import EmailMessageSummary
 from autorentledger.expenses import ExpenseCategory, create_property_expense
 from autorentledger.identity import normalize_alias
-from autorentledger.month_close import MonthCloseStatus, build_month_close
+from autorentledger.month_close import (
+    MonthCloseCheckStatus,
+    MonthCloseStatus,
+    build_month_close,
+)
 from autorentledger.parsing import PaymentNotification
 from autorentledger.schedules import create_rent_schedule
 from autorentledger.storage import (
@@ -128,6 +132,10 @@ def database_snapshot(database_path):
         )
 
 
+def checks_by_key(summary):
+    return {check.key: check for check in summary.checks}
+
+
 def test_clean_empty_month_is_clear(tmp_path):
     fixture = create_fixture(tmp_path)
 
@@ -137,6 +145,25 @@ def test_clean_empty_month_is_clear(tmp_path):
     assert summary.rent.obligation_count == 0
     assert summary.attention.active_payment_count == 0
     assert summary.recurring_rent.missing_expected_obligation_count == 0
+    checks = checks_by_key(summary)
+    assert [check.key for check in summary.checks] == [
+        "rent_balances",
+        "recurring_rent",
+        "unallocated_payments",
+        "payer_identity",
+        "allocation_suggestions",
+        "evidence_parsing",
+        "expenses",
+        "property_cash",
+    ]
+    assert checks["rent_balances"].status is MonthCloseCheckStatus.NOT_APPLICABLE
+    assert checks["recurring_rent"].status is MonthCloseCheckStatus.NOT_APPLICABLE
+    assert checks["unallocated_payments"].status is MonthCloseCheckStatus.NOT_APPLICABLE
+    assert checks["payer_identity"].status is MonthCloseCheckStatus.NOT_APPLICABLE
+    assert checks["allocation_suggestions"].status is MonthCloseCheckStatus.PASS
+    assert checks["evidence_parsing"].status is MonthCloseCheckStatus.PASS
+    assert checks["expenses"].status is MonthCloseCheckStatus.NOT_APPLICABLE
+    assert checks["property_cash"].status is MonthCloseCheckStatus.PASS
     assert CURRENT_SCHEMA_VERSION == 15
 
 
@@ -168,6 +195,12 @@ def test_rent_status_uses_canonical_reconciliation(
     assert summary.rent.owed_cents == 120_000
     assert summary.rent.allocated_cents == allocated_cents
     assert summary.rent.remaining_cents == 120_000 - allocated_cents
+    rent_check = checks_by_key(summary)["rent_balances"]
+    assert rent_check.status is (
+        MonthCloseCheckStatus.PASS
+        if expected_status is MonthCloseStatus.CLEAR
+        else MonthCloseCheckStatus.ATTENTION
+    )
 
 
 def test_global_unresolved_and_unallocated_payment_attention_is_explicit(tmp_path):
@@ -183,6 +216,10 @@ def test_global_unresolved_and_unallocated_payment_attention_is_explicit(tmp_pat
     assert summary.attention.payments_with_unallocated_count == 1
     assert summary.attention.unallocated_cents == 35_000
     assert summary.attention.unallocated_payments[0].reference_id == payment.id
+    checks = checks_by_key(summary)
+    assert checks["unallocated_payments"].status is MonthCloseCheckStatus.ATTENTION
+    assert checks["unallocated_payments"].detail == "1 payment, $350.00 remaining"
+    assert checks["payer_identity"].status is MonthCloseCheckStatus.ATTENTION
 
 
 def test_actionable_suggestion_targets_obligation_period_not_payment_month(tmp_path):
@@ -201,6 +238,10 @@ def test_actionable_suggestion_targets_obligation_period_not_payment_month(tmp_p
     ]
     assert october.attention.actionable_suggestions[0].rent_obligation_id == obligation.id
     assert november.attention.actionable_suggestions == ()
+    assert (
+        checks_by_key(october)["allocation_suggestions"].status is MonthCloseCheckStatus.ATTENTION
+    )
+    assert checks_by_key(november)["allocation_suggestions"].status is MonthCloseCheckStatus.PASS
 
 
 def test_applicable_schedule_warns_until_obligation_exists(tmp_path):
@@ -221,6 +262,8 @@ def test_applicable_schedule_warns_until_obligation_exists(tmp_path):
     assert missing.recurring_rent.missing_expected_obligations[0].schedule_id == schedule.id
     assert existing.recurring_rent.missing_expected_obligation_count == 0
     assert existing.recurring_rent.existing_obligation_count == 1
+    assert checks_by_key(missing)["recurring_rent"].status is MonthCloseCheckStatus.ATTENTION
+    assert checks_by_key(existing)["recurring_rent"].status is MonthCloseCheckStatus.PASS
 
 
 def test_partial_first_and_final_month_states_do_not_create_false_schedule_warnings(
@@ -242,6 +285,7 @@ def test_partial_first_and_final_month_states_do_not_create_false_schedule_warni
     summary = close(fixture)
 
     assert summary.recurring_rent.missing_expected_obligation_count == 0
+    assert checks_by_key(summary)["recurring_rent"].status is MonthCloseCheckStatus.NOT_APPLICABLE
 
 
 def test_unparsed_evidence_is_global_attention(tmp_path):
@@ -253,6 +297,7 @@ def test_unparsed_evidence_is_global_attention(tmp_path):
     assert summary.status is MonthCloseStatus.NEEDS_ATTENTION
     assert summary.attention.unparsed_evidence_count == 1
     assert summary.attention.unparsed_evidence[0].reference_id == raw.id
+    assert checks_by_key(summary)["evidence_parsing"].status is MonthCloseCheckStatus.ATTENTION
 
 
 def test_expenses_capital_and_negative_cash_do_not_change_clear_status(tmp_path):
@@ -279,6 +324,9 @@ def test_expenses_capital_and_negative_cash_do_not_change_clear_status(tmp_path)
     assert summary.expenses.operating_expense_cents == 127_500
     assert summary.expenses.capital_improvement_cents == 90_000
     assert summary.property_cash[0].net_cash_before_debt_cents == -217_500
+    checks = checks_by_key(summary)
+    assert checks["expenses"].status is MonthCloseCheckStatus.PASS
+    assert checks["property_cash"].status is MonthCloseCheckStatus.PASS
 
 
 def test_property_cash_uses_allocation_month_semantics_and_live_property_context(tmp_path):
@@ -322,6 +370,63 @@ def test_month_close_build_is_read_only(tmp_path):
     assert database_snapshot(fixture["path"]) == before
 
 
+def test_fully_allocated_payment_has_clean_payment_checks(tmp_path):
+    fixture = create_fixture(tmp_path)
+    resolve_sender(fixture, fixture["account_a"])
+    obligation = fixture["obligations"].create(
+        fixture["account_a"].id, "2026-09", 40_000, date(2026, 9, 1)
+    )
+    payment = add_payment(fixture, 1, 40_000)
+    fixture["allocations"].create_checked(payment.id, obligation.id, 40_000)
+
+    checks = checks_by_key(close(fixture))
+
+    assert checks["unallocated_payments"].status is MonthCloseCheckStatus.PASS
+    assert checks["payer_identity"].status is MonthCloseCheckStatus.PASS
+
+
+def test_resolved_sender_has_identity_pass_even_when_money_is_unallocated(tmp_path):
+    fixture = create_fixture(tmp_path)
+    resolve_sender(fixture, fixture["account_a"])
+    add_payment(fixture, 1, 25_000)
+
+    summary = close(fixture)
+    checks = checks_by_key(summary)
+
+    assert checks["payer_identity"].status is MonthCloseCheckStatus.PASS
+    assert checks["unallocated_payments"].status is MonthCloseCheckStatus.ATTENTION
+
+
+def test_no_properties_makes_property_cash_not_applicable(tmp_path):
+    database_path = tmp_path / "empty.sqlite3"
+    upgrade_database(database_path)
+
+    summary = build_month_close(
+        SQLiteReconciliationRepository(database_path),
+        SQLiteReviewRepository(database_path),
+        SQLiteSuggestionRepository(database_path),
+        SQLiteRentScheduleRepository(database_path),
+        SQLitePropertyCashRepository(database_path),
+        "2026-10",
+    )
+
+    assert checks_by_key(summary)["property_cash"].status is (MonthCloseCheckStatus.NOT_APPLICABLE)
+    assert summary.status is MonthCloseStatus.CLEAR
+
+
+def test_top_level_status_is_derived_only_from_attention_checks(tmp_path):
+    fixture = create_fixture(tmp_path)
+    summaries = [close(fixture)]
+    fixture["obligations"].create(fixture["account_a"].id, "2026-10", 100_000, date(2026, 10, 1))
+    summaries.append(close(fixture))
+
+    for summary in summaries:
+        has_attention = any(
+            check.status is MonthCloseCheckStatus.ATTENTION for check in summary.checks
+        )
+        assert (summary.status is MonthCloseStatus.NEEDS_ATTENTION) is has_attention
+
+
 def test_month_close_cli_valid_invalid_and_attention_exit_behavior(tmp_path, capsys):
     fixture = create_fixture(tmp_path)
     parsed = build_parser().parse_args(["month-close", "--period", "2026-10"])
@@ -342,6 +447,11 @@ def test_month_close_cli_valid_invalid_and_attention_exit_behavior(tmp_path, cap
     clear_output = capsys.readouterr().out
     assert "MONTH CLOSE - 2026-10" in clear_output
     assert "STATUS: CLEAR" in clear_output
+    assert "READINESS" in clear_output
+    assert "[N/A] Rent balances - No rent obligations for this month" in clear_output
+    assert "[PASS] Allocation suggestions - No actionable suggestions" in clear_output
+    assert "[PASS] Property cash review - 2 Properties summarized" in clear_output
+    assert "RENT\nObligations: 0" in clear_output
 
     fixture["obligations"].create(fixture["account_a"].id, "2026-10", 100_000, date(2026, 10, 1))
     assert (
@@ -358,6 +468,7 @@ def test_month_close_cli_valid_invalid_and_attention_exit_behavior(tmp_path, cap
     )
     attention_output = capsys.readouterr().out
     assert "STATUS: NEEDS ATTENTION" in attention_output
+    assert "[ATTENTION] Rent balances - 0 partial, 1 unpaid" in attention_output
     assert "Unpaid: 1" in attention_output
     assert "Remaining: $1,000.00" in attention_output
 
@@ -406,9 +517,21 @@ def test_month_close_web_is_authenticated_get_only_and_read_only(tmp_path):
     assert response.status_code == 200
     assert "Month Close - OCTOBER 2026" in output
     assert "NEEDS ATTENTION" in output
+    assert 'id="close-readiness-heading">Readiness</h2>' in output
+    assert "Rent balances" in output
+    assert "0 partial, 1 unpaid" in output
+    assert "Recurring rent coverage" in output
+    assert "No recurring rent applies this month" in output
+    assert "N/A" in output
+    assert "Property cash review" in output
+    assert "2 Properties summarized" in output
     assert "<dt>Unpaid</dt><dd>1</dd>" in output
     assert "/obligations?period=2026-10" in output
+    assert "/overview?period=2026-10" in output
     assert "/payments?unresolved=1" in output
+    assert "/payments?unallocated=1" in output
+    assert "/attention" in output
+    assert "/expenses" in output
     assert "/allocation-plan?from=2026-10&amp;to=2026-10" in output
     assert "/property-cash?period=2026-10" in output
     assert client.post("/month-close?period=2026-10").status_code == 405

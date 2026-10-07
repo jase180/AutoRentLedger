@@ -286,15 +286,20 @@ Without GNU Make, run `autorentledger daily` followed by
 `autorentledger month-close --period 2026-10`. The same derived review is available at
 `/month-close?period=2026-10` in the authenticated local web UI.
 
-Month Close labels payment/evidence exceptions as global because payment occurrence month does not
-assign money to a rent month. Allocation suggestions shown there target obligations in the selected
-month. Missing scheduled rent means the existing generation planner would propose `CREATE`; it is
-an operational warning, not debt, and Month Close does not generate it.
+Scan the readiness checklist first. Resolve each `ATTENTION` row through the existing explicit
+commands or linked read-only drill-down, then rerun Month Close. `PASS` means that derived gate is
+currently clean; `N/A` means no relevant canonical facts apply. Month Close labels payment/evidence
+exceptions as global because payment occurrence month does not assign money to a rent month.
+Allocation suggestions shown there target obligations in the selected month. Missing scheduled rent
+means the existing generation planner would propose `CREATE`; it is an operational warning, not
+debt, and Month Close does not generate it.
 
 Resolve issues explicitly with the existing payer, obligation-generation, allocation, expense, and
-repair commands, then rerun Month Close. `CLEAR` is a live derived result, not an approval or lock.
-Expenses and negative Property Cash do not make the result need attention by themselves. Late fees
-remain separate and are not included in Month Close rent totals.
+repair commands, then rerun Month Close. `CLEAR` means no currently derived review issue remains
+under AutoRentLedger's operational rules; it is not legal, tax, or accounting certification, an
+approval, or a lock. No checklist state is saved. Expenses and negative Property Cash do not make
+the result need attention by themselves. Late fees remain separate and are not included in Month
+Close rent totals.
 
 ## Advanced monthly repair/backfill
 
